@@ -1,6 +1,6 @@
 # A9 — Electron Client (Phase 3)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: Phase 0a A2-stub의 OpenAPI export + client codegen 완료. A2·A8 완료 권장 (실제 endpoint 동작).
 
 ## 너의 역할
@@ -11,13 +11,13 @@ Windows 데스크톱 사용자 앱 (Electron + React + TypeScript). UI-01~05 6�
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ux/wireframes.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ux/ui-states.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ux/i18n.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ux/client-behaviors.md` (전체 12 룰)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/auth.md`, `consent.md`, `onboarding.md`, `interest.md`, `topics.md`, `recommendation.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/security/auth-flow.md`, `token-handling.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/api-conventions.md`
+- `docs/ux/wireframes.md` (전체)
+- `docs/ux/ui-states.md`
+- `docs/ux/i18n.md`
+- `docs/ux/client-behaviors.md` (전체 12 룰)
+- `docs/api/auth.md`, `consent.md`, `onboarding.md`, `interest.md`, `topics.md`, `recommendation.md`
+- `docs/security/auth-flow.md`, `token-handling.md`
+- `docs/sdd/api-conventions.md`
 
 ## 산출
 

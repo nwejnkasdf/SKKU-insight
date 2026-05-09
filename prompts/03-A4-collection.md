@@ -1,6 +1,6 @@
 # A4 — Collection (Phase 1)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2 backend + A3 cso-topic 완료. 단 A5(clickbait)·A6(베이지안) 진행과 병렬 가능.
 
 ## 너의 역할
@@ -11,14 +11,14 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/sources-registry.md` (전체 — 학술 4 + 빅테크 30+ + 뉴스)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (Document, DocumentTopic, CollectionJob, Source, SourcePolicy, ClickbaitResult, TopicLinkageError)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/collection.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/data-flow.md` §2 (수집 시퀀스)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` §8 (jitter)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/clickbait-integration.md` (호출 인터페이스)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-topic-traversal.md` §6.1 (수집 대상 = active trace path ∪ 1-hop adjacent — A7 의존, 본 세션은 단순 fallback)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ops/runbooks.md` §1 (수집 실패 대응)
+- `docs/data/sources-registry.md` (전체 — 학술 4 + 빅테크 30+ + 뉴스)
+- `docs/data/schema.md` (Document, DocumentTopic, CollectionJob, Source, SourcePolicy, ClickbaitResult, TopicLinkageError)
+- `docs/api/collection.md`
+- `docs/sdd/data-flow.md` §2 (수집 시퀀스)
+- `docs/sdd/concurrency.md` §8 (jitter)
+- `docs/algorithms/clickbait-integration.md` (호출 인터페이스)
+- `docs/algorithms/cso-topic-traversal.md` §6.1 (수집 대상 = active trace path ∪ 1-hop adjacent — A7 의존, 본 세션은 단순 fallback)
+- `docs/ops/runbooks.md` §1 (수집 실패 대응)
 
 ## 산출
 

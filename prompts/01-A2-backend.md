@@ -1,6 +1,6 @@
 # A2 — Backend Foundation 본문 (Phase 0b)
 
-> 본 prompt를 새 세션의 첫 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 `/Users/hyojung/학교 과제/소프트웨어공학개론/`.
+> 본 prompt를 새 세션의 첫 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 ``.
 > **사전조건**: Phase 0a A2-stub 완료 + commit (contracts.py + endpoint stub + OpenAPI export 동작).
 
 ## 너의 역할
@@ -13,14 +13,14 @@ Phase 0a stub의 본문을 채운다. **인증·동의·온보딩·사용자 모
 
 `prompts/_common-disambiguation.md` 의 "첫 5분" 5개 + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/architecture.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/module-boundaries.md` (`app/auth`, `app/consent`, `app/user`, `app/onboarding`, `app/security`, `app/db` 부분)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` (§1 DB pool, §3 user-level mutex, §4.2 active_day atomic, §7 consent cache)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (User, AdminUser, UserConsent, UserCSOTraversal, sentinel Source 시드)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/auth.md`, `consent.md`, `onboarding.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/security/auth-flow.md`, `token-handling.md`, `password-policy.md`, `rate-limiting.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ops/docker-compose.md`, `env-vars.md`, `admin-bootstrap.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cold-start.md` (onboarding이 호출하는 부분)
+- `docs/sdd/architecture.md`
+- `docs/sdd/module-boundaries.md` (`app/auth`, `app/consent`, `app/user`, `app/onboarding`, `app/security`, `app/db` 부분)
+- `docs/sdd/concurrency.md` (§1 DB pool, §3 user-level mutex, §4.2 active_day atomic, §7 consent cache)
+- `docs/data/schema.md` (User, AdminUser, UserConsent, UserCSOTraversal, sentinel Source 시드)
+- `docs/api/auth.md`, `consent.md`, `onboarding.md`
+- `docs/security/auth-flow.md`, `token-handling.md`, `password-policy.md`, `rate-limiting.md`
+- `docs/ops/docker-compose.md`, `env-vars.md`, `admin-bootstrap.md`
+- `docs/algorithms/cold-start.md` (onboarding이 호출하는 부분)
 
 ## 산출
 

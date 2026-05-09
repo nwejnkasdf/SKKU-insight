@@ -1,6 +1,6 @@
 # Code Review Prompt — Codex 검토자 전용
 
-> 본 prompt를 Codex 플러그인 / 새 세션의 검토 시작 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 `/Users/hyojung/학교 과제/소프트웨어공학개론/`.
+> 본 prompt를 Codex 플러그인 / 새 세션의 검토 시작 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 ``.
 > Claude Code가 메인으로 작성한 PR/diff에 대해 본 prompt로 검토.
 
 ## 너의 역할
@@ -11,13 +11,13 @@
 
 검토 시작 전 다음을 통독하라.
 
-1. `/Users/hyojung/학교 과제/소프트웨어공학개론/AGENTS.md` — 작업 규칙 14조 + 5겹 방어
-2. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decisions.md` — 결정 매트릭스 (12+ 라운드)
-3. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decision-backlog.md` — P0/P1/P2 + C-급 결정 매핑
-4. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/contracts.md` — enum·error code·Redis key SOR
-5. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/api-conventions.md` — HTTP 표준 + codegen
-6. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` — 5겹 동시성 가드
-7. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/agent-orchestration.md` — 에이전트 헌법
+1. `AGENTS.md` — 작업 규칙 14조 + 5겹 방어
+2. `docs/decisions.md` — 결정 매트릭스 (12+ 라운드)
+3. `docs/decision-backlog.md` — P0/P1/P2 + C-급 결정 매핑
+4. `docs/sdd/contracts.md` — enum·error code·Redis key SOR
+5. `docs/sdd/api-conventions.md` — HTTP 표준 + codegen
+6. `docs/sdd/concurrency.md` — 5겹 동시성 가드
+7. `docs/sdd/agent-orchestration.md` — 에이전트 헌법
 8. **검토 대상 모듈의 docs/** (예: A7이면 `algorithms/cso-topic-traversal.md` + `algorithms/leaf-topic-lifecycle.md`)
 9. **검토 대상 PR/diff 자체**
 

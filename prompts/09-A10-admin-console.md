@@ -1,6 +1,6 @@
 # A10 — Admin Console (Phase 3)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: Phase 0a A2-stub의 OpenAPI export + admin-console codegen 완료. A2 + A8 권장.
 
 ## 너의 역할
@@ -11,12 +11,12 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ux/wireframes.md` (UI-06 부분)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/admin.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/collection.md` (admin 부분)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ops/admin-bootstrap.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/security/threat-model.md` (E 카테고리)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/api-conventions.md`
+- `docs/ux/wireframes.md` (UI-06 부분)
+- `docs/api/admin.md` (전체)
+- `docs/api/collection.md` (admin 부분)
+- `docs/ops/admin-bootstrap.md`
+- `docs/security/threat-model.md` (E 카테고리)
+- `docs/sdd/api-conventions.md`
 
 ## 산출
 

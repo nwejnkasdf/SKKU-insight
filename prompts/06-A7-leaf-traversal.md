@@ -1,6 +1,6 @@
 # A7 — Leaf Lifecycle + Traversal Engine (Phase 2)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2 + A3 + A4 + A6 완료. 본 모듈이 가장 알고리즘 깊은 부분.
 
 ## 너의 역할
@@ -15,12 +15,12 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-topic-traversal.md` (전체, 핵심 SOR)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/leaf-topic-lifecycle.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (UserCSOTraversal, DynamicLeafTopic, DynamicLeafTopicCSOTopic)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/module-boundaries.md` (`TraversalEngine`, `LifecycleEvaluator` 추상)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` §3 user-mutex
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/interest-bayesian.md` §propagation (A6와 협업)
+- `docs/algorithms/cso-topic-traversal.md` (전체, 핵심 SOR)
+- `docs/algorithms/leaf-topic-lifecycle.md` (전체)
+- `docs/data/schema.md` (UserCSOTraversal, DynamicLeafTopic, DynamicLeafTopicCSOTopic)
+- `docs/sdd/module-boundaries.md` (`TraversalEngine`, `LifecycleEvaluator` 추상)
+- `docs/sdd/concurrency.md` §3 user-mutex
+- `docs/algorithms/interest-bayesian.md` §propagation (A6와 협업)
 
 ## 산출
 

@@ -8,11 +8,11 @@
 
 ## 첫 5분에 반드시 read 할 것
 
-1. `/Users/hyojung/학교 과제/소프트웨어공학개론/AGENTS.md` — 작업 규칙 14조 + 5겹 방어 + 에이전트 분할표
-2. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decisions.md` — 결정 매트릭스 SOR (12+ 라운드)
-3. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decision-backlog.md` — P0/P1/P2 미해결 항목과 default
-4. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/contracts.md` — `backend/app/contracts.py` SOR 명세
-5. `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/agent-orchestration.md` — 에이전트 헌법 + Phase 순서
+1. `AGENTS.md` — 작업 규칙 14조 + 5겹 방어 + 에이전트 분할표
+2. `docs/decisions.md` — 결정 매트릭스 SOR (12+ 라운드)
+3. `docs/decision-backlog.md` — P0/P1/P2 미해결 항목과 default
+4. `docs/sdd/contracts.md` — `backend/app/contracts.py` SOR 명세
+5. `docs/sdd/agent-orchestration.md` — 에이전트 헌법 + Phase 순서
 
 이 5개를 다 read 안 했으면 작업 시작 금지.
 

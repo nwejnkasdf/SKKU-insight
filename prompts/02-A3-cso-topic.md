@@ -1,6 +1,6 @@
 # A3 — CSO Topic Engine (Phase 0b)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: Phase 0a A2-stub 완료. A2 본문과 병렬 가능 (DB schema의 CSOTopic 테이블만 공유, 본 세션이 시드).
 
 ## 너의 역할
@@ -11,11 +11,11 @@ CSO (Computer Science Ontology) 데이터를 PostgreSQL에 임포트하고 Netwo
 
 `prompts/_common-disambiguation.md` 의 "첫 5분" 5개 + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-mapping.md` (그래프 탐색 알고리즘 + 12 클러스터 매핑)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/cso-import.md` (다운로드·파싱·Alembic seed)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (CSOTopic, DynamicLeafTopic, DynamicLeafTopicCSOTopic 부분)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/topics.md` (모든 endpoint)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-topic-traversal.md` (§1.3 leaf 분기 영역 제약, §6.1 카테고리 정의 — A7·A8과 의존성)
+- `docs/algorithms/cso-mapping.md` (그래프 탐색 알고리즘 + 12 클러스터 매핑)
+- `docs/data/cso-import.md` (다운로드·파싱·Alembic seed)
+- `docs/data/schema.md` (CSOTopic, DynamicLeafTopic, DynamicLeafTopicCSOTopic 부분)
+- `docs/api/topics.md` (모든 endpoint)
+- `docs/algorithms/cso-topic-traversal.md` (§1.3 leaf 분기 영역 제약, §6.1 카테고리 정의 — A7·A8과 의존성)
 
 ## 산출
 

@@ -1,6 +1,6 @@
 # A8 — Recommendation Engine (Phase 2)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2 + A3 + A4 + A6 + A7 모두 완료. A8가 모든 의존을 통합하는 마지막 알고리즘 모듈.
 
 ## 너의 역할
@@ -11,13 +11,13 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/recommendation-ranking.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cold-start.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-topic-traversal.md` §6 (current/adjacent/proactive 정의)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/recommendation.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` §2 single-flight, §5 LLM semaphore
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (Recommendation, RecommendationSlot)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/data-flow.md` §3 dashboard
+- `docs/algorithms/recommendation-ranking.md` (전체)
+- `docs/algorithms/cold-start.md` (전체)
+- `docs/algorithms/cso-topic-traversal.md` §6 (current/adjacent/proactive 정의)
+- `docs/api/recommendation.md`
+- `docs/sdd/concurrency.md` §2 single-flight, §5 LLM semaphore
+- `docs/data/schema.md` (Recommendation, RecommendationSlot)
+- `docs/sdd/data-flow.md` §3 dashboard
 
 ## 산출
 

@@ -1,6 +1,6 @@
 # A2-stub — Phase 0a (Contract-first 게이트)
 
-> ⚠️ **본 prompt를 새 세션의 첫 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 `/Users/hyojung/학교 과제/소프트웨어공학개론/`.**
+> ⚠️ **본 prompt를 새 세션의 첫 메시지로 그대로 붙여 넣는다. 작업 디렉토리는 본 저장소 루트(repo root).**
 >
 > 본격 구현 전 단일 게이트 세션. **본 세션이 끝나야** 다른 모든 에이전트가 안전하게 작업 가능.
 
@@ -15,17 +15,17 @@
 
 `prompts/_common-disambiguation.md` 의 "첫 5분" 5개 + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/contracts.md` (정밀 명세)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/api-conventions.md` (HTTP 표준 + codegen 파이프라인)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/auth.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/consent.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/onboarding.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/topics.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/interest.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/collection.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/recommendation.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/admin.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (참고용, 본 세션에서는 SQLAlchemy 모델 작성 X)
+- `docs/sdd/contracts.md` (정밀 명세)
+- `docs/sdd/api-conventions.md` (HTTP 표준 + codegen 파이프라인)
+- `docs/api/auth.md`
+- `docs/api/consent.md`
+- `docs/api/onboarding.md`
+- `docs/api/topics.md`
+- `docs/api/interest.md`
+- `docs/api/collection.md`
+- `docs/api/recommendation.md`
+- `docs/api/admin.md`
+- `docs/data/schema.md` (참고용, 본 세션에서는 SQLAlchemy 모델 작성 X)
 
 ## 산출
 

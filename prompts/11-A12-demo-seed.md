@@ -1,6 +1,6 @@
 # A12 — Demo Seed (Phase 4)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2~A10 완료 (모든 모듈 동작). A11과 병렬 가능. **본 모듈이 시연 안정성의 핵심**.
 
 ## 너의 역할
@@ -11,11 +11,11 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/seed-personas.md` (전체 — 페르소나 6명, daily pattern)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decisions.md` §9 (데모 시나리오 5개)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/deployment.md` (시연 부트 절차)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cold-start.md` (mock fixture 패턴)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` (active_day 시뮬레이션)
+- `docs/data/seed-personas.md` (전체 — 페르소나 6명, daily pattern)
+- `docs/decisions.md` §9 (데모 시나리오 5개)
+- `docs/sdd/deployment.md` (시연 부트 절차)
+- `docs/algorithms/cold-start.md` (mock fixture 패턴)
+- `docs/sdd/concurrency.md` (active_day 시뮬레이션)
 
 ## 산출
 

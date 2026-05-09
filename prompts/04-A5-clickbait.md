@@ -1,6 +1,6 @@
 # A5 — Clickbait Detector (Phase 1)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2 backend + A4 collection 완료. **P0-1 (사용자가 DoRA 모듈 경로 공유) 해결되어야 본 세션 시작 가능**. 미해결 시 stub 응답으로 진행 후 모듈 공유 받으면 wrap만 갱신.
 
 ## 너의 역할
@@ -11,10 +11,10 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/clickbait-integration.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (ClickbaitResult 부분)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/architecture.md` (Clickbait DoRA 컴포넌트)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/decision-backlog.md` (P0-1 항목)
+- `docs/algorithms/clickbait-integration.md` (전체)
+- `docs/data/schema.md` (ClickbaitResult 부분)
+- `docs/sdd/architecture.md` (Clickbait DoRA 컴포넌트)
+- `docs/decision-backlog.md` (P0-1 항목)
 
 ## 산출
 

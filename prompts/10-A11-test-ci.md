@@ -1,6 +1,6 @@
 # A11 — Test + CI/CD (Phase 4)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2~A10 완료 (모든 모듈 코드 존재). A12와 병렬 가능.
 
 ## 너의 역할
@@ -11,12 +11,12 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/ops/ci-cd.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/agent-orchestration.md` §5 (CI 검증), §6 (테스트 시나리오)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/api-conventions.md` §14 (cross-check + codegen), §16 (테스트)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` §12 (부하 테스트)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/srs/08-acceptance-tests.md` (AT-01~15)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/contracts.md` §9 (CI 검증)
+- `docs/ops/ci-cd.md` (전체)
+- `docs/sdd/agent-orchestration.md` §5 (CI 검증), §6 (테스트 시나리오)
+- `docs/sdd/api-conventions.md` §14 (cross-check + codegen), §16 (테스트)
+- `docs/sdd/concurrency.md` §12 (부하 테스트)
+- `docs/srs/08-acceptance-tests.md` (AT-01~15)
+- `docs/sdd/contracts.md` §9 (CI 검증)
 
 ## 산출
 

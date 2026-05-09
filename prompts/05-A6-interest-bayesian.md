@@ -1,6 +1,6 @@
 # A6 — Interest Bayesian (Phase 1)
 
-> 작업 디렉토리: `/Users/hyojung/학교 과제/소프트웨어공학개론/`
+> 작업 디렉토리: ``
 > **사전조건**: A2 backend + A3 cso-topic 완료. A4·A5와 병렬 가능.
 
 ## 너의 역할
@@ -11,11 +11,11 @@
 
 `prompts/_common-disambiguation.md` "첫 5분" + 다음:
 
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/interest-bayesian.md` (전체)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/algorithms/cso-topic-traversal.md` §4 propagation, §5 active day
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/data/schema.md` (UserInterestState, UserEvent, SavedDocument, HiddenDocument, NotInterestedTopic)
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/api/interest.md`
-- `/Users/hyojung/학교 과제/소프트웨어공학개론/docs/sdd/concurrency.md` §3 user-mutex, §4.1 atomic, §4.2 active_day, §6 batch flush
+- `docs/algorithms/interest-bayesian.md` (전체)
+- `docs/algorithms/cso-topic-traversal.md` §4 propagation, §5 active day
+- `docs/data/schema.md` (UserInterestState, UserEvent, SavedDocument, HiddenDocument, NotInterestedTopic)
+- `docs/api/interest.md`
+- `docs/sdd/concurrency.md` §3 user-mutex, §4.1 atomic, §4.2 active_day, §6 batch flush
 
 ## 산출
 

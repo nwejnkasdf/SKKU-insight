@@ -1,0 +1,227 @@
+%% SKKU InSight ERD (Mermaid)
+%% 본 ERD는 docs/data/schema.md의 SQLAlchemy 의사 모델과 1:1 대응한다.
+%% SRS §3.4.2 Figure 2의 Mermaid 버전.
+
+erDiagram
+    USER ||--o{ USER_CONSENT : "has"
+    USER ||--o{ USER_CSO_TRAVERSAL : "navigates"
+    USER ||--o{ DYNAMIC_LEAF_TOPIC : "owns"
+    USER ||--o{ USER_INTEREST_STATE : "has"
+    USER ||--o{ COLLECTION_JOB : "triggers"
+    USER ||--o{ USER_EVENT : "emits"
+    USER ||--o{ SAVED_DOCUMENT : "saves"
+    USER ||--o{ HIDDEN_DOCUMENT : "hides"
+    USER ||--o{ NOT_INTERESTED_TOPIC : "marks"
+    USER ||--o{ RECOMMENDATION : "receives"
+    USER ||--o{ RECOMMENDATION_SLOT : "has"
+
+    ADMIN_USER ||--o{ REPROCESS_REQUEST : "requests"
+
+    CSO_TOPIC ||--o{ CSO_TOPIC : "parent_of"
+    CSO_TOPIC ||--o{ DYNAMIC_LEAF_TOPIC_CSO_TOPIC : "links"
+    CSO_TOPIC ||--o{ DOCUMENT_TOPIC : "tags"
+    CSO_TOPIC ||--o{ USER_INTEREST_STATE : "scored_for"
+    CSO_TOPIC ||--o{ COLLECTION_JOB : "targets"
+    CSO_TOPIC ||--o{ NOT_INTERESTED_TOPIC : "excluded_in"
+
+    DYNAMIC_LEAF_TOPIC ||--o{ DYNAMIC_LEAF_TOPIC_CSO_TOPIC : "linked_to"
+    DYNAMIC_LEAF_TOPIC ||--o{ DOCUMENT_TOPIC : "tags"
+    DYNAMIC_LEAF_TOPIC ||--o{ USER_INTEREST_STATE : "scored_for"
+    DYNAMIC_LEAF_TOPIC ||--o{ COLLECTION_JOB : "targets"
+    DYNAMIC_LEAF_TOPIC ||--o{ NOT_INTERESTED_TOPIC : "excluded_in"
+    DYNAMIC_LEAF_TOPIC ||--o| DYNAMIC_LEAF_TOPIC : "merged_into"
+
+    SOURCE ||--o{ DOCUMENT : "publishes"
+    SOURCE ||--o{ COLLECTION_JOB : "scraped_by"
+
+    SOURCE_POLICY ||..o{ SOURCE : "applies_to"
+
+    DOCUMENT ||--|| CLICKBAIT_RESULT : "evaluated_by"
+    DOCUMENT ||--o{ DOCUMENT_TOPIC : "tagged_with"
+    DOCUMENT ||--o{ RECOMMENDATION : "appears_in"
+    DOCUMENT ||--o{ USER_EVENT : "involved_in"
+    DOCUMENT ||--o{ SAVED_DOCUMENT : "saved_as"
+    DOCUMENT ||--o{ HIDDEN_DOCUMENT : "hidden_as"
+    DOCUMENT ||--o{ TOPIC_LINKAGE_ERROR : "fails_for"
+
+    COLLECTION_JOB ||--o{ REPROCESS_REQUEST : "rerun_by"
+
+    USER {
+        uuid user_id PK
+        string email
+        string password_hash
+        timestamp created_at
+        timestamp deleted_at
+        bool onboarding_complete
+        int active_day_counter
+        date last_active_calendar_date
+    }
+    USER_CSO_TRAVERSAL {
+        uuid trace_id PK
+        uuid user_id FK
+        array path
+        string status
+        int started_active_day
+        int last_activity_active_day
+        float score_tail
+    }
+    ADMIN_USER {
+        uuid admin_id PK
+        string email
+        string role
+        string status
+        bool must_change_password
+    }
+    USER_CONSENT {
+        uuid consent_id PK
+        uuid user_id FK
+        string consent_type
+        timestamp agreed_at
+        timestamp revoked_at
+    }
+    BROAD_INTEREST {
+        uuid broad_interest_id PK
+        string name
+        string cso_cluster_label
+        int display_order
+    }
+    CSO_TOPIC {
+        uuid cso_topic_id PK
+        string label
+        string uri
+        uuid parent_topic_id FK
+        array cluster_labels
+    }
+    DYNAMIC_LEAF_TOPIC {
+        uuid leaf_topic_id PK
+        uuid user_id FK
+        string label
+        float confidence
+        string status
+        int created_active_day
+        int last_signal_active_day
+        uuid merged_into_leaf_topic_id FK
+    }
+    DYNAMIC_LEAF_TOPIC_CSO_TOPIC {
+        uuid leaf_topic_id FK
+        uuid cso_topic_id FK
+        float confidence
+        timestamp linked_at
+    }
+    USER_INTEREST_STATE {
+        uuid state_id PK
+        uuid user_id FK
+        uuid cso_topic_id FK
+        uuid leaf_topic_id FK
+        float long_alpha
+        float long_beta
+        float short_alpha
+        float short_beta
+        float long_score
+        float short_score
+        timestamp updated_at
+        int last_event_active_day
+        int last_decay_active_day
+    }
+    SOURCE_POLICY {
+        uuid policy_id PK
+        string source_category
+        string trust_level
+        json collection_rule
+        bool enabled
+    }
+    SOURCE {
+        uuid source_id PK
+        string name
+        string source_type
+        string url
+        string trust_level
+        bool enabled
+    }
+    COLLECTION_JOB {
+        uuid job_id PK
+        uuid user_id FK
+        uuid source_id FK
+        uuid target_cso_topic_id FK
+        uuid target_leaf_topic_id FK
+        string job_type
+        string status
+        string failure_reason
+        int retry_count
+    }
+    DOCUMENT {
+        uuid document_id PK
+        uuid source_id FK
+        string title
+        string normalized_title
+        string url
+        string canonical_url
+        string doi
+        string content_type
+    }
+    DOCUMENT_TOPIC {
+        uuid document_id FK
+        uuid cso_topic_id FK
+        uuid leaf_topic_id FK
+        float confidence
+    }
+    CLICKBAIT_RESULT {
+        uuid result_id PK
+        uuid document_id FK
+        string model_name
+        string adapter_type
+        string decision
+        float confidence
+    }
+    RECOMMENDATION_SLOT {
+        uuid slot_id PK
+        uuid user_id FK
+        string slot_type
+        int target_count
+        int actual_count
+        string fallback_reason
+    }
+    RECOMMENDATION {
+        uuid recommendation_id PK
+        uuid user_id FK
+        uuid document_id FK
+        string slot_type
+        string reason
+    }
+    USER_EVENT {
+        uuid event_id PK
+        uuid user_id FK
+        uuid document_id FK
+        string event_type
+        int dwell_ms
+        string client_request_id
+    }
+    SAVED_DOCUMENT {
+        uuid user_id FK
+        uuid document_id FK
+        timestamp saved_at
+    }
+    HIDDEN_DOCUMENT {
+        uuid user_id FK
+        uuid document_id FK
+        timestamp hidden_at
+    }
+    NOT_INTERESTED_TOPIC {
+        uuid user_id FK
+        uuid cso_topic_id FK
+        uuid leaf_topic_id FK
+    }
+    REPROCESS_REQUEST {
+        uuid request_id PK
+        uuid admin_id FK
+        uuid job_id FK
+        string status
+        string result_message
+    }
+    TOPIC_LINKAGE_ERROR {
+        uuid error_id PK
+        uuid document_id FK
+        uuid expected_cso_topic_id FK
+        string error_message
+        int retry_count
+    }

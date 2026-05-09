@@ -1,0 +1,139 @@
+# 결정 백로그 (Decision Backlog)
+
+본 문서는 docs/ 전반에 흩어진 모든 `<!-- TODO: -->` / `# TODO:` 마커를 한 곳에 모아 우선순위(P0/P1/P2)를 부여하고, P0 외 항목은 reasonable default 또는 stub 전략을 제시한다. 후속 에이전트가 자기 모듈을 구현할 때 본 표를 따르면 막힘 없이 진행할 수 있다.
+
+분류 기준:
+- **P0 — 구현 시작 전 필수 결정**: 사용자 외부 자원·정책에 의존하므로 default가 불가능. 미해결 시 해당 에이전트가 막힘.
+- **P1 — Default로 진행 가능**: 합리적 default를 코드/config에 박아 두고, 시연 후 튜닝.
+- **P2 — 폴리시·검증 단계 항목**: 1차 구현 동안은 stub 또는 후순위. 본 시연에 영향 없음.
+
+원본 마커 위치는 `file:line` 형태로 기록.
+
+---
+
+## P0 — 구현 시작 전 필수 결정 (1건)
+
+### P0-1. DoRA 낚시성 모듈 경로 공유
+- **원본**: `algorithms/clickbait-integration.md:9`, `sdd/architecture.md:74`
+- **내용**: 사용자가 보유한 DoRA 파인튜닝된 `A.x 4.0 light` 낚시성 탐지 모듈의 어댑터 weight·base 모델 위치를 공유 받아야 `services/clickbait-detector/Dockerfile`과 `app/main.py`를 작성할 수 있다.
+- **막히는 에이전트**: A5 (clickbait)
+- **사용자에게 필요한 것**: 모듈 디렉토리/파일 경로 또는 다운로드 URL + base 모델 식별자.
+- **임시 우회**: 사용자 공유 전까지는 A5 보류. 다른 에이전트는 영향 없음 (A4가 수집 잡에서 `clickbait_classifier_unavailable`을 받으면 추천 후보 제외 + ClickbaitResult error 기록하는 경로가 이미 정의됨).
+- **default 불가**: 모듈 자체가 없으면 NFR-09 (98%대 정확도) 충족 검증이 불가능하고, AT-09(낚시성 차단) 시연 데이터가 비어 있게 된다.
+
+## C-급 (이전 분석에서 식별, 인터뷰로 해소된 항목)
+
+| ID | 원래 제기된 문제 | 해소 위치 |
+|---|---|---|
+| C-1. UserBroadInterest 매핑 누락 | onboarding 선택은 14 active day 한정 prior boost로 동작, 영구 저장 매핑 테이블 불필요로 결정 (행동이 root 모델). 영구 보존 필요 시 `algorithms/cso-topic-traversal.md §1.2` 참조 | `algorithms/cso-topic-traversal.md §1.2`, `decisions.md §4` |
+| C-3. Cold-start pseudo Document FK 정합성 | 1차 시연에서는 Source 테이블에 sentinel 행 (`name="cold_start_pseudo"`) 시드 + content_type="pseudo_cold_start" 별도 처리. P1로 격하해 default 진행 | `algorithms/cold-start.md` (TODO 마커 유지) |
+| C-4. emerging leaf 노출 경로 부재 | traversal trace 모델 도입으로 자연 해소: emerging은 active trace path 끝 산하에서만 분기되어 current 카테고리 = core 슬롯에 자연 포함. core 슬롯 5개 중 1개는 emerging quota | `algorithms/cso-topic-traversal.md §6.2`, `algorithms/recommendation-ranking.md` Core 섹션 |
+| C-5. 사용자 × CSO 토픽 상태 머신·전이 룰 (인터뷰에서 신규 식별) | `UserCSOTraversal` trace 객체 도입 + active day 기반 라이프사이클로 해소. SRS Open Issue 5로 등록 | `algorithms/cso-topic-traversal.md` 전체, `decisions.md §4` |
+
+> **C-2 (NFR-21 30일 grace period)**는 여전히 미해소. 1차 시연은 즉시 cascade로 진행하되, 시연 후 폴리시 단계에서 soft delete + worker 도입 검토. 운영 시 NFR-21 정합 주의.
+
+---
+
+## P1 — Reasonable Default로 진행 (7건)
+
+### P1-1. User 엔티티에 사용자 클래스(학생/연구자/교수) 필드 추가 여부
+- **원본**: `algorithms/cold-start.md:15`
+- **사용 맥락**: cold-start LLM 입력에 사용자 클래스를 힌트로 넣어 첫 10개 추천을 페르소나에 맞게 생성.
+- **default**: **User 테이블에 추가하지 않는다.** 대신 온보딩 화면에서 받은 user_class를 transient input으로 cold-start LLM 호출 1회에만 사용하고 저장하지 않는다. 이후 일반 추천은 행동 로그(베이지안 사후)로 충분히 개인화된다.
+- **stub**: `POST /onboarding/interests` ([`api/onboarding.md`](api/onboarding.md)) 요청 바디에 `user_class: "undergraduate" | "researcher" | "professor" | "general"` 필드를 받아 cold-start orchestrator로 transient 전달. User 영구 저장 없음.
+- **튜닝 트리거**: 시연 후 사용자 클래스를 영구적으로 보고 싶다는 요구가 생기면 마이그레이션으로 컬럼 추가.
+
+### P1-2. 24시간 cold-start LLM 호출 캡
+- **원본**: `algorithms/cold-start.md:118`
+- **default**: `recommendation.toml` 의 `cold_start_max_per_day = 100` (전역). 사용자당으로는 사실상 가입 직후 1회만 호출되므로 100/일 전역 캡으로 시연 충분.
+- **stub**: 초과 시 fallback 경로 (trust_level=high 트렌드)로 자동 전환. 이미 `runbooks.md` §2 정의됨.
+
+### P1-3. 낚시성 분류기 1회 추론 SLA
+- **원본**: `algorithms/clickbait-integration.md:112`
+- **default**: **CPU 환경 5초**, 초과 시 비동기 큐 전환. `clickbait-detector` 컨테이너의 `/classify` 엔드포인트는 동기 응답 5초 timeout, 초과 응답은 backend 측에서 RQ 큐로 wrap (`worker`가 후처리, 결과는 `ClickbaitResult.evaluated_at` 사후 채움).
+- **stub**: 시연 환경(데이터 5+ 페르소나)에서는 모든 호출이 5초 이내 완료한다고 가정. 비동기 경로는 코드 골격만 두고 활성화는 시연 후.
+
+### P1-4. UserEvent에서 leaf_topic 없는 이벤트의 토픽 분배 정책
+- **원본**: `algorithms/interest-bayesian.md:184`
+- **default**: **이벤트가 가리키는 Document에 매핑된 모든 (cso_topic, leaf_topic) 쌍의 confidence를 정규화해 분배.** leaf_topic이 없는 매핑은 cso_topic만 분배 대상에 포함. 사용자 명시 이벤트(`not_interested` 등)에서 토픽이 직접 지정된 경우는 100% 단일 분배.
+- **stub**: `app/interest/topic_distribution.py` 의 `resolve_topic_distribution(event)` 함수가 위 룰을 구현.
+
+### P1-5. CSO 다운로드 버전
+- **원본**: `data/cso-import.md:227`
+- **default**: **CSO 3.4** (현재 사이트의 안정 stable 다운로드). `make import-cso` 가 fetch URL을 환경변수 `CSO_DOWNLOAD_URL`에서 읽어 변경 가능.
+- **stub**: `scripts/import_cso.py` 가 다운받은 N3/CSV의 hash를 `cso_metadata` 테이블에 기록 → 향후 버전 갱신 시 변경 감지.
+- **튜닝 트리거**: 신버전(3.5+) 출시 시 `CSO_DOWNLOAD_URL`만 교체 후 `make import-cso --refresh`.
+
+### P1-6. 네이버뉴스 Document 야간 정리 잡 정책
+- **원본**: `data/schema.md:352`
+- **default**: 매일 02:00 KST cron. 모든 토픽 매핑이 사라지고 `created_at` 으로부터 30일 경과한 `content_type=tech_news` Document는 삭제. SRS의 NFR-25 (외부 원문 무단 복제 금지) 정합.
+- **stub**: `workers/cleanup/naver_news_cleanup.py` 에 위 룰 구현. `COLLECTION_CRON` 과 별도 `NAVER_CLEANUP_CRON=0 17 * * *` (UTC) 환경변수.
+
+### P1-7. SRS docx 와이어프레임 PNG 추출 경로
+- **원본**: 본 정리 작업에서 신규 식별. SRS 분할 파일과 `ux/wireframes.md` 의 PNG 링크 부재 안내(이미 본 정리 작업으로 박스 추가됨).
+- **default**: **PNG 추출 안 함**. `ux/wireframes.md` 의 화면별 상태 머신 Mermaid + 정상/빈/오류 매트릭스를 단일 권위 소스로 사용. A9는 본 Mermaid·매트릭스만 보고 6개 화면을 구현한다.
+- **stub**: 추후 발표용 슬라이드에 와이어프레임 이미지가 필요하면 `unzip SKKU_InSight_SRS.docx -d /tmp/srs-docx && cp /tmp/srs-docx/word/media/* assets/` 로 추출 (본 저장소 외부 한정).
+
+---
+
+## P2 — 폴리시·검증 단계 (5건)
+
+### P2-1. OpenAPI 자동 생성 결과 cross-check
+- **원본**: `api/auth.md:82`
+- **default action**: A2가 FastAPI 부트스트랩 후 `python -m app.openapi_dump` 로 OpenAPI YAML을 출력하고, `docs/api/*.md` 의 시그니처와 자동 비교하는 단순 diff 스크립트를 `scripts/check_api_docs.py` 에 둔다. CI에서 비교.
+- **시점**: A2 작업 마지막 단계.
+
+### P2-2. 시드 페르소나 문서 ID 캡처
+- **원본**: `data/seed-personas.md:162`
+- **default action**: A12가 시드 스크립트 1회 실행 후 생성된 Document ID를 `scripts/fixtures/seed_documents.json` 에 캡처해 시연 재현성 확보.
+- **시점**: A12 작업 + A11 (test-ci) 가 동일 fixture 사용.
+
+### P2-3. 빅테크 RSS URL 검증
+- **원본**: `data/sources-registry.md` 의 `# TODO: verify URL` 약 22개
+- **default action**: A4가 부트 시 `python -m app.source_adapters.verify_urls` 를 실행해 각 RSS의 200 응답 + `<rss>` 또는 `<feed>` root tag 존재를 검증. 실패 시 `enabled=false` 자동 마킹 + 관리자 콘솔 알림. 마커는 검증 통과한 항목부터 제거.
+- **시점**: A4 작업 초반.
+
+### P2-4. 빅테크 소스 50–80개로 확장
+- **원본**: `data/sources-registry.md:392`, `:482`
+- **default action**: 1차 시연은 현재 골격(약 30개)으로 충분. 추가 회사는 사용자 시연 후 우선순위 결정. `sources.yaml` 에 새 엔트리만 추가하고 alembic data migration 1개로 반영하는 패턴이 이미 정립됨.
+- **시점**: M4 (발표 준비) 직전 또는 후순위.
+
+### P2-5. 관리자가 사용자 비밀번호를 강제 reset 하는 임시 endpoint
+- **원본**: `security/password-policy.md:111`
+- **default action**: **시연 동안은 미구현.** 사용자가 잊으면 `docker compose exec api python -m app.scripts.reset_password user@example.com` CLI로 직접 임시 비번 발급. 운영 단계에서 endpoint 검토.
+- **시점**: 본 1차 구현 범위 외.
+
+### P2-6. clickbait-detector 외부 인터페이스 가정
+- **원본**: `algorithms/clickbait-integration.md:107` 영역
+- **default action**: P0-1 해결 시 자연 해결. P0-1 전까지는 `services/clickbait-detector/main.py` 에 dummy `decision="clean", confidence=0.5` 응답을 반환하는 stub 컨테이너로 운영해 다른 에이전트(A4, A8) 진행을 막지 않는다.
+- **시점**: P0-1 해결 후 즉시 교체.
+
+---
+
+## 요약 표
+
+| 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
+|---|---|---|---|
+| P0 | 1 | A5 | 사용자 결정 필요 |
+| P1 | 7 | (없음) | reasonable default + stub |
+| P2 | 6 | (없음) | 후속 폴리시 단계 |
+
+**P0 1건만 사용자 액션 대기. 그 외 12건은 모두 default·stub 경로가 정해져 있어 A1 외 모든 에이전트가 즉시 작업 시작 가능.**
+
+## 본 백로그의 출처
+
+본 문서는 다음 위치의 마커를 한 번에 수집·정리한 결과다. 각 마커는 그대로 유지되며, 해결 시점에 해당 라인의 `<!-- TODO: -->` 또는 `# TODO:` 를 제거한다. 본 백로그 자체는 진척에 따라 갱신.
+
+- `algorithms/cold-start.md` (2)
+- `algorithms/clickbait-integration.md` (3)
+- `algorithms/interest-bayesian.md` (1)
+- `api/auth.md` (1)
+- `data/cso-import.md` (1)
+- `data/schema.md` (1)
+- `data/seed-personas.md` (1)
+- `data/sources-registry.md` (~22 verify URL + 2 보강)
+- `security/password-policy.md` (1)
+- `sdd/architecture.md` (1, P0-1과 동일)
+- `ux/wireframes.md` (정리 작업으로 본 백로그 P1-7로 이동)
+
+마지막 정리: 2026-05-09.

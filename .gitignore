@@ -1,0 +1,117 @@
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# --- 가상환경 ---
+.venv/
+venv/
+env/
+.python-version
+
+# --- 테스트 / 타입 캐시 ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+
+# --- Node / TypeScript ---
+node_modules/
+.next/
+out/
+.vite/
+.turbo/
+*.tsbuildinfo
+.npm/
+.yarn/
+.pnp.*
+
+# --- Electron / 빌드 산출물 ---
+release/
+*.app
+*.dmg
+*.exe
+*.AppImage
+*.snap
+
+# --- 환경변수·비밀 ---
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+*.pem
+*.key
+
+# --- LLM·모델 weights ---
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.gguf
+*.ckpt
+
+# --- 캐시·다운로드 ---
+.cache/
+*.cache
+.tmp/
+tmp/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# --- OpenAPI codegen 자동 생성 산출물은 commit 함 (CI 검증용) ---
+# client/src/generated/ → commit
+# admin-console/src/generated/ → commit
+# 단 IDE 임시 파일은 무시
+client/src/generated/.cache/
+admin-console/src/generated/.cache/
+
+# --- 로그 ---
+*.log
+logs/
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- DB local data (docker volumes) ---
+pg_data/
+redis_data/
+
+# --- 백업·압축 ---
+*.zip
+*.tar
+*.tar.gz
+*.bak
+docs.zip
+
+# --- 시연 fixture 캡처 (의도적으로 commit하는 경우 주석 처리) ---
+# tests/fixtures/mock_llm/captured/
+
+# --- OS·시스템 ---
+Thumbs.db
+Desktop.ini

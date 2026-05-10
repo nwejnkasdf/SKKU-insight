@@ -24,6 +24,7 @@ CSO (Computer Science Ontology) 데이터를 PostgreSQL에 임포트하고 Netwo
 - 다운로드 캐시 `.cache/cso/CSO.3.4.csv`
 - 12 cluster seed BFS 라벨링
 - Alembic data migration 또는 직접 INSERT
+- **CSO 임포트 후 BroadInterest 12 시드 작성** — `cso_seed_topic_id` FK = 각 cluster 의 seed CSOTopic UUID (A2 가 빈 BroadInterest 테이블만 만들고 본 세션이 시드 채움; data/schema.md BroadInterest §)
 - `make import-cso` Makefile target
 
 ### 2. NetworkX 캐시

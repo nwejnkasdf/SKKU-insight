@@ -15,7 +15,7 @@
 
 | Phase | 모듈 | Prompt 파일 | 상태 | 마지막 결과 (commit / 노트) |
 |---|---|---|---|---|
-| 0a | A2-stub | [`00-A2-stub.md`](00-A2-stub.md) | ⬜ | |
+| 0a | A2-stub | [`00-A2-stub.md`](00-A2-stub.md) | 🟢 | `73f57e8` (PR #4 머지 2026-05-11) — backend/ 33 파일 + contracts.py SOR (13 enum + 39 ErrorCode + 14 RedisKey) + 53 endpoint stubs + docs drift 24건 fix |
 | 0b | A2 backend-foundation | [`01-A2-backend.md`](01-A2-backend.md) | ⬜ | |
 | 0b | A3 cso-topic | [`02-A3-cso-topic.md`](02-A3-cso-topic.md) | ⬜ | |
 | 1 | A4 collection | [`03-A4-collection.md`](03-A4-collection.md) | ⬜ | |

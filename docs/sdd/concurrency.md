@@ -167,36 +167,80 @@ async def maybe_increment_active_day(user_id: UUID, today: date) -> int:
 
 `WHERE last_active_calendar_date < :today` 조건이 동시 두 요청 중 첫 번째만 통과시키는 가드. 두 번째는 row 0건 갱신.
 
-## 5. LLM concurrent call cap
+## 5. LLM concurrent call cap (Redis 분산 semaphore, multi-worker 안전)
 
 외부 API rate limit (OpenAI Tier 1 = 60 req/min, codex_oauth는 더 엄격) 보호 + 한 사용자 몰빵 방어.
 
-### Provider-level semaphore
+### Worker 병렬 정책 (decision-backlog C-19, C-20)
+
+`UVICORN_WORKERS>1` 또는 다중 컨테이너 환경에서 `asyncio.Semaphore` 는 process 별
+독립이라 전역 캡 보장 불가 (워커 4개 × 8 = 실효 32). 따라서 **Redis 기반 분산
+semaphore** 사용 — Lua atomic check + INCR/DECR + TTL.
+
+### 구현 — Redis 분산 semaphore (Lua atomic)
 
 ```python
-# app/llm_provider/base.py
-class LLMProvider:
-    _semaphore: asyncio.Semaphore = asyncio.Semaphore(LLM_MAX_CONCURRENT)
-    _per_user_semaphore: dict[UUID, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(LLM_MAX_CONCURRENT_PER_USER))
+# app/llm_provider/_concurrency.py
+_LUA_ACQUIRE = """
+local global_limit = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[3])
+local global_current = tonumber(redis.call('GET', KEYS[1]) or '0')
+if global_current >= global_limit then return 0 end
+if KEYS[2] ~= '' and ARGV[2] ~= '' then
+    local user_limit = tonumber(ARGV[2])
+    local user_current = tonumber(redis.call('GET', KEYS[2]) or '0')
+    if user_current >= user_limit then return 0 end
+    redis.call('INCR', KEYS[2])
+    redis.call('EXPIRE', KEYS[2], ttl)
+end
+redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ttl)
+return 1
+"""
 
-    async def complete(self, ..., user_id: UUID | None = None) -> LLMResponse:
-        per_user = self._per_user_semaphore[user_id] if user_id else nullcontext()
-        async with self._semaphore, per_user:
-            return await self._do_complete(...)
+@asynccontextmanager
+async def acquire_slot(user_id):
+    redis = get_redis("default")
+    deadline = time.monotonic() + settings.LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS
+    backoff = 0.05
+    while True:
+        if int(await redis.eval(_LUA_ACQUIRE, 2, global_key, user_key, ...)) == 1:
+            break
+        if time.monotonic() >= deadline:
+            raise LLMBudgetExceeded("semaphore_timeout")
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 1.5, 0.5)
+    try:
+        yield
+    finally:
+        await redis.eval(_LUA_RELEASE, 2, global_key, user_key)
 ```
+
+### Redis 키
+
+```
+llm:active:global              INCR/DECR, TTL 60s
+llm:active:user:{user_id}      INCR/DECR, TTL 60s (per-user cap)
+```
+
+- TTL 60s: acquire 후 release 못한 채 crash 시 자연 해소. LLM 단일 호출이 60s
+  안에 끝난다 가정 (`LLM_REQUEST_TIMEOUT_SECONDS=60` 과 정합).
+- DECR floor 0 (음수 방지 — Lua 안에서 check)
 
 ### 권장 cap
 
 ```
-LLM_MAX_CONCURRENT = 8         # 전역 동시 LLM 호출 cap
-LLM_MAX_CONCURRENT_PER_USER = 2 # 한 사용자가 burst로 잡을 수 있는 cap
+LLM_MAX_CONCURRENT = 8                          # 전역 동시 LLM 호출 cap
+LLM_MAX_CONCURRENT_PER_USER = 2                  # 한 사용자 burst cap
+LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS = 30      # acquire 재시도 한도
 ```
 
-20명이 동시 cold-start 호출하더라도 8개씩 직렬화되어 외부 API 보호.
+20명이 동시 cold-start 호출해도 8개씩 직렬화 — multi-worker 환경에서도 같은 보장.
 
 ### Mock provider 예외
 
-`LLM_PROVIDER=mock`은 deterministic 즉답이라 semaphore 우회 가능 (옵션 `mock_bypass_semaphore=true`).
+`LLM_PROVIDER=mock`은 deterministic 즉답이라 acquire 우회 가능 (mock provider 가
+`acquire_slot` 호출 안 함). OpenAI/Anthropic/OpenRouter 만 acquire.
 
 ## 6. Event batch flush (dwell_tick 폭증 완화)
 

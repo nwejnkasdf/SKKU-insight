@@ -46,6 +46,8 @@
 | C-16. account_deletion worker 가 `refresh_index:*` 전역 SCAN/DEL | 한 사용자 삭제 시 모든 사용자 refresh_index 삭제 → 다른 사용자 강제 로그아웃. SCAN 패턴 제거 + 본 사용자 namespace 만 정리(`refresh:{user_id}:*` + `idemp:onboarding:{user_id}:*`). refresh_index 는 TTL 14d 만료에 위임. codex review C-1. | `app/worker/jobs/account_deletion.py` |
 | C-17. admin pagination Python tuple 비교 런타임 에러 | `(User.created_at, User.user_id) < (ts, uid)` 가 Python tuple comparison 으로 평가돼 SQLAlchemy 표현식 boolean 평가 → TypeError → 2페이지 cursor 호출 실패. `tuple_(...)` SQL helper 사용으로 row-comparison SQL 생성. codex review C-6. | `app/admin/users_service.py:list_users` |
 | C-18. `/admin/auth/refresh` JwtAuthMiddleware 화이트리스트 누락 | refresh endpoint 가 인증 필요로 처리돼 access 만료 후 갱신 불가. `/auth/refresh` 와 동일하게 우회. codex review C-3. | `app/middleware/jwt_auth.py:WHITELIST_PATTERNS` |
+| C-19. LLM 동시성 가드 (`_global_sem`, `_user_sems`) 가 per-process asyncio.Semaphore | `UVICORN_WORKERS>1` 또는 다중 컨테이너에서 전역 `LLM_MAX_CONCURRENT=8` 약속 깨짐 (워커 4 × 8 = 실효 32). Redis 분산 semaphore (Lua atomic acquire/release + INCR/DECR + 60s TTL) 로 교체. `RedisKey.llm_global_active_count()` / `llm_user_active_count(user_id)` 신규. `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30` env 추가. multi-worker 동시성 정책 검수에서 발견. | [`sdd/concurrency.md §5`](sdd/concurrency.md), `app/llm_provider/_concurrency.py`, `app/contracts.py` RedisKey |
+| C-20. multi-worker 정책 부재 | `UVICORN_WORKERS` env 신규 (default 1). DB pool 은 process 독립이므로 운영자가 `UVICORN_WORKERS * PG_API_POOL_MAX + PG_WORKER_POOL_MAX ≤ PostgreSQL max_connections` 가 되도록 조정. docker-compose.yml api command 가 `--workers ${UVICORN_WORKERS:-1}` 사용. env-vars.md §Worker 병렬 정책 에 공식 표 추가. | [`ops/env-vars.md`](ops/env-vars.md) §Worker 병렬 정책, `docker-compose.yml`, `config.py` |
 
 ---
 
@@ -144,7 +146,7 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
 | P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex review) | 18 (해결 18 — C-2 부분 해소, C-6~18 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex review 로 13건 해결 |
+| C-급 (인터뷰 식별 + codex review + multi-worker) | 20 (해결 20 — C-2 부분 해소, C-6~20 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex review + multi-worker 정책으로 15건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 

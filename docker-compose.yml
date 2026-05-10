@@ -44,6 +44,18 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+    # Worker 병렬 정책 (decision-backlog C-19, C-20):
+    # - UVICORN_WORKERS>1 시 LLM 동시성 가드(MAX_CONCURRENT, PER_USER) 는
+    #   Redis 분산 semaphore (`_concurrency.py` Lua atomic) 가 전역 캡 보장.
+    # - DB pool 은 process 독립. 총 connection =
+    #     UVICORN_WORKERS * PG_API_POOL_MAX + PG_WORKER_POOL_MAX
+    #   가 PostgreSQL `max_connections` (default 100) 이하 되도록 운영자 조정.
+    # - 본 데모 default UVICORN_WORKERS=1 (10-20 명 시연에 충분).
+    command:
+      - sh
+      - -c
+      - "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1}"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -295,6 +295,16 @@ class RedisKey:
         return f"llm:tokens:{date_str}"
 
     @staticmethod
+    def llm_global_active_count() -> str:
+        """전역 LLM 동시 호출 카운터 — multi-worker 분산 semaphore (C-19)."""
+        return "llm:active:global"
+
+    @staticmethod
+    def llm_user_active_count(user_id: UUID) -> str:
+        """사용자별 LLM 동시 호출 카운터 — multi-worker 분산 semaphore (C-19)."""
+        return f"llm:active:user:{user_id}"
+
+    @staticmethod
     def dwell_tick_count(user_id: UUID, document_id: UUID) -> str:
         """dwell_tick 카운터 (atomic SQL UPSERT 사용 시 보통 불필요)."""
         return f"dwell:{user_id}:{document_id}"

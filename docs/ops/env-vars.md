@@ -47,8 +47,9 @@
 | `OPENROUTER_API_KEY` | `sk-or-...` | LLM_PROVIDER=openrouter 일 때 필수 |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `60` | |
 | `LLM_DAILY_TOKEN_BUDGET` | `1000000` | 운영 가드, 초과 시 fallback |
-| `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — 외부 API rate limit 보호 ([`../sdd/concurrency.md §5`](../sdd/concurrency.md)) |
-| `LLM_MAX_CONCURRENT_PER_USER` | `2` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap |
+| `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
+| `LLM_MAX_CONCURRENT_PER_USER` | `2` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
+| `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS` | `30` | 분산 semaphore acquire 재시도 한도. 초과 시 `LLMBudgetExceeded` (fallback 진입) |
 
 ## 클릭베이트 모듈
 
@@ -120,6 +121,30 @@
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING |
 | `STRUCTLOG_RENDER` | `json` | json | console |
 
+## Worker 병렬 정책 (decision-backlog C-20)
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `UVICORN_WORKERS` | `1` | uvicorn worker process 수. 데모 default 1. multi-worker 시 LLM 동시성은 Redis 분산 (자동), DB pool 합산은 운영자 책임 |
+
+**DB connection 합산 공식** (PostgreSQL `max_connections` 초과 방지):
+
+```
+total_db_conn = UVICORN_WORKERS * PG_API_POOL_MAX + PG_WORKER_POOL_MAX
+              + (admin-console, alembic 등 ad-hoc 클라이언트, ~5)
+```
+
+PostgreSQL default `max_connections=100` 기준:
+
+| 워커 | api pool | worker pool | total | 적합 여부 |
+|---|---|---|---|---|
+| 1 | 30 | 10 | ~45 | ✅ default 데모 |
+| 2 | 30 | 10 | ~75 | ✅ |
+| 4 | 30 | 10 | ~135 | ❌ — pool 축소 또는 max_connections 200+ |
+| 4 | 15 | 10 | ~75 | ✅ — `PG_API_POOL_MAX=15` 로 축소 |
+
+**LLM 동시성은 워커 수 무관** — Redis 분산 semaphore 가 전역 캡 보장.
+
 ## .env.example 골격
 
 ```env
@@ -161,6 +186,7 @@ LLM_REQUEST_TIMEOUT_SECONDS=60
 LLM_DAILY_TOKEN_BUDGET=1000000
 LLM_MAX_CONCURRENT=8
 LLM_MAX_CONCURRENT_PER_USER=2
+LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30
 
 # === Clickbait (URL은 운영 시점 결정 — 호스팅·transport와 무관) ===
 CLICKBAIT_SERVICE_URL=
@@ -210,6 +236,9 @@ CORS_ALLOWED_ORIGINS=http://localhost:3001,app://insight
 API_PUBLIC_BASE=http://localhost:8000
 LOG_LEVEL=INFO
 STRUCTLOG_RENDER=json
+
+# === Worker 병렬 정책 (decision-backlog C-20) ===
+UVICORN_WORKERS=1
 ```
 
 ## 검증

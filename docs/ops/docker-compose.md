@@ -8,7 +8,7 @@
 - `.env.example` (프로젝트 루트, [`env-vars.md`](env-vars.md) 카탈로그 미리 채워둠)
 - `backend/Dockerfile` — api + worker 공유 이미지
 - `admin-console/Dockerfile`
-- `services/clickbait-detector/Dockerfile` (옵션, 자체 호스팅 시) — clickbait 모듈은 호스팅·transport가 운영 결정. [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조
+- `clickbait_module/Dockerfile` (옵션, 자체 호스팅 시) — clickbait 모듈은 호스팅·transport가 운영 결정. [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조
 
 ## 서비스 정의 골격
 
@@ -90,12 +90,12 @@ services:
       retries: 3
 
   # clickbait-detector — 호스팅·transport는 운영 결정 (default: docker-compose에 정의하지 않음).
-  # 자체 호스팅으로 도커 컴포즈에 포함하려면 아래 블록 주석 해제 + services/clickbait-detector/ 빌드 컨텍스트 준비
+  # 자체 호스팅으로 도커 컴포즈에 포함하려면 아래 블록 주석 해제 + clickbait_module/Dockerfile 준비
   # + backend env CLICKBAIT_SERVICE_URL=http://clickbait-detector:8100 설정.
   # 외부 호스팅(별도 GPU 머신, 클라우드 등) 시 본 블록 그대로 두고 backend env CLICKBAIT_SERVICE_URL을 외부 URL로 지정.
   # clickbait-detector:
   #   build:
-  #     context: ./services/clickbait-detector
+  #     context: ./clickbait_module
   #     dockerfile: Dockerfile
   #   env_file: .env
   #   ports:

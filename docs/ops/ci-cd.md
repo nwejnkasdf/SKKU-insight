@@ -173,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t insight-clickbait:${{ github.sha }} ./services/clickbait-detector
+      - run: docker build -t insight-clickbait:${{ github.sha }} ./clickbait_module
 
   build-admin-console:
     runs-on: ubuntu-latest

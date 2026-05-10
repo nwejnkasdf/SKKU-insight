@@ -54,7 +54,7 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `CLICKBAIT_SERVICE_URL` | `http://clickbait-detector:8100` | 백엔드가 호출하는 URL |
+| `CLICKBAIT_SERVICE_URL` | (운영 결정) | 백엔드가 호출하는 URL. 호스팅·transport와 무관하게 동일 계약 충족 시 swap 가능 ([`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화) |
 | `CLICKBAIT_MODEL_NAME` | `ax-4.0-light-dora-clickbait-v1` | 응답에 그대로 사용 |
 
 ## 관리자 부트스트랩
@@ -158,8 +158,8 @@ LLM_DAILY_TOKEN_BUDGET=1000000
 LLM_MAX_CONCURRENT=8
 LLM_MAX_CONCURRENT_PER_USER=2
 
-# === Clickbait ===
-CLICKBAIT_SERVICE_URL=http://clickbait-detector:8100
+# === Clickbait (URL은 운영 시점 결정 — 호스팅·transport와 무관) ===
+CLICKBAIT_SERVICE_URL=
 CLICKBAIT_MODEL_NAME=ax-4.0-light-dora-clickbait-v1
 
 # === Admin bootstrap ===

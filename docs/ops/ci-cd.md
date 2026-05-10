@@ -166,7 +166,10 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - run: docker build -t insight-api:${{ github.sha }} ./backend
 
+  # 자체 도커 호스팅 시에만 활성화. 외부 호스팅(default)이면 본 잡 비활성화.
+  # 호스팅·transport 결정은 algorithms/clickbait-integration.md §호스팅·transport 추상화 참조.
   build-clickbait-image:
+    if: ${{ vars.CLICKBAIT_SELF_HOSTED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

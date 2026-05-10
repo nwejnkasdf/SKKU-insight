@@ -11,15 +11,12 @@
 
 ---
 
-## P0 — 구현 시작 전 필수 결정 (1건)
+## P0 — 구현 시작 전 필수 결정 (0건, 모두 해소됨)
 
-### P0-1. DoRA 낚시성 모듈 경로 공유
-- **원본**: `algorithms/clickbait-integration.md:9`, `sdd/architecture.md:74`
-- **내용**: 사용자가 보유한 DoRA 파인튜닝된 `A.x 4.0 light` 낚시성 탐지 모듈의 어댑터 weight·base 모델 위치를 공유 받아야 `services/clickbait-detector/Dockerfile`과 `app/main.py`를 작성할 수 있다.
-- **막히는 에이전트**: A5 (clickbait)
-- **사용자에게 필요한 것**: 모듈 디렉토리/파일 경로 또는 다운로드 URL + base 모델 식별자.
-- **임시 우회**: 사용자 공유 전까지는 A5 보류. 다른 에이전트는 영향 없음 (A4가 수집 잡에서 `clickbait_classifier_unavailable`을 받으면 추천 후보 제외 + ClickbaitResult error 기록하는 경로가 이미 정의됨).
-- **default 불가**: 모듈 자체가 없으면 NFR-09 (98%대 정확도) 충족 검증이 불가능하고, AT-09(낚시성 차단) 시연 데이터가 비어 있게 된다.
+### P0-1. DoRA 낚시성 모듈 경로 공유 — **해결됨 (2026-05-11)**
+- **원본**: `algorithms/clickbait-integration.md:9`, `sdd/architecture.md:74` (해소되어 마커 제거됨)
+- **결정**: 모듈 위치 = `clickbait_module/`. 가중치 호스팅 = HuggingFace Hub private repo. 서빙 엔진 = **vLLM** (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 시점 결정 — backend는 `CLICKBAIT_SERVICE_URL` env로만 호출하며 transport·호스팅과 무관.
+- **코드 phase 산출**: `clickbait_module/app/` (FastAPI + vLLM AsyncLLMEngine), `clickbait_module/scripts/merge_adapter.py` (peft `merge_and_unload()`). P1-8·P2-7도 본 결정으로 자연 해소(아래 참조).
 
 ## C-급 (이전 분석에서 식별, 인터뷰로 해소된 항목)
 
@@ -34,7 +31,7 @@
 
 ---
 
-## P1 — Reasonable Default로 진행 (7건)
+## P1 — Reasonable Default로 진행 (8건, 활성 7 + 해결 1)
 
 ### P1-1. User 엔티티에 사용자 클래스(학생/연구자/교수) 필드 추가 여부
 - **원본**: `algorithms/cold-start.md:15`
@@ -74,9 +71,15 @@
 - **default**: **PNG 추출 안 함**. `ux/wireframes.md` 의 화면별 상태 머신 Mermaid + 정상/빈/오류 매트릭스를 단일 권위 소스로 사용. A9는 본 Mermaid·매트릭스만 보고 6개 화면을 구현한다.
 - **stub**: 추후 발표용 슬라이드에 와이어프레임 이미지가 필요하면 `unzip SKKU_InSight_SRS.docx -d /tmp/srs-docx && cp /tmp/srs-docx/word/media/* assets/` 로 추출 (본 저장소 외부 한정).
 
+### P1-8. vLLM의 DoRA 어댑터 호환성 + A.X-4.0-Light 로드 검증 — **해결됨 (2026-05-11)**
+- **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
+- **결정**: stub 옵션 (a) 채택. **DoRA scaling을 사전에 base에 merge → vLLM이 일반 base로 로드** (multi-LoRA serving 미사용). vLLM의 DoRA 직접 지원 여부와 무관하게 동작. base 모델은 [skt/A.X-4.0-Light](https://huggingface.co/skt/A.X-4.0-Light) 공식 모델 카드의 vLLM 서빙 예시로 호환성 가정.
+- **구현**: `clickbait_module/scripts/merge_adapter.py` (peft `merge_and_unload()` + `chat_template.jinja` + `run_meta.json` 복사), `clickbait_module/app/inference.py` (vLLM `AsyncLLMEngine` 부트).
+- **잔여 작업**: GPU 환경에서 1회 머지 + 부트 + 학습 평가 1건 sanity check (코드 외부 운영 작업).
+
 ---
 
-## P2 — 폴리시·검증 단계 (5건)
+## P2 — 폴리시·검증 단계 (7건, 활성 5 + 해결 2)
 
 ### P2-1. OpenAPI 자동 생성 결과 cross-check
 - **원본**: `api/auth.md:82`
@@ -103,10 +106,15 @@
 - **default action**: **시연 동안은 미구현.** 사용자가 잊으면 `docker compose exec api python -m app.scripts.reset_password user@example.com` CLI로 직접 임시 비번 발급. 운영 단계에서 endpoint 검토.
 - **시점**: 본 1차 구현 범위 외.
 
-### P2-6. clickbait-detector 외부 인터페이스 가정
-- **원본**: `algorithms/clickbait-integration.md:107` 영역
-- **default action**: P0-1 해결 시 자연 해결. P0-1 전까지는 `services/clickbait-detector/main.py` 에 dummy `decision="clean", confidence=0.5` 응답을 반환하는 stub 컨테이너로 운영해 다른 에이전트(A4, A8) 진행을 막지 않는다.
-- **시점**: P0-1 해결 후 즉시 교체.
+### P2-6. clickbait-detector 외부 인터페이스 가정 — **해결됨 (2026-05-11)**
+- **원본**: `algorithms/clickbait-integration.md:107` 영역 (해소되어 마커 정리됨)
+- **결정**: P0-1 해결과 함께 자연 해소. 모듈 위치 = `clickbait_module/`. 서빙 엔진 = vLLM. 호스팅·transport는 운영 결정. 자세히는 P0-1 + P1-8 + P2-7.
+
+### P2-7. vLLM 기반 추론에서 next-token "0"/"1" logprob 추출 방식 — **해결됨 (2026-05-11)**
+- **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
+- **결정**: `SamplingParams(max_tokens=1, logprobs=K, temperature=0.0)` greedy 추론 후 첫 번째 생성 토큰의 logprob 분포에서 id0=56, id1=57 추출 → 2-class softmax. K=20 default(env `LOGPROBS_TOPK`).
+- **구현**: `clickbait_module/app/inference.py` (`ClickbaitEngine.classify`). id0/id1은 `adapter/run_meta.json` 권위 사용 (없으면 토크나이저 폴백 + warning).
+- **잔여 작업**: 학습 시점 transformers 기반 산식(p0/p1/score_logit_diff)과 vLLM 추론 결과 sanity check 1건 (GPU 환경에서, NFR-09 검증과 함께).
 
 ---
 
@@ -114,18 +122,18 @@
 
 | 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
 |---|---|---|---|
-| P0 | 1 | A5 | 사용자 결정 필요 |
-| P1 | 7 | (없음) | reasonable default + stub |
-| P2 | 6 | (없음) | 후속 폴리시 단계 |
+| P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
+| P1 | 8 (해결 1, 활성 7) | (없음) | reasonable default + stub |
+| P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
 
-**P0 1건만 사용자 액션 대기. 그 외 12건은 모두 default·stub 경로가 정해져 있어 A1 외 모든 에이전트가 즉시 작업 시작 가능.**
+**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 
 ## 본 백로그의 출처
 
 본 문서는 다음 위치의 마커를 한 번에 수집·정리한 결과다. 각 마커는 그대로 유지되며, 해결 시점에 해당 라인의 `<!-- TODO: -->` 또는 `# TODO:` 를 제거한다. 본 백로그 자체는 진척에 따라 갱신.
 
 - `algorithms/cold-start.md` (2)
-- `algorithms/clickbait-integration.md` (3)
+- `algorithms/clickbait-integration.md` (3, P0-1·P2-6 해소되어 마커 제거; vLLM 결정 추가)
 - `algorithms/interest-bayesian.md` (1)
 - `api/auth.md` (1)
 - `data/cso-import.md` (1)
@@ -133,7 +141,7 @@
 - `data/seed-personas.md` (1)
 - `data/sources-registry.md` (~22 verify URL + 2 보강)
 - `security/password-policy.md` (1)
-- `sdd/architecture.md` (1, P0-1과 동일)
+- `sdd/architecture.md` (1, P0-1 해소되어 마커 제거)
 - `ux/wireframes.md` (정리 작업으로 본 백로그 P1-7로 이동)
 
-마지막 정리: 2026-05-09.
+마지막 정리: 2026-05-11 (P0-1·P2-6 해소 + clickbait_module 코드 phase 완료로 P1-8·P2-7 해결 — 합계 4건 해소).

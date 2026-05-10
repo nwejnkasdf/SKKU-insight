@@ -7,8 +7,8 @@
 - `docker-compose.yml` (프로젝트 루트)
 - `.env.example` (프로젝트 루트, [`env-vars.md`](env-vars.md) 카탈로그 미리 채워둠)
 - `backend/Dockerfile` — api + worker 공유 이미지
-- `services/clickbait-detector/Dockerfile`
 - `admin-console/Dockerfile`
+- `services/clickbait-detector/Dockerfile` (옵션, 자체 호스팅 시) — clickbait 모듈은 호스팅·transport가 운영 결정. [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조
 
 ## 서비스 정의 골격
 
@@ -89,21 +89,25 @@ services:
       timeout: 5s
       retries: 3
 
-  clickbait-detector:
-    build:
-      context: ./services/clickbait-detector
-      dockerfile: Dockerfile
-    env_file: .env
-    ports:
-      - "127.0.0.1:8100:8100"
-    volumes:
-      - ./models:/models:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8100/health || exit 1"]
-      interval: 15s
-      timeout: 3s
-      retries: 3
-    restart: unless-stopped
+  # clickbait-detector — 호스팅·transport는 운영 결정 (default: docker-compose에 정의하지 않음).
+  # 자체 호스팅으로 도커 컴포즈에 포함하려면 아래 블록 주석 해제 + services/clickbait-detector/ 빌드 컨텍스트 준비
+  # + backend env CLICKBAIT_SERVICE_URL=http://clickbait-detector:8100 설정.
+  # 외부 호스팅(별도 GPU 머신, 클라우드 등) 시 본 블록 그대로 두고 backend env CLICKBAIT_SERVICE_URL을 외부 URL로 지정.
+  # clickbait-detector:
+  #   build:
+  #     context: ./services/clickbait-detector
+  #     dockerfile: Dockerfile
+  #   env_file: .env
+  #   ports:
+  #     - "127.0.0.1:8100:8100"
+  #   volumes:
+  #     - ./models:/models:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8100/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 3s
+  #     retries: 3
+  #   restart: unless-stopped
 
   admin-console:
     build:
@@ -139,7 +143,7 @@ volumes:
 
 ## profiles (선택)
 
-개발 시 일부 서비스만 띄우려면 compose profiles 활용 가능. 1차 결정: profiles 미사용. 항상 6개 다 부팅. demo 모드는 `--build`만 다름.
+개발 시 일부 서비스만 띄우려면 compose profiles 활용 가능. 1차 결정: profiles 미사용. 항상 5개(postgres / redis / api / worker / admin-console) 부팅. clickbait-detector는 자체 호스팅 시에만 추가. demo 모드는 `--build`만 다름.
 
 ## 명령
 

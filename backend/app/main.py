@@ -1,46 +1,66 @@
-"""FastAPI application entry point — Phase 0a stub.
+"""FastAPI application entry point — Phase 0b A2 본문.
 
-본 모듈은 모든 router 를 등록해 OpenAPI export 가 동작하도록만 한다.
-Phase 0b A2 가 다음을 추가 구현:
-- Settings.JWT_SECRET / POSTGRES_PASSWORD 빈 값 거부 lifespan validator
-- structlog 바인딩 (LOG_LEVEL, STRUCTLOG_RENDER)
-- ErrorResponse 변환 exception handler
-- slowapi rate limit middleware
-- consent active middleware
-- DB pool / Redis 연결 lifespan
+A2-stub 가 만든 골격 위에 본문 채움:
+- lifespan (JWT_SECRET/POSTGRES_PASSWORD 검증, engine/redis init, structlog)
+- 미들웨어 4종 (RequestId / JwtAuth / ConsentGate / CORS)
+- slowapi rate limit (Limiter + 429 handler)
+- exception handler 3종 (Validation / HTTP / unhandled)
+- /health endpoint
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.admin.router import router as admin_router
 from app.auth.router import router as auth_router
 from app.collection.router import router as collection_router
+from app.config import get_settings
 from app.consent.router import router as consent_router
 from app.interest.router import router as interest_router
+from app.lifespan import lifespan
+from app.middleware.consent_gate import ConsentGateMiddleware
+from app.middleware.exception_handler import (
+    http_exception_handler,
+    unhandled_exception_handler,
+    validation_exception_handler,
+)
+from app.middleware.jwt_auth import JwtAuthMiddleware
+from app.middleware.request_id import RequestIdMiddleware
 from app.onboarding.router import router as onboarding_router
 from app.recommendation.router import document_router, recommendation_router
+from app.security.rate_limit import limiter, rate_limit_exceeded_handler
 from app.topic.router import router as topic_router
 
 
 def create_app() -> FastAPI:
-    """FastAPI 앱 팩토리. test/codegen 시 재사용 가능."""
+    """FastAPI 앱 팩토리."""
+    settings = get_settings()
     app = FastAPI(
         title="SKKU InSight Backend",
         version="0.1.0",
         description=(
-            "SKKU InSight 백엔드 (Phase 0a contract-first 게이트 산출). "
-            "endpoint body 는 모두 NotImplementedError — Phase 0b A2 부터 구현."
+            "SKKU InSight 백엔드 (Phase 0b A2 backend-foundation). "
+            "auth / consent / onboarding / admin auth / admin users 본문 구현. "
+            "나머지 endpoint 는 후속 에이전트 stub 유지."
         ),
+        lifespan=lifespan,
     )
 
-    # --- CORS skeleton (Phase 0b 가 settings.CORS_ALLOWED_ORIGINS 로 교체) ---
+    # slowapi rate limit — 앱에 limiter 바인딩
+    app.state.limiter = limiter
+
+    # === 미들웨어 (등록 역순으로 실행 — 마지막 등록이 가장 바깥) ===
+    # CORS (가장 바깥)
+    cors_origins = [
+        o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3001", "app://insight"],
+        allow_origins=cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
@@ -58,16 +78,20 @@ def create_app() -> FastAPI:
             "WWW-Authenticate",
         ],
     )
+    # ConsentGate (인증 통과 후)
+    app.add_middleware(ConsentGateMiddleware)
+    # JwtAuth (RequestId 셋팅 이후, ConsentGate 이전)
+    app.add_middleware(JwtAuthMiddleware)
+    # RequestId (가장 안쪽, 모든 응답에 적용)
+    app.add_middleware(RequestIdMiddleware)
 
-    # --- X-Request-Id skeleton (Phase 0b 가 echo + structlog binding 추가) ---
-    @app.middleware("http")
-    async def request_id_middleware(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        return await call_next(request)
+    # === Exception handlers ===
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
-    # --- Routers ---
+    # === Routers ===
     app.include_router(auth_router)
     app.include_router(consent_router)
     app.include_router(onboarding_router)
@@ -77,6 +101,11 @@ def create_app() -> FastAPI:
     app.include_router(recommendation_router)
     app.include_router(document_router)
     app.include_router(admin_router)
+
+    # === Health ===
+    @app.get("/health", tags=["health"], summary="헬스 체크")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
 
     return app
 

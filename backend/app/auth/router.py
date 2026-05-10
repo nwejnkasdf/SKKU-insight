@@ -1,12 +1,24 @@
-"""auth router — Phase 0a stub.
+"""auth router — Phase 0b A2 본문.
 
-모든 endpoint body 는 NotImplementedError. Phase 0b A2 가 본문 구현.
-docs: api/auth.md, security/auth-flow.md, security/token-handling.md, security/password-policy.md.
+5 endpoint: signup / login / refresh / logout / me.
+rate limit 은 docs/security/rate-limiting.md + env-vars.md 정확값.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from typing import Annotated
 
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.db.models import User
+from app.db.session import get_session
+from app.redis import get_redis
+from app.security.deps import get_current_user
+from app.security.rate_limit import limiter
+
+from . import service
 from .schemas import (
     LoginRequest,
     MeResponse,
@@ -19,15 +31,27 @@ from .schemas import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _redis_default() -> aioredis.Redis:
+    return get_redis("default")
+
+
+_settings = get_settings()
+
+
 @router.post(
     "/signup",
     status_code=status.HTTP_201_CREATED,
     response_model=SignupResponse,
     summary="회원가입 (FR-01)",
 )
-async def signup(req: SignupRequest) -> SignupResponse:
-    """회원가입. NFR-15·16·17, password-policy.md 룰 적용."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit(_settings.RATE_LIMIT_SIGNUP)
+async def signup_endpoint(
+    request: Request,
+    req: SignupRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SignupResponse:
+    """회원가입. NFR-15·16·17 + password-policy.md + email 정규화 3겹."""
+    return await service.signup(req, request=request, db=db)
 
 
 @router.post(
@@ -35,9 +59,14 @@ async def signup(req: SignupRequest) -> SignupResponse:
     response_model=TokenPair,
     summary="로그인 (FR-02)",
 )
-async def login(req: LoginRequest) -> TokenPair:
+@limiter.limit(_settings.RATE_LIMIT_LOGIN)
+async def login_endpoint(
+    request: Request,
+    req: LoginRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> TokenPair:
     """이메일·비밀번호 로그인. rate limit 5/분/IP."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+    return await service.login(req, request=request, db=db, redis=_redis_default())
 
 
 @router.post(
@@ -45,9 +74,13 @@ async def login(req: LoginRequest) -> TokenPair:
     response_model=TokenPair,
     summary="액세스 토큰 갱신",
 )
-async def refresh(req: RefreshRequest) -> TokenPair:
-    """refresh token 으로 새 access token 발급. token-handling.md §refresh."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit("60/hour")
+async def refresh_endpoint(
+    request: Request,
+    req: RefreshRequest,
+) -> TokenPair:
+    """refresh rotation. HMAC :rotated 마커 family revoke (decision-backlog C-6)."""
+    return await service.refresh(req, request=request, redis=_redis_default())
 
 
 @router.post(
@@ -55,9 +88,11 @@ async def refresh(req: RefreshRequest) -> TokenPair:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="로그아웃",
 )
-async def logout() -> Response:
-    """refresh token 폐기 + access token jti deny-list (15m TTL)."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit("30/minute")
+async def logout_endpoint(request: Request) -> Response:
+    """현재 access jti 를 denylist 에 추가 (잔여 access TTL)."""
+    await service.logout(request=request, redis=_redis_default())
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
@@ -65,6 +100,11 @@ async def logout() -> Response:
     response_model=MeResponse,
     summary="자기 정보 조회",
 )
-async def me() -> MeResponse:
+@limiter.limit(_settings.RATE_LIMIT_DEFAULT)
+async def me_endpoint(
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> MeResponse:
     """현재 사용자 프로필. consent_active + onboarding_complete 포함."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+    return await service.me(user=user, db=db, redis=_redis_default())

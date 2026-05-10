@@ -59,15 +59,56 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("lifespan shutdown ok")
 
 
+# codex v2 #1: .env.example placeholder 가 길이만 통과해 운영자가 미교체 시
+# 공개 HS256 키로 서명 — 토큰 위조 가능. 명시 차단 리스트 + prefix 패턴 차단.
+_JWT_SECRET_PLACEHOLDERS = frozenset(
+    {
+        "change-this-to-64-char-random-secret-please-do-not-leave-default-here",
+        "change-me",
+        "changeme",
+        "your-secret-here",
+        "placeholder",
+        "secret",
+    }
+)
+_JWT_SECRET_BAD_PREFIXES = ("change-this-to-", "your-secret-", "example-")
+_POSTGRES_PASSWORD_PLACEHOLDERS = frozenset(
+    {
+        "changeme-strong-password",
+        "changeme",
+        "change-me",
+        "password",
+        "postgres",
+        "placeholder",
+    }
+)
+
+
 def _validate_secrets(jwt_secret: str, postgres_password: str) -> None:
     if len(jwt_secret) < 32:
         raise RuntimeError(
             "JWT_SECRET 은 32자 이상이어야 합니다 (env-vars.md 권장 64+). "
             ".env 의 JWT_SECRET 을 확인하세요."
         )
+    jwt_lower = jwt_secret.lower()
+    if jwt_lower in _JWT_SECRET_PLACEHOLDERS:
+        raise RuntimeError(
+            "JWT_SECRET 이 .env.example placeholder 값입니다 — 실제 운영 secret 으로 "
+            "교체하세요 (64+ 자 random)."
+        )
+    for prefix in _JWT_SECRET_BAD_PREFIXES:
+        if jwt_lower.startswith(prefix):
+            raise RuntimeError(
+                f"JWT_SECRET 이 template placeholder 패턴입니다 — '{prefix}...' 로 "
+                "시작하는 값은 모두 차단됨. 실제 운영 secret 으로 교체하세요."
+            )
     if not postgres_password.strip():
         raise RuntimeError(
             "POSTGRES_PASSWORD 가 비어 있습니다. .env 를 확인하세요."
+        )
+    if postgres_password.lower() in _POSTGRES_PASSWORD_PLACEHOLDERS:
+        raise RuntimeError(
+            "POSTGRES_PASSWORD 가 placeholder 값입니다 — 실제 운영 secret 으로 교체."
         )
 
 

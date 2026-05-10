@@ -155,7 +155,8 @@ async def request_account_deletion(
     worker function 본문은 backend/app/worker/jobs/account_deletion.py.
     """
     _ = payload  # reason 은 worker 로 그대로 전달 — 현재는 사용 안 함
-    lock_key = f"account_deletion:{user.user_id}"
+    # codex v2 #2: JwtAuthMiddleware 가 본 lock 존재 시 access 차단 (deletion gate).
+    lock_key = RedisKey.account_deletion_pending(user.user_id)
     locked = await redis.set(lock_key, "1", nx=True, ex=ACCOUNT_DELETION_LOCK_TTL)
     if not locked:
         raise _http_error(

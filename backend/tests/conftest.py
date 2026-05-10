@@ -83,15 +83,31 @@ async def db_engine() -> AsyncIterator[AsyncEngine]:
             await conn.exec_driver_sql('CREATE DATABASE insight_test')
     await admin_engine.dispose()
 
-    # Alembic migrate
-    from alembic import command
-    from alembic.config import Config
+    # codex v2 #6 → C-26: alembic env.py 의 online path 가 asyncio.run() 호출 —
+    # pytest 의 running loop 안에서 직접 호출하면 RuntimeError. subprocess 로 분리해
+    # 자체 이벤트 루프에서 실행.
+    import subprocess
+    import sys
 
     backend_dir = Path(__file__).parent.parent
-    cfg = Config(str(backend_dir / "alembic.ini"))
-    cfg.set_main_option("script_location", str(backend_dir / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
-    command.upgrade(cfg, "head")
+    result_cmd = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=backend_dir,
+        env={
+            **os.environ,
+            "DATABASE_URL": settings.DATABASE_URL,
+            "PYTHONIOENCODING": "utf-8",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result_cmd.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade failed (exit={result_cmd.returncode})\n"
+            f"stdout:\n{result_cmd.stdout}\n"
+            f"stderr:\n{result_cmd.stderr}"
+        )
 
     engine = create_async_engine(settings.DATABASE_URL, pool_size=2, max_overflow=2)
     yield engine
@@ -137,12 +153,16 @@ async def redis_client() -> AsyncIterator[aioredis.Redis]:
 async def client(
     db_engine: AsyncEngine, redis_client: aioredis.Redis
 ) -> AsyncIterator[AsyncClient]:
-    """app.main:app 의 ASGI transport. lifespan 은 fixture 가 직접 init/dispose
-    하므로 ASGITransport 의 lifespan='off' 사용."""
+    """app.main:app 의 ASGI transport.
+
+    codex v2 #7 → C-27: httpx>=0.27 의 ASGITransport 는 `lifespan` 인자 미지원
+    (lifespan 처리를 외부 manager 로 분리). conftest 는 fixture 가 직접 DB/Redis
+    init/dispose 하므로 lifespan 자체 미실행 — 별도 manager 불필요.
+    """
     from app.main import create_app
 
     app = create_app()
-    transport = ASGITransport(app=app, lifespan="off")
+    transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as ac:

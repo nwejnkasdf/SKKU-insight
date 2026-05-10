@@ -53,11 +53,26 @@ def create_app() -> FastAPI:
     # slowapi rate limit — 앱에 limiter 바인딩
     app.state.limiter = limiter
 
-    # === 미들웨어 (등록 역순으로 실행 — 마지막 등록이 가장 바깥) ===
-    # CORS (가장 바깥)
+    # === 미들웨어 ===
+    # Starlette 은 add_middleware 호출 순서의 *역순* 으로 wrap — 마지막 add 가 가장
+    # 바깥. codex v2 #4 → C-24: 인증 미들웨어가 401/403 반환 시에도 CORS 헤더가
+    # 응답에 포함되어야 브라우저/Electron 이 cross-origin 으로 응답 본문(ErrorResponse)
+    # 을 읽을 수 있다. 따라서 CORS 를 **가장 마지막** 에 add (가장 바깥).
+    #
+    # 등록 순서 (request 들어오는 순서로 안쪽→바깥):
+    #   RequestId → JwtAuth → ConsentGate → CORS (바깥)
+    #
+    # 즉 응답 시: CORS 가 먼저 wrap → JwtAuth 가 401 반환해도 CORS 가 헤더 추가.
     cors_origins = [
         o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()
     ]
+    # RequestId (가장 안쪽 — 모든 응답에 X-Request-Id, structlog binding)
+    app.add_middleware(RequestIdMiddleware)
+    # JwtAuth (Bearer + aud + denylist + deletion gate)
+    app.add_middleware(JwtAuthMiddleware)
+    # ConsentGate (personalization endpoint 보호)
+    app.add_middleware(ConsentGateMiddleware)
+    # CORS (가장 바깥 — 401/403 응답에도 CORS 헤더 적용)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -78,12 +93,6 @@ def create_app() -> FastAPI:
             "WWW-Authenticate",
         ],
     )
-    # ConsentGate (인증 통과 후)
-    app.add_middleware(ConsentGateMiddleware)
-    # JwtAuth (RequestId 셋팅 이후, ConsentGate 이전)
-    app.add_middleware(JwtAuthMiddleware)
-    # RequestId (가장 안쪽, 모든 응답에 적용)
-    app.add_middleware(RequestIdMiddleware)
 
     # === Exception handlers ===
     app.add_exception_handler(RequestValidationError, validation_exception_handler)

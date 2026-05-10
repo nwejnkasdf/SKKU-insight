@@ -135,60 +135,61 @@ async def post_interests(
         )
 
     request_id = uuid4()
-    try:
-        await redis.set(f"{lock_key}:request_id", str(request_id), ex=ONBOARDING_LOCK_TTL)
-        await redis.hset(
-            RedisKey.cold_start_status(request_id),
-            mapping={
-                "status": "queued",
-                "progress_percent": "0",
-                "dashboard_ready": "false",
-            },
-        )
-        await redis.expire(
-            RedisKey.cold_start_status(request_id), COLD_START_STATUS_TTL
-        )
-        await db.execute(
-            update(User).where(User.user_id == user.user_id).values(onboarding_complete=True)
-        )
-        await db.commit()
-        _enqueue_cold_start_job(
-            request_id=request_id,
-            user_id=user.user_id,
-            cluster_ids=payload.cso_cluster_ids,
-            user_class=payload.user_class.value,
-            locale=payload.locale,
-        )
+    # codex v2 #3 → C-23: 기존 finally 가 lock 즉시 삭제 → cold-start job 큐잉 중
+    # 동일 사용자 재호출 시 중복 enqueue. 본 패치는 lock 을 TTL 30s 자연 만료에 위임
+    # — cold-start orchestrator (A8) 가 완료 시 명시 DEL 추가 가능. lock 키가 살아
+    # 있는 동안 다음 POST 는 진행 중 request_id 회귀 응답.
+    await redis.set(f"{lock_key}:request_id", str(request_id), ex=ONBOARDING_LOCK_TTL)
+    await redis.hset(
+        RedisKey.cold_start_status(request_id),
+        mapping={
+            "status": "queued",
+            "progress_percent": "0",
+            "dashboard_ready": "false",
+        },
+    )
+    await redis.expire(
+        RedisKey.cold_start_status(request_id), COLD_START_STATUS_TTL
+    )
+    await db.execute(
+        update(User).where(User.user_id == user.user_id).values(onboarding_complete=True)
+    )
+    await db.commit()
+    _enqueue_cold_start_job(
+        request_id=request_id,
+        user_id=user.user_id,
+        cluster_ids=payload.cso_cluster_ids,
+        user_class=payload.user_class.value,
+        locale=payload.locale,
+    )
 
-        # Prefer: respond=sync 8s 폴링
-        if prefer_sync:
-            for _ in range(int(PREFER_SYNC_TIMEOUT_SECONDS / PREFER_SYNC_POLL_INTERVAL)):
-                await asyncio.sleep(PREFER_SYNC_POLL_INTERVAL)
-                status_value = await redis.hget(
-                    RedisKey.cold_start_status(request_id), "status"
+    # Prefer: respond=sync 8s 폴링
+    if prefer_sync:
+        for _ in range(int(PREFER_SYNC_TIMEOUT_SECONDS / PREFER_SYNC_POLL_INTERVAL)):
+            await asyncio.sleep(PREFER_SYNC_POLL_INTERVAL)
+            status_value = await redis.hget(
+                RedisKey.cold_start_status(request_id), "status"
+            )
+            if status_value in ("completed", "failed"):
+                response = _build_response(request_id, status_value)
+                await store_idempotent_response(
+                    "onboarding",
+                    user.user_id,
+                    idempotency_key,
+                    response.model_dump(mode="json"),
+                    redis,
                 )
-                if status_value in ("completed", "failed"):
-                    response = _build_response(request_id, status_value)
-                    await store_idempotent_response(
-                        "onboarding",
-                        user.user_id,
-                        idempotency_key,
-                        response.model_dump(mode="json"),
-                        redis,
-                    )
-                    return response
+                return response
 
-        response = _build_response(request_id, "queued")
-        await store_idempotent_response(
-            "onboarding",
-            user.user_id,
-            idempotency_key,
-            response.model_dump(mode="json"),
-            redis,
-        )
-        return response
-    finally:
-        await redis.delete(lock_key)
+    response = _build_response(request_id, "queued")
+    await store_idempotent_response(
+        "onboarding",
+        user.user_id,
+        idempotency_key,
+        response.model_dump(mode="json"),
+        redis,
+    )
+    return response
 
 
 async def put_interests(

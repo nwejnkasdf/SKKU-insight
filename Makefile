@@ -35,7 +35,9 @@ reset-password:
 	docker compose exec api python -m scripts.reset_password --email "$(EMAIL)" --new-password "$(NEW)"
 
 test:
-	docker compose exec -e TESTING=1 api pytest backend/tests -v
+	# codex v2 #8 → C-28: container 의 WORKDIR=/app 이고 Dockerfile 이 backend
+	# context 를 직접 /app 으로 COPY → 컨테이너 안 path 는 /app/tests (backend/tests X).
+	docker compose exec -e TESTING=1 api pytest tests -v
 
 lint:
 	docker compose exec api ruff check app/ scripts/

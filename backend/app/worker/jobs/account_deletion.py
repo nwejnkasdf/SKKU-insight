@@ -60,8 +60,9 @@ def delete_user_account(user_id_str: str, reason: str | None = None) -> None:
             RedisKey.collection_lock(user_id),
             RedisKey.recommendation_build_lock(user_id),
             RedisKey.event_buffer(user_id),
-            # consent.service lock — RedisKey 외 키 (EXPLICIT_ALLOWED_KEYS, P0 후 contracts.py 정식화 검토)
-            f"account_deletion:{user_id}",
+            # codex v2 #2 → C-22: worker 완료 시점에 deletion lock 도 명시 DEL
+            # (JwtAuthMiddleware deletion gate 가 본 lock 으로 차단하므로).
+            RedisKey.account_deletion_pending(user_id),
         ]
         for key in exact_keys:
             redis_conn.delete(key)

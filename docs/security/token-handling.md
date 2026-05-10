@@ -190,6 +190,22 @@ body 가 비어 있으면 access 만 폐기되고 refresh 는 유지 — **보�
 
 worker 가 사용자 삭제 시 `refresh_index:*` 전역 SCAN/DEL 하면 **다른 모든 사용자의 index 까지 삭제** → 다른 사용자 강제 로그아웃. 따라서 worker 는 `refresh:{user_id}:*` 만 namespace SCAN. `refresh_index:{HMAC}` 키는 단방향 HMAC 이라 user 로 prefix 잡기 불가 — TTL 14d 만료에 위임 + 다음 refresh 시도 시 meta 가 이미 삭제됐으므로 family revoke 트리거.
 
+### Deletion gate — access 토큰 차단 (codex review C-23)
+
+`/consent/account-deletion` 202 응답 후 worker 가 DB row 삭제 전까지 access JWT 는 잔여 TTL (≤15분) 동안 유효 → 사용자가 personalization API 계속 호출 가능. **JwtAuthMiddleware 가 `RedisKey.account_deletion_pending(user_id)` 존재 시 access 차단** (`user` audience 한정 — admin endpoint 는 별도 흐름).
+
+```python
+# app/middleware/jwt_auth.py (요지)
+if sub_str and expected_aud == TokenAudience.USER:
+    user_uuid = UUID(sub_str)
+    if await redis.exists(RedisKey.account_deletion_pending(user_uuid)):
+        return 401 + ErrorCode.CONSENT_DELETION_IN_PROGRESS
+```
+
+- lock 은 `consent.service.request_account_deletion` 가 SET (TTL 600s)
+- worker 가 row 삭제 + Redis 정리 완료 시 명시 DEL
+- 시연 중 사용자는 deletion 진행 동안 401 받음 → 클라이언트는 로그아웃 처리
+
 ## Access 토큰 denylist
 
 로그아웃 시 access의 `jti`를 SET 추가. TTL = 남은 만료 시간. 미들웨어가 매 호출 때 체크.

@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
+from uuid import UUID
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from jose import ExpiredSignatureError, JWTError
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.contracts import ErrorCode, ErrorResponse, TokenAudience
+from app.contracts import ErrorCode, ErrorResponse, RedisKey, TokenAudience
 from app.redis import get_redis
 from app.security.jwt import decode_access, is_jti_denylisted
 
@@ -81,7 +82,26 @@ class JwtAuthMiddleware(BaseHTTPMiddleware):
                 "토큰이 폐기되었습니다.",
             )
 
-        request.state.user_id = str(payload.get("sub", ""))
+        sub_str = str(payload.get("sub", ""))
+        # codex v2 #2 → C-22: account deletion 진행 중인 user 의 access 차단.
+        # endpoint 가 202 반환 후 worker 가 row delete 하기 전까지 access TTL (15m)
+        # 동안 유효해 personalization API 호출 가능했음 — 본 gate 가 차단.
+        # /admin/* 은 별도 권한 흐름이므로 user audience 만 검사.
+        if sub_str and expected_aud == TokenAudience.USER:
+            try:
+                user_uuid = UUID(sub_str)
+                if await redis.exists(
+                    RedisKey.account_deletion_pending(user_uuid)
+                ):
+                    return _unauthorized(
+                        request,
+                        ErrorCode.CONSENT_DELETION_IN_PROGRESS,
+                        "계정 삭제가 진행 중입니다. 모든 세션이 곧 종료됩니다.",
+                    )
+            except ValueError:
+                pass
+
+        request.state.user_id = sub_str
         request.state.aud = str(payload.get("aud", ""))
         request.state.jti = jti
         request.state.exp = payload.get("exp")

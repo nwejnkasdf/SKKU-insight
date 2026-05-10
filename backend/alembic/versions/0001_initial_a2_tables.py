@@ -249,6 +249,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("name", name="uq_source_name"),
     )
     # sentinel `cold_start_pseudo` 1행 시드 — cold-start pseudo Document FK 충족용.
+    # codex v2 #5 → C-25: JSONB 컬럼은 str "{}" 가 아닌 dict {} 로 전달해야
+    # SQLAlchemy bind processor 가 JSON object 로 직렬화. str 은 JSON 문자열
+    # ('"{}"') 로 저장돼 `extra.get(...)` 시 AttributeError.
     op.bulk_insert(
         source_table,
         [
@@ -259,7 +262,7 @@ def upgrade() -> None:
                 "url": "internal://cold-start-pseudo",
                 "trust_level": "low",
                 "enabled": False,
-                "extra": "{}",
+                "extra": {},
             }
         ],
     )
@@ -283,6 +286,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("source_category", name="uq_source_policy_category"),
     )
+    # JSONB seed 는 dict {} 사용 (codex v2 #5 → C-25).
     op.bulk_insert(
         source_policy_table,
         [
@@ -290,21 +294,21 @@ def upgrade() -> None:
                 "policy_id": "00000000-0000-0000-0000-000000000010",
                 "source_category": "academic",
                 "trust_level": "high",
-                "collection_rule": "{}",
+                "collection_rule": {},
                 "enabled": True,
             },
             {
                 "policy_id": "00000000-0000-0000-0000-000000000011",
                 "source_category": "vendor_blog",
                 "trust_level": "high",
-                "collection_rule": "{}",
+                "collection_rule": {},
                 "enabled": True,
             },
             {
                 "policy_id": "00000000-0000-0000-0000-000000000012",
                 "source_category": "tech_news",
                 "trust_level": "medium",
-                "collection_rule": "{}",
+                "collection_rule": {},
                 "enabled": True,
             },
         ],

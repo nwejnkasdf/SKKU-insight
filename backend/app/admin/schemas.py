@@ -45,6 +45,12 @@ class AdminRefreshRequest(BaseModel):
     refresh_token: str
 
 
+class AdminLogoutRequest(BaseModel):
+    """로그아웃 시 admin refresh token 함께 폐기 (codex C-2). access jti 는 Bearer 에서 추출."""
+
+    refresh_token: str | None = None
+
+
 class AdminMeResponse(BaseModel):
     """admin 자기 정보 (admin.md schema 정의됨, endpoint 는 Phase 0b 에서 추가 검토)."""
 
@@ -197,6 +203,7 @@ __all__ = [
     "AdminEventView",
     "AdminInterestTopicView",
     "AdminLoginRequest",
+    "AdminLogoutRequest",
     "AdminMeResponse",
     "AdminRefreshRequest",
     "AdminTokenPair",

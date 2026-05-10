@@ -46,6 +46,11 @@ class TokenPair(BaseModel):
 class RefreshRequest(BaseModel):
     refresh_token: str
 
+class LogoutRequest(BaseModel):
+    # 로그아웃 시 refresh token 도 함께 전달해 폐기 (codex C-2, decision-backlog C-13).
+    # body 가 없으면 access 만 denylist 되고 refresh 는 보안상 함께 만료시키지 못함.
+    refresh_token: str | None = None
+
 class MeResponse(BaseModel):
     user_id: UUID
     email: EmailStr
@@ -80,7 +85,7 @@ class ErrorResponse(BaseModel):
 - **Email 정규화 3겹**: 모든 endpoint(signup/login/me)의 email 필드는 `email.strip().lower()` 정규화 후 처리·저장. 클라이언트가 `Test@TEST.com` 보내도 백엔드는 `test@test.com`으로 통일. 1) Pydantic validator(요청 경계) + 2) service 계층(방어적) + 3) DB functional index `LOWER(email)` partial UNIQUE — 3겹 ([`../security/auth-flow.md`](../security/auth-flow.md), [`../data/schema.md`](../data/schema.md) User).
 - 신규 가입 시 UserConsent는 별도 `/consent` 호출로 등록한다 (FR-05, FR-11).
 - 로그인 성공 시 `last_login_at` 갱신.
-- 로그아웃은 Redis의 `refresh:{user_id}:{jti}` 키를 삭제. access_token의 `jti`는 deny-list에 짧게 추가 (15분 TTL).
+- 로그아웃: access_token 의 `jti` 를 deny-list 에 추가 (잔여 access TTL) + body 로 받은 `refresh_token` 도 함께 폐기 (HMAC index 값을 `:revoked` 로 OVERWRITE + meta `active='0'`). body 없으면 access 만 폐기되고 refresh 는 보안 결함이므로 클라이언트는 항상 refresh body 전달 권장.
 - **Refresh replay 감지**: 회전된 토큰 재사용 시 user의 모든 refresh family revoke (HMAC `:rotated` 마커 패턴, [`../security/token-handling.md`](../security/token-handling.md)).
 - 모든 응답은 `X-Request-Id` 헤더 포함 (구조화 로그 상관관계용).
 

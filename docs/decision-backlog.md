@@ -39,6 +39,13 @@
 | C-9. /admin/users 마스킹 1글자 local part 처리 | 길이≥2: 첫·마지막 글자 유지 + `***`. 길이=1: 전체 마스킹 fallback `***@domain`. | [`api/admin.md`](api/admin.md) 비즈니스 룰 |
 | C-10. User.last_login_at 컬럼이 schema.md User 정의에 누락 (auth-flow.md / api/auth.md 는 갱신 명시) | `last_login_at: DateTime(timezone=True), nullable=True` 컬럼 추가. auth/service.login 이 UPDATE. A2 자체 검수에서 발견. | [`data/schema.md`](data/schema.md) User |
 | C-11. passlib + bcrypt 4.x 호환성 깨짐 | passlib 1.7.4 가 bcrypt 4.x 의 `__about__` 제거·72byte ValueError 처리 못 함. `passlib` 의존 제거 + `bcrypt` 직접 호출 + SHA-256 hex pre-hash 패턴 (64 ASCII bytes — 72 한도 + null 회피). UTF-8 한국어 128자 정책 보장. A2 자체 검수에서 발견. | [`security/password-policy.md`](security/password-policy.md) §저장 |
+| C-12. UserCSOTraversal `array_length(path,1)>=1` CHECK 가 빈 배열 우회 | PostgreSQL `array_length('{}'::uuid[],1)=NULL` 이고 CHECK NULL 통과 → `{}` 저장 가능. `cardinality(path)>=1` 으로 교체 (빈 배열 0 반환). codex review (A2 self-review 후) 에서 발견. | [`data/schema.md`](data/schema.md) UserCSOTraversal, 0001 migration |
+| C-13. logout 시 refresh token 폐기 누락 | `/auth/logout`·`/admin/auth/logout` 이 access jti 만 denylist, refresh 메타는 active 유지 → 탈취 refresh 로 새 access 발급 가능. `LogoutRequest.refresh_token` body 도입 + `revoke_refresh_by_token()` 신규(`:revoked` 마커). codex review C-2. | [`api/auth.md`](api/auth.md) §비즈니스 룰, [`api/admin.md`](api/admin.md) `AdminLogoutRequest`, [`security/token-handling.md`](security/token-handling.md) |
+| C-14. `must_change_password=true` admin 의 다른 API 차단 부재 | `get_current_admin` 이 must_change_password 상태도 통과시켜 `/admin/users` 호출 가능. admin-bootstrap.md 와 명세 불일치. 가드: change-password/logout 외 경로는 409 `admin.must_change_password`. codex review C-4. | [`api/admin.md`](api/admin.md) §비즈니스 룰, `app/security/deps.py:get_current_admin` |
+| C-15. refresh rotation race (read-then-write) | 동일 token 동시 2 refresh 요청 → 둘 다 active pointer 인식 → 양쪽 모두 새 token 발급 → family revoke 무력화. Redis Lua 스크립트로 GET+상태 확인+`:rotated` 전이+meta active='0' 셋팅을 atomic CAS. codex review C-7 (P2 였으나 사용자 결정으로 P0 처리). | [`security/token-handling.md`](security/token-handling.md), `app/security/jwt.py:_LUA_VERIFY_AND_MARK_ROTATED` |
+| C-16. account_deletion worker 가 `refresh_index:*` 전역 SCAN/DEL | 한 사용자 삭제 시 모든 사용자 refresh_index 삭제 → 다른 사용자 강제 로그아웃. SCAN 패턴 제거 + 본 사용자 namespace 만 정리(`refresh:{user_id}:*` + `idemp:onboarding:{user_id}:*`). refresh_index 는 TTL 14d 만료에 위임. codex review C-1. | `app/worker/jobs/account_deletion.py` |
+| C-17. admin pagination Python tuple 비교 런타임 에러 | `(User.created_at, User.user_id) < (ts, uid)` 가 Python tuple comparison 으로 평가돼 SQLAlchemy 표현식 boolean 평가 → TypeError → 2페이지 cursor 호출 실패. `tuple_(...)` SQL helper 사용으로 row-comparison SQL 생성. codex review C-6. | `app/admin/users_service.py:list_users` |
+| C-18. `/admin/auth/refresh` JwtAuthMiddleware 화이트리스트 누락 | refresh endpoint 가 인증 필요로 처리돼 access 만료 후 갱신 불가. `/auth/refresh` 와 동일하게 우회. codex review C-3. | `app/middleware/jwt_auth.py:WHITELIST_PATTERNS` |
 
 ---
 
@@ -137,7 +144,7 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
 | P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별) | 11 (해결 11 — C-2 부분 해소, C-6~11 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 단계 + 자체 검수에서 6건 해결 |
+| C-급 (인터뷰 식별 + codex review) | 18 (해결 18 — C-2 부분 해소, C-6~18 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex review 로 13건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 

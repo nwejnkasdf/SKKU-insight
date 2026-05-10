@@ -66,12 +66,14 @@ def delete_user_account(user_id_str: str, reason: str | None = None) -> None:
         for key in exact_keys:
             redis_conn.delete(key)
 
-        # SCAN 패턴 — refresh:{user_id}:{jti} 의 모든 jti 매치, idempotency 등.
-        # RedisKey 가 prefix 매처를 노출하지 않으므로 raw pattern 사용 (SCAN 와일드카드는
-        # SOR 룰의 정확 키 생성 범위 외 — check_redis_keys 가 wildcard 포함 패턴 무시).
+        # SCAN 패턴 — user_id namespace 안의 와일드카드만 사용 (전역 prefix SCAN 금지).
+        # `refresh_index:{HMAC}` 키는 단방향 HMAC 이라 user_id 로 prefix 가 안 잡힘.
+        # 절대 전역 `refresh_index:*` SCAN 사용 금지 — 다른 사용자 index 까지 모두
+        # 삭제돼 모든 사용자가 강제 로그아웃 됨 (codex review 2026-05-11 C-1).
+        # 결과적으로 본 사용자의 refresh_index 항목은 TTL 14d 자연 만료에 위임.
+        # 다음 verify_refresh 호출 시 meta hash 가 이미 삭제됐으므로 family revoke 트리거.
         scan_patterns = [
             f"refresh:{user_id}:*",
-            "refresh_index:*",  # 인덱스는 단방향 HMAC — TTL 14d 자연 만료에 위임
             f"idemp:onboarding:{user_id}:*",
         ]
         for pattern in scan_patterns:

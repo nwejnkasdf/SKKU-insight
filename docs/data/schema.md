@@ -153,7 +153,7 @@ class UserCSOTraversal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 ```
 
-CHECK (`status IN ('active','stale','archived')`). CHECK (`array_length(path, 1) >= 1`). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용). path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
+CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용). path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
 
 > **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3.
 

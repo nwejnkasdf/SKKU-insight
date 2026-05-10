@@ -21,6 +21,7 @@ from app.security.rate_limit import limiter
 from . import service
 from .schemas import (
     LoginRequest,
+    LogoutRequest,
     MeResponse,
     RefreshRequest,
     SignupRequest,
@@ -89,9 +90,12 @@ async def refresh_endpoint(
     summary="로그아웃",
 )
 @limiter.limit("30/minute")
-async def logout_endpoint(request: Request) -> Response:
-    """현재 access jti 를 denylist 에 추가 (잔여 access TTL)."""
-    await service.logout(request=request, redis=_redis_default())
+async def logout_endpoint(
+    request: Request,
+    payload: LogoutRequest | None = None,
+) -> Response:
+    """access jti denylist + body 의 refresh token 도 함께 폐기 (codex C-2)."""
+    await service.logout(payload, request=request, redis=_redis_default())
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import AdminRole, PagedResponse, PageMeta, RedisKey
@@ -64,8 +64,10 @@ async def list_users(
         decoded = _decode_cursor(cursor)
         if decoded:
             ts, uid = decoded
+            # codex C-6: Python tuple 비교가 먼저 발생해 SQLAlchemy 표현식의 truth value
+            # 평가로 이어지면 TypeError. tuple_() SQL helper 사용으로 SQL row-comparison.
             stmt = stmt.where(
-                (User.created_at, User.user_id) < (ts, uid)  # tuple comparison
+                tuple_(User.created_at, User.user_id) < tuple_(ts, uid)
             )
     stmt = stmt.limit(limit + 1)  # +1 has_more 검출
     rows = list((await db.execute(stmt)).scalars().all())

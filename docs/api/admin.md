@@ -83,6 +83,13 @@ class ChangeAdminPasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+class AdminRefreshRequest(BaseModel):
+    refresh_token: str
+
+class AdminLogoutRequest(BaseModel):
+    # codex C-2: 로그아웃 시 admin refresh token 함께 폐기 (decision-backlog C-13).
+    refresh_token: str | None = None
+
 # === 수집 (관리자 전용 — collection.md 의 사용자용 schema 와 별도) ===
 
 class ReprocessRequestPayload(BaseModel):
@@ -192,6 +199,7 @@ class AdminInterestTopicView(BaseModel):
 
 - 모든 `/admin/*` 응답은 `aud="admin"` 클레임 검증 (FR-60). 일반 사용자 토큰 → 403 즉시.
 - 부트스트랩 admin은 첫 로그인 시 `must_change_password=true`로 강제 비번 변경.
+- **`must_change_password=true` 인 admin 의 `/admin/*` 호출은 409 `admin.must_change_password` 로 차단** (codex C-4, decision-backlog C-14). 예외 경로: `/admin/auth/change-password` + `/admin/auth/logout` 두 endpoint 만 통과. 비번 변경 후 `must_change_password=false` 로 갱신되면 다른 admin API 사용 가능.
 - **`/admin/users` 응답의 email 마스킹 정확 규칙** (NFR-04):
   - `super` 권한: 전체 email 원문 그대로 노출
   - `operator` / `read_only` 권한: local part 길이에 따라

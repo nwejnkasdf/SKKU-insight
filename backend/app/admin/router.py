@@ -26,6 +26,7 @@ from . import auth_service, users_service
 from .schemas import (
     AdminEventView,
     AdminLoginRequest,
+    AdminLogoutRequest,
     AdminRefreshRequest,
     AdminTokenPair,
     AdminUserInterestState,
@@ -99,9 +100,13 @@ async def admin_refresh_endpoint(
 async def admin_logout_endpoint(
     request: Request,
     admin: Annotated[AdminUser, Depends(get_current_admin)],
+    payload: AdminLogoutRequest | None = None,
 ) -> Response:
-    _ = admin  # auth 미들웨어가 이미 jti 셋팅
-    await auth_service.admin_logout(request=request, redis=_redis_default())
+    _ = admin  # auth 미들웨어가 이미 jti 셋팅 + get_current_admin 가 must_change_password 예외 처리
+    refresh_token = payload.refresh_token if payload else None
+    await auth_service.admin_logout(
+        request=request, redis=_redis_default(), refresh_token=refresh_token
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

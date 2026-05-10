@@ -144,6 +144,42 @@ async def revoke_all_user_refresh(user_id: str, redis):
 
 **핵심:** opaque token에서 user_id 직접 추출 불가. HMAC index가 유일한 역추적 경로이므로 회전 시 삭제 대신 `:rotated` 마킹으로 보존. 동일 user의 정상 refresh family는 별도 active index/메타로 관리되므로 영향 0.
 
+### 동시 rotation race 차단 (codex review C-7 → C-15)
+
+위 Python pseudo-code 는 read-then-write 패턴 — 동일 token 의 동시 2 refresh 요청이 모두 active pointer 를 본 뒤 각자 새 token 을 발급할 수 있다 (family revoke 무력화).
+
+**실제 구현은 Redis Lua 스크립트로 atomic CAS**:
+
+```lua
+-- KEYS[1] = refresh_index:{HMAC}, KEYS[2] = refresh:{user_id}:{jti} 메타
+-- ARGV[1] = "{user_id}:{jti}:rotated"
+local pointer = redis.call('GET', KEYS[1])
+if not pointer then return {'miss', false} end
+local state = pointer 의 마지막 segment
+if state ~= 'active' then return {'replay', pointer} end
+if redis.call('HGET', KEYS[2], 'active') ~= '1' then return {'replay', pointer} end
+-- atomic transition
+redis.call('SET', KEYS[1], ARGV[1], 'EX', TTL)
+redis.call('HSET', KEYS[2], 'active', '0')
+return {'ok', pointer}
+```
+
+Redis 는 Lua 를 단일 thread 로 실행하므로 동시 2 호출 중 한 호출만 `'ok'`, 다른 호출은 `'replay'` 받아 family revoke. 구현체는 `backend/app/security/jwt.py:_LUA_VERIFY_AND_MARK_ROTATED`.
+
+### Logout 시 refresh 폐기 (codex review C-2 → C-13)
+
+`/auth/logout` (및 `/admin/auth/logout`) 요청 body 에 `refresh_token` 도 포함해야 한다. server 는:
+
+1. access jti 를 `jwt_denylist:{jti}` 에 추가 (잔여 TTL)
+2. body 의 refresh token HMAC index 를 GET → user_id/jti 추출
+3. index 값을 `:revoked` 로 OVERWRITE (TTL 유지) + meta `active='0'`
+
+body 가 비어 있으면 access 만 폐기되고 refresh 는 유지 — **보안 결함이므로 클라이언트는 항상 refresh body 전달 권장**. 구현체는 `backend/app/security/jwt.py:revoke_refresh_by_token`.
+
+### Account deletion worker 의 refresh_index 처리 (codex review C-1 → C-16)
+
+worker 가 사용자 삭제 시 `refresh_index:*` 전역 SCAN/DEL 하면 **다른 모든 사용자의 index 까지 삭제** → 다른 사용자 강제 로그아웃. 따라서 worker 는 `refresh:{user_id}:*` 만 namespace SCAN. `refresh_index:{HMAC}` 키는 단방향 HMAC 이라 user 로 prefix 잡기 불가 — TTL 14d 만료에 위임 + 다음 refresh 시도 시 meta 가 이미 삭제됐으므로 family revoke 트리거.
+
 ## Access 토큰 denylist
 
 로그아웃 시 access의 `jti`를 SET 추가. TTL = 남은 만료 시간. 미들웨어가 매 호출 때 체크.

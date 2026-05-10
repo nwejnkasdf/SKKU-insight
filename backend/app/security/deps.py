@@ -80,6 +80,21 @@ async def get_current_admin(
             "관리자 권한이 필요합니다.",
             request_id=getattr(request.state, "request_id", None),
         )
+    # codex C-4: 부트스트랩 admin 의 must_change_password 강제 차단.
+    # 예외 경로: 비번 변경(/admin/auth/change-password) + 로그아웃(/admin/auth/logout).
+    # admin-bootstrap.md 가 다른 admin API 호출을 409 admin.must_change_password 로 막도록 명시.
+    if admin.must_change_password:
+        path = request.url.path.rstrip("/")
+        if path not in (
+            "/admin/auth/change-password",
+            "/admin/auth/logout",
+        ):
+            raise _http_error(
+                status.HTTP_409_CONFLICT,
+                ErrorCode.ADMIN_MUST_CHANGE_PASSWORD,
+                "관리자 첫 로그인 후 비밀번호를 변경해야 합니다.",
+                request_id=getattr(request.state, "request_id", None),
+            )
     return admin
 
 

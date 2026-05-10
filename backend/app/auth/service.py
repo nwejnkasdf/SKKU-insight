@@ -26,6 +26,7 @@ from app.security.jwt import (
     denylist_access,
     encode_access,
     issue_refresh,
+    revoke_refresh_by_token,
     revoke_refresh_jti,
     verify_refresh_and_rotate,
 )
@@ -38,6 +39,7 @@ from app.security.password import (
 
 from .schemas import (
     LoginRequest,
+    LogoutRequest,
     MeResponse,
     RefreshRequest,
     SignupRequest,
@@ -200,11 +202,16 @@ async def refresh(
 
 
 async def logout(
+    payload: LogoutRequest | None,
     *,
     request: Request,
     redis: aioredis.Redis,
 ) -> None:
-    """현재 access jti 를 denylist 에 + refresh jti 비활성."""
+    """현재 access jti 를 denylist 에 + 함께 전달된 refresh token 도 폐기 (codex C-2).
+
+    refresh_token 이 body 로 오면 그 토큰의 HMAC index 와 meta 모두 active='0' 으로 마킹.
+    body 없는 옛 클라이언트 호환: access 만 denylist (보안 경고 로그).
+    """
     user_id_str = getattr(request.state, "user_id", None)
     jti = getattr(request.state, "jti", None)
     exp = getattr(request.state, "exp", None)
@@ -213,14 +220,10 @@ async def logout(
         return
     ttl_remaining = max(0, int(exp) - int(time.time())) if exp else 0
     await denylist_access(jti, ttl_seconds=ttl_remaining, redis=redis)
-    user_id = UUID(user_id_str)
-    # access jti 와 refresh jti 는 다른 namespace 이지만, 단일 디바이스 로그아웃 시 같은
-    # 세션의 refresh 도 폐기되어야 함. access jti 와 매핑된 refresh jti 가 따로 없으므로
-    # 가장 최근 refresh 를 찾기 어렵다 → user 의 모든 refresh active="0" 마킹은 보수적.
-    # 1차 시연: refresh jti 동일하게 추적할 매핑 없음 → access 만 denylist + 다음 refresh
-    # 시도 시 verify_refresh_and_rotate 가 자연 family revoke.
-    # 향후 access JWT 클레임에 refresh_jti 추가 시 더 정밀하게 분리 가능.
-    _ = user_id  # 현재 사용 없음 — 향후 사용자 명시 logout-all 시 활용
+
+    if payload is not None and payload.refresh_token:
+        # 전달된 refresh 도 폐기 — index 를 `:revoked` 로 마킹 (TTL 유지) + meta active='0'.
+        await revoke_refresh_by_token(payload.refresh_token, redis)
 
 
 async def me(

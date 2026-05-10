@@ -57,6 +57,12 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    """로그아웃 시 refresh token 함께 폐기 (codex C-2). access jti 는 헤더의 Bearer 에서 추출."""
+
+    refresh_token: str | None = None
+
+
 class MeResponse(BaseModel):
     """`GET /auth/me` 응답."""
 

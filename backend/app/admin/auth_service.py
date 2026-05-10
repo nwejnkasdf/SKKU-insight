@@ -22,6 +22,7 @@ from app.security.jwt import (
     encode_access,
     issue_refresh,
     revoke_all_user_refresh,
+    revoke_refresh_by_token,
     verify_refresh_and_rotate,
 )
 from app.security.password import (
@@ -158,12 +159,16 @@ async def admin_logout(
     *,
     request: Request,
     redis: aioredis.Redis,
+    refresh_token: str | None = None,
 ) -> None:
+    """admin access jti denylist + body 의 refresh token 도 함께 폐기 (codex C-2)."""
     jti = getattr(request.state, "jti", None)
     exp = getattr(request.state, "exp", None)
     if jti:
         ttl_remaining = max(0, int(exp) - int(time.time())) if exp else 0
         await denylist_access(jti, ttl_seconds=ttl_remaining, redis=redis)
+    if refresh_token:
+        await revoke_refresh_by_token(refresh_token, redis)
 
 
 async def admin_change_password(

@@ -210,8 +210,10 @@ def upgrade() -> None:
             "status IN ('active','stale','archived')",
             name="ck_user_cso_traversal_status",
         ),
+        # codex C-5: array_length('{}'::uuid[], 1) 는 NULL → CHECK 가 NULL 통과시켜 빈
+        # 배열 저장 가능. cardinality(arr) 는 빈 배열에 0 반환 → NULL bypass 차단.
         sa.CheckConstraint(
-            "array_length(path, 1) >= 1",
+            "cardinality(path) >= 1",
             name="ck_user_cso_traversal_path_nonempty",
         ),
     )

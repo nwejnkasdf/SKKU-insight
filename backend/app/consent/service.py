@@ -8,6 +8,7 @@ account-deletion 은 RQ async + worker (decision-backlog C-2 부분 해소, A2 �
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
@@ -41,7 +42,7 @@ def _http_error(
     message: str,
     *,
     request: Request,
-    details: dict | None = None,
+    details: dict[str, Any] | None = None,
 ) -> HTTPException:
     request_id = getattr(request.state, "request_id", None)
     body = ErrorResponse(

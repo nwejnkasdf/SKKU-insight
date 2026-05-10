@@ -11,7 +11,7 @@ from scripts._common import repo_root, setup
 
 setup()
 
-from app.db import models  # noqa: F401  Base.metadata 등록
+from app.db import models  # noqa: E402, F401  Base.metadata 등록
 from app.db.base import Base  # noqa: E402
 
 SCHEMA_MD = repo_root() / "docs" / "data" / "schema.md"

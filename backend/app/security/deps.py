@@ -5,7 +5,7 @@ DB 에서 User/AdminUser 로드 + 추가 검증.
 """
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Any
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -41,7 +41,7 @@ async def get_current_user(
         )
     user_id = UUID(user_id_str)
     stmt = select(User).where(User.user_id == user_id, User.deleted_at.is_(None))
-    user = cast("User | None", (await db.execute(stmt)).scalars().first())
+    user = (await db.execute(stmt)).scalars().first()
     if user is None:
         raise _http_error(
             status.HTTP_401_UNAUTHORIZED,
@@ -70,9 +70,7 @@ async def get_current_admin(
     stmt = select(AdminUser).where(
         AdminUser.admin_id == admin_id, AdminUser.status == "active"
     )
-    admin = cast(
-        "AdminUser | None", (await db.execute(stmt)).scalars().first()
-    )
+    admin = (await db.execute(stmt)).scalars().first()
     if admin is None:
         raise _http_error(
             status.HTTP_403_FORBIDDEN,
@@ -142,7 +140,7 @@ def _http_error(
     message: str,
     *,
     request_id: str | None = None,
-    details: dict | None = None,
+    details: dict[str, Any] | None = None,
 ) -> HTTPException:
     """ErrorResponse 형식 HTTPException 생성."""
     body = ErrorResponse(

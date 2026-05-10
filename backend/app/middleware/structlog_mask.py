@@ -7,6 +7,7 @@ structlog.configure 의 processors 체인에 추가.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 MASK_KEYS = frozenset(
@@ -30,10 +31,14 @@ MASK_VALUE = "***MASKED***"
 
 
 def mask_secrets(
-    logger: Any, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
-    """structlog processor — event_dict 의 민감 키를 일괄 마스킹."""
-    return _mask_dict(event_dict)
+    logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> Mapping[str, Any]:
+    """structlog processor — event_dict 의 민감 키를 일괄 마스킹.
+
+    structlog 의 Processor 시그니처: `(WrappedLogger, str, MutableMapping[str,Any])
+    → Mapping[str,Any] | str | bytes | bytearray | tuple[...]`.
+    """
+    return _mask_dict(dict(event_dict))
 
 
 def _mask_dict(d: dict[str, Any]) -> dict[str, Any]:

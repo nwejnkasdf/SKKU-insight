@@ -65,6 +65,13 @@ disallow_untyped_decorators = false
 module = ["jose.*", "bcrypt.*", "slowapi.*", "rq.*", "rq_scheduler.*"]
 ignore_missing_imports = true
 
+# redis.asyncio 가 sync/async dual signature 라 mypy 가 `Awaitable[T] | T` 로
+# 추론 → `await redis.X(...)` 가 misc 에러 발생. 본 프로젝트는 redis.asyncio 만
+# 사용 + 모든 호출이 await 패턴 → misc 비활성. strict 의 다른 검사는 유지.
+[[tool.mypy.overrides]]
+module = ["redis", "redis.*"]
+disable_error_code = ["misc"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

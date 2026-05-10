@@ -107,7 +107,8 @@ async def issue_refresh(
     meta_key = RedisKey.refresh_token(user_id, jti)
     index_key = RedisKey.refresh_index(compute_refresh_hmac(token))
     now_iso = _now_iso()
-    await redis.hset(
+    # redis.asyncio hset 의 dual sync/async 시그니처 → mypy strict misc 무시.
+    await redis.hset(  # type: ignore[misc]
         meta_key,
         mapping={
             "created_at": now_iso,
@@ -286,7 +287,7 @@ def _redis_str(value: object) -> str | None:
 async def revoke_refresh_jti(user_id: UUID, jti: str, redis: aioredis.Redis) -> None:
     """특정 jti 만 폐기 (로그아웃 — 다른 디바이스 세션 유지)."""
     meta_key = RedisKey.refresh_token(user_id, jti)
-    await redis.hset(meta_key, "active", "0")
+    await redis.hset(meta_key, "active", "0")  # type: ignore[misc]
     # NOTE: index 는 SCAN 으로 찾기 어려우나 메타 active="0" 만으로도 verify 단계에서
     # family revoke 트리거됨. 명시 :revoked 마킹은 logout-all 등 일괄 경로에서만 사용.
 
@@ -313,7 +314,7 @@ async def revoke_refresh_by_token(refresh_token: str, redis: aioredis.Redis) -> 
         return
     meta_key = RedisKey.refresh_token(user_id, jti)
     await redis.set(index_key, f"{user_id_str}:{jti}:revoked", keepttl=True)
-    await redis.hset(meta_key, "active", "0")
+    await redis.hset(meta_key, "active", "0")  # type: ignore[misc]
 
 
 async def revoke_all_user_refresh(user_id: UUID, redis: aioredis.Redis) -> None:
@@ -336,7 +337,8 @@ async def denylist_access(jti: str, *, ttl_seconds: int, redis: aioredis.Redis) 
 
 async def is_jti_denylisted(jti: str, redis: aioredis.Redis) -> bool:
     """미들웨어가 매 access 호출 시 체크."""
-    return await redis.exists(RedisKey.jwt_denylist(jti)) > 0
+    count: int = await redis.exists(RedisKey.jwt_denylist(jti))
+    return count > 0
 
 
 # === 내부 헬퍼 ===

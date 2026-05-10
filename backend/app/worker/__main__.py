@@ -11,7 +11,7 @@ import logging
 import sys
 
 import redis as sync_redis
-from rq import Connection, Queue, Worker
+from rq import Queue, Worker
 
 from app.config import get_settings
 
@@ -21,20 +21,17 @@ from app.worker import jobs  # noqa: F401
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def main() -> None:
+def main() -> int:
+    """RQ worker entrypoint. rq 2.x 에서 `Connection` context manager 제거됨 —
+    Queue/Worker 가 connection 인자를 직접 받음."""
     settings = get_settings()
     conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)
-    queue_names = [
-        "default",
-        "leaf_lifecycle",
-        "merge_evaluation",
-        "summary_generation",
-    ]
-    with Connection(conn):
-        queues = [Queue(name) for name in queue_names]
-        worker = Worker(queues, connection=conn)
-        worker.work(with_scheduler=True, logging_level="INFO")
+    queue_names = ["default", "leaf_lifecycle", "merge_evaluation", "summary_generation"]
+    queues = [Queue(name, connection=conn) for name in queue_names]
+    worker = Worker(queues, connection=conn)
+    worker.work(with_scheduler=True, logging_level="INFO")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    sys.exit(main())

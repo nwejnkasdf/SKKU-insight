@@ -20,9 +20,9 @@ async def is_consent_active(
 ) -> bool:
     """personalization consent 활성 여부. 60s Redis 캐시."""
     key = RedisKey.consent_active_cache(user_id)
-    cached = await redis.get(key)
+    cached: str | None = await redis.get(key)
     if cached is not None:
-        return cached == "1"
+        return bool(cached == "1")
     stmt = select(UserConsent).where(
         UserConsent.user_id == user_id,
         UserConsent.consent_type == "personalization",

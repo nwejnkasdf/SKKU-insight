@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from app.config import get_settings
 from app.db.engine import dispose_engines, get_engine
 from app.middleware.structlog_mask import mask_secrets
-from app.redis import RedisDB, close_redis, get_redis
+from app.redis import close_redis, get_redis
 
 
 @asynccontextmanager
@@ -36,9 +36,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_engine("api")
     # Redis ping 4개
     for db_name in ("default", "rate_limit", "queue", "cache"):
-        client = get_redis(db_name)  # type: ignore[arg-type]
+        client = get_redis(db_name)
         try:
-            pong = await client.ping()
+            pong: bool = await client.ping()  # type: ignore[misc]
             if not pong:
                 raise RuntimeError(f"Redis ping failed for db={db_name}")
         except Exception as exc:

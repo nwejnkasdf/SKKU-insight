@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -69,7 +70,7 @@ def _http_error(
     message: str,
     *,
     request: Request | None = None,
-    details: dict | None = None,
+    details: dict[str, Any] | None = None,
 ) -> HTTPException:
     request_id = (
         getattr(request.state, "request_id", None) if request else None

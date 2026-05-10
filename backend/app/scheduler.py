@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import TypedDict
 
 import redis as sync_redis
 from rq_scheduler import Scheduler
@@ -25,7 +26,17 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-JOB_REGISTRATIONS = [
+class _JobRegistration(TypedDict):
+    """rq-scheduler cron job 등록 spec."""
+
+    id: str
+    cron_attr: str
+    func: str
+    queue: str
+    timeout: int
+
+
+JOB_REGISTRATIONS: list[_JobRegistration] = [
     {
         "id": "naver_cleanup_job",
         "cron_attr": "NAVER_CLEANUP_CRON",
@@ -94,15 +105,16 @@ def register_cron_jobs() -> None:
         conn.close()
 
 
-def main() -> None:
+def main() -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
     )
     register_cron_jobs()
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    sys.exit(main())
 
 
 __all__ = ["JOB_REGISTRATIONS", "register_cron_jobs"]

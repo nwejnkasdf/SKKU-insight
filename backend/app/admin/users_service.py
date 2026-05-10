@@ -9,11 +9,12 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from datetime import datetime
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from sqlalchemy import desc, select, tuple_
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import AdminRole, PagedResponse, PageMeta, RedisKey
@@ -44,7 +45,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID] | None:
         decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
         ts_str, uid_str = decoded.split("|", 1)
         return datetime.fromisoformat(ts_str), UUID(uid_str)
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         return None
 
 
@@ -65,9 +66,13 @@ async def list_users(
         if decoded:
             ts, uid = decoded
             # codex C-6: Python tuple 비교가 먼저 발생해 SQLAlchemy 표현식의 truth value
-            # 평가로 이어지면 TypeError. tuple_() SQL helper 사용으로 SQL row-comparison.
+            # 평가로 이어지면 TypeError. SQL row-comparison 명시 OR/AND 로 표현.
+            # 같은 created_at 안에서는 user_id 로 tie-break.
             stmt = stmt.where(
-                tuple_(User.created_at, User.user_id) < tuple_(ts, uid)
+                or_(
+                    User.created_at < ts,
+                    and_(User.created_at == ts, User.user_id < uid),
+                )
             )
     stmt = stmt.limit(limit + 1)  # +1 has_more 검출
     rows = list((await db.execute(stmt)).scalars().all())

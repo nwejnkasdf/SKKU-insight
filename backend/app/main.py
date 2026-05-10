@@ -54,24 +54,34 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
 
     # === 미들웨어 ===
-    # Starlette 은 add_middleware 호출 순서의 *역순* 으로 wrap — 마지막 add 가 가장
-    # 바깥. codex v2 #4 → C-24: 인증 미들웨어가 401/403 반환 시에도 CORS 헤더가
-    # 응답에 포함되어야 브라우저/Electron 이 cross-origin 으로 응답 본문(ErrorResponse)
-    # 을 읽을 수 있다. 따라서 CORS 를 **가장 마지막** 에 add (가장 바깥).
+    # Starlette 의 add_middleware 동작 (codex v3 #1 → C-30):
+    # - 마지막 add 가 **가장 바깥 (request 들어올 때 먼저 실행)**
+    # - 따라서 요청 흐름은 add 호출의 *역순* 으로 진행
     #
-    # 등록 순서 (request 들어오는 순서로 안쪽→바깥):
-    #   RequestId → JwtAuth → ConsentGate → CORS (바깥)
+    # 의도하는 요청 흐름 (바깥→안쪽):
+    #   CORS → RequestId → JwtAuth → ConsentGate → endpoint
     #
-    # 즉 응답 시: CORS 가 먼저 wrap → JwtAuth 가 401 반환해도 CORS 가 헤더 추가.
+    # 사유:
+    #   1) CORS 가장 바깥 — JwtAuth/ConsentGate 가 401/403 반환해도 CORS 헤더 적용
+    #      (브라우저·Electron 이 cross-origin 으로 ErrorResponse 읽기 가능)
+    #   2) RequestId — JwtAuth 이전에 셋팅돼야 모든 인증 실패 로그에 request_id 바인딩
+    #   3) JwtAuth — request.state.user_id/aud/jti 셋팅
+    #   4) ConsentGate — JwtAuth 가 셋팅한 user_id/aud 를 사용. JwtAuth 이전에
+    #      실행되면 user_id 미셋팅 → "user audience 만 검사" 가드가 false →
+    #      **모든 protected endpoint 가 consent 검사 없이 통과** (codex v2 fix 의
+    #      잘못된 순서가 만든 결함, codex v3 #1 으로 발견)
+    #
+    # add 호출 순서 (마지막이 가장 바깥):
+    #   ConsentGate(첫 add — 가장 안쪽) → JwtAuth → RequestId → CORS(마지막)
     cors_origins = [
         o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()
     ]
-    # RequestId (가장 안쪽 — 모든 응답에 X-Request-Id, structlog binding)
-    app.add_middleware(RequestIdMiddleware)
-    # JwtAuth (Bearer + aud + denylist + deletion gate)
-    app.add_middleware(JwtAuthMiddleware)
-    # ConsentGate (personalization endpoint 보호)
+    # ConsentGate (가장 안쪽 — endpoint 직전. JwtAuth 가 셋팅한 user_id/aud 사용)
     app.add_middleware(ConsentGateMiddleware)
+    # JwtAuth (Bearer + aud + denylist + deletion gate. request.state.user_id 셋팅)
+    app.add_middleware(JwtAuthMiddleware)
+    # RequestId (JwtAuth 이전에 실행돼 모든 로그에 request_id 바인딩)
+    app.add_middleware(RequestIdMiddleware)
     # CORS (가장 바깥 — 401/403 응답에도 CORS 헤더 적용)
     app.add_middleware(
         CORSMiddleware,

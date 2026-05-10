@@ -44,7 +44,7 @@ class LLMBudgetExceeded(Exception):
 class LLMProvider(Protocol):
     """모든 provider 가 따라야 할 Protocol."""
 
-    async def complete(  # type: ignore[empty-body]
+    async def complete(
         self,
         messages: list[ChatMessage],
         *,

@@ -8,7 +8,7 @@ POST:
 5) Redis `lock:onboarding:{user_id}` NX EX=30 — 실패 시 진행 중 request_id 반환
 6) `cold_start:status:{request_id}` HSET queued + User.onboarding_complete=true
 7) RQ enqueue `cold_start_job` (worker function 본문은 A8)
-8) Prefer: respond=sync 헤더 시 8s 폴링 (asyncio.sleep(0.5) × 16)
+8) Prefer: respond=sync 헤더 시 8s 폴링 (asyncio.sleep(0.5) x 16)
 
 PUT: 1차는 onboarding_complete 유지 + 202 reply. prior boost 갱신은 A6, stale 은 A7.
 
@@ -17,8 +17,8 @@ GET status: Redis HGETALL `cold_start:status:{request_id}` → ColdStartStatusRe
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
@@ -53,7 +53,7 @@ def _http_error(
     message: str,
     *,
     request: Request,
-    details: dict | None = None,
+    details: dict[str, Any] | None = None,
 ) -> HTTPException:
     request_id = getattr(request.state, "request_id", None)
     body = ErrorResponse(
@@ -140,7 +140,7 @@ async def post_interests(
     # — cold-start orchestrator (A8) 가 완료 시 명시 DEL 추가 가능. lock 키가 살아
     # 있는 동안 다음 POST 는 진행 중 request_id 회귀 응답.
     await redis.set(f"{lock_key}:request_id", str(request_id), ex=ONBOARDING_LOCK_TTL)
-    await redis.hset(
+    await redis.hset(  # type: ignore[misc]
         RedisKey.cold_start_status(request_id),
         mapping={
             "status": "queued",
@@ -167,7 +167,7 @@ async def post_interests(
     if prefer_sync:
         for _ in range(int(PREFER_SYNC_TIMEOUT_SECONDS / PREFER_SYNC_POLL_INTERVAL)):
             await asyncio.sleep(PREFER_SYNC_POLL_INTERVAL)
-            status_value = await redis.hget(
+            status_value = await redis.hget(  # type: ignore[misc]
                 RedisKey.cold_start_status(request_id), "status"
             )
             if status_value in ("completed", "failed"):
@@ -229,7 +229,7 @@ async def get_cold_start_status(
     request_id: UUID, *, request: Request, redis: aioredis.Redis
 ) -> ColdStartStatusResponse:
     """Redis 키 HGETALL → ColdStartStatusResponse."""
-    raw = await redis.hgetall(RedisKey.cold_start_status(request_id))
+    raw = await redis.hgetall(RedisKey.cold_start_status(request_id))  # type: ignore[misc]
     if not raw:
         raise _http_error(
             status.HTTP_404_NOT_FOUND,
@@ -249,7 +249,7 @@ async def get_cold_start_status(
         status_value = "queued"
     return ColdStartStatusResponse(
         request_id=request_id,
-        status=status_value,  # type: ignore[arg-type]
+        status=status_value,
         progress_percent=int(raw.get("progress_percent", "0") or "0"),
         completed_at=completed_at,
         dashboard_ready=raw.get("dashboard_ready", "false") == "true",

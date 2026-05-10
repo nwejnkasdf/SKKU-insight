@@ -21,7 +21,6 @@ from uuid import UUID
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.contracts import ErrorCode, ErrorResponse, RedisKey, TokenAudience
@@ -71,7 +70,7 @@ class ConsentGateMiddleware(BaseHTTPMiddleware):
             if cached != "1":
                 return _forbidden(request)
             return await call_next(request)
-        async with AsyncSessionLocal() as session:  # type: AsyncSession
+        async with AsyncSessionLocal() as session:
             active = await is_consent_active(user_id, redis, session)
         if not active:
             return _forbidden(request)

@@ -16,7 +16,7 @@
 | Phase | 모듈 | Prompt 파일 | 상태 | 마지막 결과 (commit / 노트) |
 |---|---|---|---|---|
 | 0a | A2-stub | [`00-A2-stub.md`](00-A2-stub.md) | 🟢 | `73f57e8` (PR #4 머지 2026-05-11) — backend/ 33 파일 + contracts.py SOR (13 enum + 39 ErrorCode + 14 RedisKey) + 53 endpoint stubs + docs drift 24건 fix |
-| 0b | A2 backend-foundation | [`01-A2-backend.md`](01-A2-backend.md) | ⬜ | |
+| 0b | A2 backend-foundation | [`01-A2-backend.md`](01-A2-backend.md) | 🟢 | 17 endpoint 본문 + Alembic 1번 migration (8 테이블) + 보안·동시성·LLM·worker·scheduler·scripts/check_*.py 6종 + docker-compose 5 서비스 + 19+ test 케이스. **11건 결정 반영**: HMAC `:rotated` family revoke (C-6), email 정규화 3겹 (C-7), SourcePolicy 시드 정확값 (C-8), /admin/users 1글자 마스킹 fallback (C-9), RQ async account-deletion (C-2 부분 해소). 시연 검증은 `make dev → make migrate → make create-admin → make test` |
 | 0b | A3 cso-topic | [`02-A3-cso-topic.md`](02-A3-cso-topic.md) | ⬜ | |
 | 1 | A4 collection | [`03-A4-collection.md`](03-A4-collection.md) | ⬜ | |
 | 1 | A5 clickbait | [`04-A5-clickbait.md`](04-A5-clickbait.md) | 🟢 외부 서비스 완료 / 🟡 backend 통합 대기 | clickbait_module/ + vLLM AsyncLLMEngine 작성 완료 (commit 4066b20). backend `app/clickbait_client/`는 A2+A4 완료 후 |

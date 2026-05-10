@@ -48,6 +48,7 @@ Authorization: Bearer <access_token>
 - `aud` 클레임이 endpoint와 매칭 (일반: `user`, 관리자: `admin`)
 - 토큰 만료 시 `401 + auth.token_expired` → 클라이언트는 `/auth/refresh` 자동 재시도
 - 401 응답에는 표준 `WWW-Authenticate: Bearer error="invalid_token"` 헤더 포함
+- **401 ErrorCode 분기 룰**: `auth.token_expired` → `/auth/refresh` 시도; `auth.invalid_token` (위조·서명 불일치) 또는 `auth.refresh_revoked` (refresh 폐기됨) → 재로그인 강제 (refresh 시도 X). 클라이언트(A9·A10)는 본 분기로 자동 행동 결정.
 
 ## 4. 표준 헤더
 
@@ -272,7 +273,7 @@ admin-console/src/generated/api.ts   ← A10 Next.js admin이 import
 
 A9·A10은 **endpoint를 raw fetch로 호출 금지**. 모든 호출은 codegen된 typed client만. A2가 시그니처 변경 시 OpenAPI 변경 → codegen 결과 변경 → 빌드 깨짐으로 즉시 발견.
 
-### 14.3 Cross-check 스크립트 (5종, CI 강제)
+### 14.3 Cross-check 스크립트 (6종, CI 강제)
 
 | 스크립트 | 검증 |
 |---|---|

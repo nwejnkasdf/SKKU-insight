@@ -13,7 +13,7 @@
 새 에이전트는 다음 4개를 순서대로 읽으면 작업 시작 가능.
 
 1. **[`docs/decisions.md`](docs/decisions.md)** — 12+ 라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원. SRS와 충돌 시 본 파일이 우선 (단 SRS의 FR/NFR/AT 식별자·표는 보존).
-2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 백로그. **P0 1건(DoRA 모듈 경로) 외 모든 항목에 default·stub 경로가 정의돼 있다**.
+2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 백로그. **P0 0건 (모두 해소됨, 2026-05-11). P1 활성 7건 + P2 활성 5건 모두 default·stub 경로가 정의돼 있다** — 모든 에이전트 즉시 작업 시작 가능.
 3. **[`docs/sdd/contracts.md`](docs/sdd/contracts.md)** + **[`docs/sdd/agent-orchestration.md`](docs/sdd/agent-orchestration.md)** — 모든 enum·error code·Redis key는 `backend/app/contracts.py` 단일 SOR. 멀티 에이전트 5겹 방어와 Phase별 순차 호출 룰.
 4. **자기 모듈에 해당하는 `docs/` 하위 디렉토리** — 후술 §에이전트 분할 표.
 
@@ -50,10 +50,11 @@
 │   ├── ops/                           # 5개 (docker-compose/env-vars/ci-cd/admin-bootstrap/runbooks)
 │   ├── security/                      # 5개 (auth-flow/token-handling/rate-limiting/password-policy/threat-model)
 │   └── ux/                            # 4개 (wireframes/ui-states/i18n/client-behaviors)
-└── (코드 디렉토리는 후속 에이전트가 만든다)
-    backend/  client/  admin-console/  workers/  llm-adapter/
-    clickbait_module/  scripts/  .github/
-    services/clickbait-detector/   ← 옵션, 자체 도커 호스팅 시에만
+├── backend/                          # ✅ Phase 0a A2-stub 산출 (FastAPI + 53 endpoint stubs + contracts.py SOR)
+├── clickbait_module/                 # ✅ vLLM + DoRA 분류기 자체 서비스 (P0-1 해결)
+└── (이하 후속 에이전트가 만듦)
+    client/  admin-console/  workers/  llm-adapter/
+    scripts/  .github/                # repo-root scripts (check_*.py, codegen 등)
 ```
 
 ## 핵심 결정 매트릭스 (압축)
@@ -73,7 +74,7 @@
 | Trace operation | extend/retract/split/archive 룰 기반. LLM은 leaf 재배치에만 (retract/split). **3단계 강등** active→stale→retract→archive |
 | Leaf 라이프사이클 | D 하이브리드 (신규 식별·병합만 LLM, 승격·강등 룰). emerging는 active trace path 끝 산하에서만 분기. core 슬롯 5개 중 1개 emerging quota |
 | LLM 어댑터 | **`MockProvider` (default)** + OpenAI/Anthropic/OpenRouter/CodexOAuth(local experimental). 환경변수 `LLM_PROVIDER` 토글 |
-| 낚시성 | DoRA 파인튜닝 `A.X-4.0-Light` 모듈 wrap (사용자 보유, P0-1 대기) |
+| 낚시성 | DoRA 파인튜닝 `A.X-4.0-Light` 모듈 (✅ `clickbait_module/` 자체 vLLM 서비스, P0-1 해결 2026-05-11) |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein |
 | 수집 소스 | 학술 4종 (arXiv/OpenAlex/Semantic Scholar/DBLP) + 빅테크 RSS 30+ + 뉴스 (네이버 BS4 / TC / Verge / Wired / MIT TR / IEEE Spectrum) + sentinel `cold_start_pseudo` |
 | 시드 | 5+ 페르소나 + 14일치 인터랙션 (active day 기반) |
@@ -188,4 +189,4 @@ cd client && npm start
 4. 영향 큰 변경은 [`docs/decision-backlog.md`](docs/decision-backlog.md)에 기록.
 5. `docs/sdd/contracts.md` 변경 시 `backend/app/contracts.py` PR로 사용자 승인 받음.
 
-마지막 갱신: 2026-05-09.
+마지막 갱신: 2026-05-11 (P0-1·P1-8·P2-6·P2-7 해소 + Phase 0a A2-stub 완료 + 39 drift fix).

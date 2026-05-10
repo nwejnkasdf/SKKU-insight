@@ -29,12 +29,13 @@ class RecommendationCard(BaseModel):
     slot_type: SlotType
     title: str
     source_name: str
-    source_type: Literal["academic", "vendor_blog", "tech_news"]
+    source_type: SourceType   # contracts.py SOR enum (sdd/contracts.md §2)
     related_topics: list[TopicChip]   # 한국어 라벨
     reason_short: str                 # 한국어, 1문장. NFR-03
     published_at: datetime
     thumbnail_url: str | None
     # 점수 미노출 (NFR-04)
+    # source_type 은 contracts.py SourceType enum 사용 (sdd/contracts.md §2)
 
 class TopicChip(BaseModel):
     topic_id: UUID
@@ -59,7 +60,7 @@ class DocumentDetailResponse(BaseModel):
     document_id: UUID
     title: str
     source_name: str
-    source_type: Literal["academic", "vendor_blog", "tech_news"]
+    source_type: SourceType   # contracts.py SOR enum (sdd/contracts.md §2)
     url: str
     canonical_url: str | None
     published_at: datetime

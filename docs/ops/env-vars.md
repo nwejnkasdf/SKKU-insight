@@ -75,6 +75,9 @@
 | `RATE_LIMIT_RUN_NOW` | `1/hour` | run-now 강제 트리거 |
 | `RATE_LIMIT_REVOKE_CONSENT` | `5/hour` | per user |
 | `RATE_LIMIT_DELETE_ACCOUNT` | `1/hour` | per user |
+| `RATE_LIMIT_ONBOARDING` | `5/hour` | per user, POST `/onboarding/interests` |
+| `RATE_LIMIT_ONBOARDING_UPDATE` | `10/hour` | per user, PUT `/onboarding/interests` |
+| `RATE_LIMIT_EVENTS` | `600/minute` | per user, POST `/events`·`/events/batch` |
 
 ## 수집 스케줄
 
@@ -174,9 +177,13 @@ RATE_LIMIT_DEFAULT=60/minute
 RATE_LIMIT_RUN_NOW=1/hour
 RATE_LIMIT_REVOKE_CONSENT=5/hour
 RATE_LIMIT_DELETE_ACCOUNT=1/hour
+RATE_LIMIT_ONBOARDING=5/hour
+RATE_LIMIT_ONBOARDING_UPDATE=10/hour
+RATE_LIMIT_EVENTS=600/minute
 
 # === Schedule ===
 COLLECTION_CRON=0 3 * * *
+COLLECTION_CRON_DEMO=0 * * * *
 COLLECTION_PER_USER_PARALLEL=4
 COLLECTION_GLOBAL_CONCURRENCY=8
 COLLECTION_USER_JITTER_SECONDS=300

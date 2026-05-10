@@ -17,9 +17,11 @@
 | POST `/auth/signup` | 3/시간 | IP | `RATE_LIMIT_SIGNUP` | 429 + `auth.rate_limited` |
 | POST `/auth/login` | 5/분 | IP | `RATE_LIMIT_LOGIN` | 429 |
 | POST `/auth/refresh` | 60/시간 | user_id | `RATE_LIMIT_DEFAULT` 보다 관대 | 429 |
-| POST `/auth/logout` | 30/분 | user_id | | 429 |
+| POST `/auth/logout` | 30/분 | user_id | `RATE_LIMIT_DEFAULT` 변형 | 429 |
 | POST `/admin/auth/login` | 5/분 | IP | `RATE_LIMIT_LOGIN` | 429 |
-| POST `/events`, `/events/batch` | 600/분 | user_id | 별도 정책 | 429 |
+| POST `/events`, `/events/batch` | 600/분 | user_id | `RATE_LIMIT_EVENTS` | 429 |
+| POST `/onboarding/interests` | 5/시간 | user_id | `RATE_LIMIT_ONBOARDING` | 429 + `onboarding.rate_limited` |
+| PUT `/onboarding/interests` | 10/시간 | user_id | `RATE_LIMIT_ONBOARDING_UPDATE` | 429 |
 | 그 외 인증된 GET/POST | 60/분 | user_id | `RATE_LIMIT_DEFAULT` | 429 |
 | POST `/collection/jobs/me/run-now` | 1/시간 | user_id | `RATE_LIMIT_RUN_NOW` | 429 |
 | POST `/consent/revoke` | 5/시간 | user_id | `RATE_LIMIT_REVOKE_CONSENT` | 429 |

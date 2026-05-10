@@ -70,7 +70,7 @@ class ColdStartStatusResponse(BaseModel):
 ## 비즈니스 룰
 
 ### `POST /onboarding/interests`
-1. 동의 활성 검증 (FR-11). 비활성이면 403 + `consent.required`
+1. 동의 활성 검증 (FR-11). 비활성이면 403 + `onboarding.consent_required`
 2. `cso_cluster_ids` 길이 0이면 422 + `onboarding.no_cluster_selected`
 3. 각 cluster_id가 BroadInterest 테이블에 존재하는지 검증
 4. **사용자별 prior boost 적용** (`UserInterestState.alpha_prior` 임시 상승, 14 active days TTL):

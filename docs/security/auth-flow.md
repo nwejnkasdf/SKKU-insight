@@ -156,8 +156,9 @@ async def auth_middleware(request, call_next):
         raise HTTPException(401, code="auth.token_expired")
     except JWTError:
         raise HTTPException(401, code="auth.invalid_token")
-    if await redis.sismember(f"jwt_denylist:{payload['jti']}", "1"):
-        raise HTTPException(401, code="auth.token_revoked")
+    if await redis.sismember(RedisKey.jwt_denylist(payload["jti"]), "1"):
+        # ErrorCode.AUTH_INVALID_TOKEN — 폐기된 토큰은 invalid_token 으로 흡수 (재로그인 필요).
+        raise HTTPException(401, code="auth.invalid_token")
     request.state.user_id = payload["sub"]
     request.state.aud = payload["aud"]
     return await call_next(request)

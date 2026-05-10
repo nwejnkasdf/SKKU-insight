@@ -36,7 +36,7 @@ S — Spoofing (위장), T — Tampering (변조), R — Repudiation (부인), I
 | 사용자 행동 부인 ("내가 안 했다") | UserEvent | 중 | client_request_id + occurred_at + server_received_at 기록, 24h 내 정렬 |
 | 관리자 작업 부인 | ReprocessRequest | 중 | requested_at, admin_id, status, result_message 기록 (FR-65) |
 | 토큰 변조/도난 후 부인 | auth | 중 | 모든 인증 이벤트 (login/logout/refresh) 로그에 ip+ua. 사용자가 자기 세션 목록 보게 한다 (`/admin/users/{id}/events` 옵션) |
-| 동의 철회 부인 | UserConsent | 중 | revoked_at 영구 기록 (실제 deletion은 30일 후, 그 사이 감사) |
+| 동의 철회 부인 | UserConsent | 중 | revoked_at 영구 기록. **1차 시연은 동의 철회 즉시 cascade — NFR-21 30일 grace 는 운영 단계 보강** (`decision-backlog.md` C-2, 같은 파일 §54 일관). |
 
 ### I — Information Disclosure
 

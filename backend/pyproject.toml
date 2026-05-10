@@ -1,0 +1,70 @@
+[project]
+name = "skku-insight-backend"
+version = "0.1.0"
+description = "SKKU InSight FastAPI backend (Phase 0a stub)"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "SKKU InSight team" }]
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "email-validator>=2.2",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "redis>=5.0",
+    "rq>=1.16",
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3",
+    "slowapi>=0.1.9",
+    "httpx>=0.27",
+    "structlog>=24.1",
+    "uvicorn[standard]>=0.30",
+    "networkx>=3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "types-passlib",
+    "types-python-jose",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "scripts*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = [
+    "E501",  # 라인 길이는 line-length=100 으로 충분 — 한국어 주석 여유.
+    "B008",  # FastAPI Depends/Query/Body default 패턴은 표준 — false positive.
+    "UP042", # `class X(str, Enum)` 유지 — docs/sdd/contracts.md SOR 일관 + Pydantic 직렬화 호환.
+    "UP046", # `class PagedResponse(BaseModel, Generic[T])` 유지 — PEP 695 syntax 는 후속 마이그레이션.
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["jose.*", "passlib.*", "slowapi.*", "rq.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

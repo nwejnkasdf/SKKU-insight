@@ -145,7 +145,7 @@ class LLMResponse(BaseModel):
 # app/source_adapters/protocol.py
 class SourceAdapter(Protocol):
     name: str  # "arxiv", "openalex", ...
-    source_type: Literal["academic", "vendor_blog", "tech_news"]
+    source_type: SourceType   # contracts.py SOR enum (sdd/contracts.md §2)
 
     async def fetch(
         self,

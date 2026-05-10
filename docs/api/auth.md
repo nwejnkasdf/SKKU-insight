@@ -16,8 +16,8 @@
 |---|---|---|---|---|
 | POST | `/auth/signup` | 회원가입 | none | 3/시간/IP |
 | POST | `/auth/login` | 로그인 | none | 5/분/IP |
-| POST | `/auth/refresh` | 액세스 토큰 갱신 | refresh_token (cookie 또는 body) | 60/분/사용자 |
-| POST | `/auth/logout` | 로그아웃 (refresh 폐기) | access_token | 60/분/사용자 |
+| POST | `/auth/refresh` | 액세스 토큰 갱신 | refresh_token (request body) | 60/시간/사용자 |
+| POST | `/auth/logout` | 로그아웃 (refresh 폐기) | access_token | 30/분/사용자 |
 | GET | `/auth/me` | 자기 정보 조회 | access_token | 60/분/사용자 |
 
 ## 스키마 (Pydantic 의사 코드)
@@ -70,8 +70,9 @@ class ErrorResponse(BaseModel):
 | `auth.email_taken` | 409 | 이메일 중복 |
 | `auth.weak_password` | 422 | 비밀번호 정책 위반 |
 | `auth.invalid_credentials` | 401 | 로그인 실패 |
-| `auth.token_expired` | 401 | JWT 만료 (NFR-17) |
-| `auth.refresh_revoked` | 401 | refresh 폐기됨 |
+| `auth.token_expired` | 401 | JWT 만료 (NFR-17) — 클라이언트는 `/auth/refresh` 자동 재시도 |
+| `auth.invalid_token` | 401 | JWT 위조·형식 오류·서명 불일치 — 재인증 필요 (refresh 불가) |
+| `auth.refresh_revoked` | 401 | refresh 폐기됨 — 재인증 필요 |
 | `auth.rate_limited` | 429 | rate limit 초과 |
 
 ## 비즈니스 룰

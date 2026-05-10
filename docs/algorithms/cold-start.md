@@ -102,7 +102,7 @@ def validate_cold_start(items: list[dict]) -> list[ColdStartCard]:
 LLM 응답의 `url_hint`가 있으면 Document 테이블에서 `canonical_url` 또는 `url` 매칭 시도. 매칭 실패 시:
 
 1. **즉시 수집 트리거** — `collection-orchestrator`에 source_name + title 키워드로 단발성 fetch 요청. 24시간 내 채워질 것.
-2. **pseudo Document 행 INSERT** — `content_type="pseudo_cold_start"`, **`source_id = SENTINEL_COLD_START_PSEUDO_SOURCE_ID`** (24시간 TTL).
+2. **pseudo Document 행 INSERT** — `content_type="pseudo_cold_start"`, **`source_id` = `Source.name == SentinelSource.COLD_START_PSEUDO_NAME` 시드 행의 UUID** (부팅 시 캐시; contracts.py §6) (24시간 TTL).
    - sentinel Source는 시스템 부팅 시 시드 데이터로 1행 INSERT: `Source(name="cold_start_pseudo", source_type="vendor_blog", url="internal://cold-start-pseudo", trust_level="low", enabled=false)`. enabled=false라 일반 수집 잡에서는 호출되지 않음. cold-start pseudo Document만 이 source_id를 FK로 참조하여 `Document.source_id NOT NULL + RESTRICT` FK 충족.
    - 실제 데이터 수집으로 원본 Document가 INSERT되면 LLM이 url_hint·title 매칭으로 pseudo와 동일 논문 식별 → pseudo Document 행을 원본으로 merge (DocumentTopic·Recommendation의 document_id를 원본으로 갱신, pseudo는 DELETE).
 3. 추천 카드에는 LLM의 `title_ko`를 표시하고, 클릭 시 외부 검색 페이지로 fallback ("Google Scholar에서 찾아보기" 링크). pseudo Document 클릭은 외부 link로만, 문서 상세 화면은 진입 X (또는 "수집 진행 중" 안내).

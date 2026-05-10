@@ -82,6 +82,7 @@ class CollectionJobStatus(str, Enum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    SKIPPED = "skipped"   # 외부 소스 비활성/조건 미충족 (2026-05-11 추가)
 
 
 class AdminRole(str, Enum):
@@ -131,7 +132,12 @@ class ErrorCode(str, Enum):
     AUTH_INVALID_TOKEN = "auth.invalid_token"
     AUTH_REFRESH_REVOKED = "auth.refresh_revoked"
     AUTH_RATE_LIMITED = "auth.rate_limited"
-    # consent / event
+    # consent
+    CONSENT_REQUIRED = "consent.required"
+    CONSENT_ALREADY_ACTIVE = "consent.already_active"
+    CONSENT_REVOCATION_PENDING = "consent.revocation_pending"
+    CONSENT_DELETION_IN_PROGRESS = "consent.deletion_in_progress"
+    # event / feedback
     EVENT_CONSENT_REQUIRED = "event.consent_required"
     EVENT_DUPLICATE = "event.duplicate"
     EVENT_INVALID_TARGET = "event.invalid_target"
@@ -153,6 +159,11 @@ class ErrorCode(str, Enum):
     TOPIC_NOT_FOUND = "topic.not_found"
     TOPIC_UNAUTHORIZED_LEAF = "topic.unauthorized_leaf"
     TOPIC_LINKAGE_ERROR = "topic.linkage_error"
+    # collection (사용자 영역 + 관리자 영역 공유)
+    COLLECTION_ALREADY_RUNNING = "collection.already_running"
+    COLLECTION_JOB_NOT_FOUND = "collection.job_not_found"
+    COLLECTION_SOURCE_DISABLED = "collection.source_disabled"
+    COLLECTION_RATE_LIMITED = "collection.rate_limited"
     # admin
     ADMIN_UNAUTHORIZED = "admin.unauthorized"
     ADMIN_ROLE_INSUFFICIENT = "admin.role_insufficient"
@@ -195,6 +206,11 @@ class RedisKey:
     @staticmethod
     def traversal_lock(user_id: UUID) -> str:
         return f"lock:traversal:{user_id}"
+
+    @staticmethod
+    def collection_lock(user_id: UUID) -> str:
+        # 일일 수집 잡 user-level lock. 동일 사용자 잡 동시 1건 강제.
+        return f"lock:collection:{user_id}"
 
     @staticmethod
     def onboarding_lock(user_id: UUID) -> str:

@@ -36,12 +36,15 @@ Content-Type: application/json
 
 ```json
 {
-  "decision": "clickbait" | "clean",
+  "decision": "clickbait" | "clean" | "error",
   "confidence": 0.0,
   "model_name": "ax-4.0-light-dora-clickbait-v1",
   "adapter_type": "dora",
   "evaluated_at": "iso8601"
 }
+// decision="error" — 분류기 자체 실패 (모델 미로드, max_model_len 초과 등).
+// backend 는 ClickbaitResult INSERT (감사용) + 추천 후보 제외 (보수적 처리).
+// ClickbaitDecision enum (sdd/contracts.md §2) 3 값과 일치.
 ```
 
 ### 헬스체크

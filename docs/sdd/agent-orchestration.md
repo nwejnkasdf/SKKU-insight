@@ -10,7 +10,7 @@
 |---|---|---|
 | 1. Contract-first | `backend/app/contracts.py` (사용자 1회 작성, 모든 에이전트 import) | enum 표류, error code 미세 차이, Redis key 컨벤션 |
 | 2. OpenAPI codegen | `scripts/export_openapi.py` → client/admin TypeScript codegen | API 시그니처 표류 |
-| 3. Cross-check 스크립트 | `scripts/check_*.py` 5종 | docs ↔ 코드 drift |
+| 3. Cross-check 스크립트 | `scripts/check_*.py` 6종 | docs ↔ 코드 drift |
 | 4. Strict type | mypy strict + ruff + tsc strict | 함수 시그니처 mismatch |
 | 5. Phase별 순차 호출 | 본 문서 §3 | 병렬 race로 인한 인터페이스 충돌 |
 

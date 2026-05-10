@@ -43,7 +43,7 @@ worker ──┬──> postgres
 | worker autoreload | rq watcher | 끔 |
 | 시드 데이터 | 부트 시 `python scripts/seed_personas.py --no-events` | 부트 시 14일치 인터랙션 포함 (`scripts/seed_personas.py --full`) |
 | LLM_PROVIDER | `mock` (default — CI/단위 테스트/시연 fixture) / `openai` / `anthropic` / `openrouter` / `codex_oauth` (local experimental, 본인 토이 빌드 전용) | `mock` |
-| 수집 cron | 수동 트리거 (`POST /admin/collection-jobs/run-now`) | 매 정시 실행 (`COLLECTION_CRON=0 * * * *` 시연용 단축) |
+| 수집 cron | 사용자 수동 트리거 `POST /collection/jobs/me/run-now` (1/시간/사용자); 관리자 재실행 `POST /admin/collection/jobs/{id}/reprocess` | demo 모드는 별도 `COLLECTION_CRON_DEMO=0 * * * *` (env-vars.md) |
 | Postgres logs | `log_statement=all` | `log_statement=ddl` |
 | 외부 소스 호출 | recorded fixture (vcrpy) | live network |
 

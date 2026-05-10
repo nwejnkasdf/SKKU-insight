@@ -39,7 +39,7 @@ sequenceDiagram
         Reco->>LLM: cold_start_prompt(selected_csos, user_class, locale)
         LLM-->>Reco: 10개 추천 후보 JSON
         Reco->>Reco: validate_cold_start (slot 분배, URL/DOI 검증)
-        Reco->>DB: INSERT pseudo Document (source_id=SENTINEL_COLD_START_PSEUDO_SOURCE_ID) for unmatched
+        Reco->>DB: INSERT pseudo Document (source_id = Source[name=SentinelSource.COLD_START_PSEUDO_NAME].id) for unmatched
         Reco->>DB: INSERT Recommendation x 10 + RecommendationSlot
         Reco->>Cache: SET recommendation:{user_id}
     end
@@ -69,7 +69,7 @@ sequenceDiagram
     SA-->>Coll: List<RawDocument>
     Coll->>Coll: dedup(URL/DOI/제목정규화/Levenshtein)
     Coll->>DB: INSERT Document, CollectionJob(status=running)
-    alt content_type == news
+    alt content_type == "tech_news"
         Coll->>CB: classify(title, body, meta)
         CB-->>Coll: {decision, confidence}
         alt decision == clickbait
@@ -195,11 +195,11 @@ sequenceDiagram
     API->>DB: SELECT AdminUser
     API-->>Web: 200 + admin_jwt
     Admin->>Web: 수집 상태 화면
-    Web->>API: GET /admin/collection-jobs?status=failed
+    Web->>API: GET /admin/collection/jobs?status=failed
     API->>DB: SELECT CollectionJob WHERE status=failed
     API-->>Web: 실패 작업 목록
     Admin->>Web: 작업 선택 + 재실행
-    Web->>API: POST /admin/collection-jobs/{id}/reprocess
+    Web->>API: POST /admin/collection/jobs/{id}/reprocess
     API->>API: assert admin_jwt.aud == "admin" (FR-60, NFR-22)
     API->>DB: INSERT ReprocessRequest(admin_id, job_id, status=queued)
     API->>Q: enqueue collection_job(id)

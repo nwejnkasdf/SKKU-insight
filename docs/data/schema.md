@@ -76,10 +76,14 @@ class BroadInterest(Base):
     name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     cso_cluster_label: Mapped[str] = mapped_column(String(40), nullable=False)   # 12 cluster
+    cso_seed_topic_id: Mapped[UUID] = mapped_column(
+        ForeignKey("cso_topic.cso_topic_id", ondelete="RESTRICT"), nullable=False,
+    )   # 클러스터 seed CSO topic — onboarding prior boost 진입점 (api/onboarding.md)
     display_order: Mapped[int] = mapped_column(Integer, default=0)
 ```
 
 12 행 시드. cso_cluster_label은 `algorithms/cso-mapping.md`의 12 클러스터 라벨 (AI, Systems, ...).
+`cso_seed_topic_id` 는 cso-mapping.md SEEDS dict 의 cluster→full label 매핑을 시드 시점에 cso_topic FK 로 resolve.
 
 ### CSOTopic
 
@@ -107,7 +111,7 @@ class DynamicLeafTopic(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)   # emerging|active|stale|merged|archived
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # last_seen_at (wallclock) 은 active day 모델로 대체됨 — last_signal_active_day 사용 (decisions.md §시간 단위).
     # Active day 기반 라이프사이클 (algorithms/cso-topic-traversal.md §5, leaf-topic-lifecycle.md)
     created_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
     last_signal_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -255,7 +259,13 @@ class Document(Base):
     doi: Mapped[str | None] = mapped_column(String(120), index=True)
     summary: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-    content_type: Mapped[str] = mapped_column(String(40), nullable=False)   # academic_paper | vendor_blog | tech_news | pseudo_cold_start
+    content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    # content_type ∈ ContentType enum (sdd/contracts.md §2): academic_paper | vendor_blog | tech_news | pseudo_cold_start
+    # Source.source_type → Document.content_type 매핑 (수집 단계):
+    #   source_type=academic     → content_type=academic_paper
+    #   source_type=vendor_blog  → content_type=vendor_blog
+    #   source_type=tech_news    → content_type=tech_news
+    #   sentinel cold_start_pseudo Source → content_type=pseudo_cold_start (algorithms/cold-start.md §pseudo-document)
     language: Mapped[str | None] = mapped_column(String(10))
     raw: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

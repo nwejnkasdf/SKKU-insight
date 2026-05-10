@@ -217,8 +217,8 @@ async def ingest_event_atomic(event: UserEvent, weights: Weights, params: Intere
 
 
 def daily_decay(params: InterestParams, state_store: StateStore) -> None:
-    decay_short = math.exp(-math.log(2) / params.half_life_short_days)
-    decay_long  = math.exp(-math.log(2) / params.half_life_long_days)
+    decay_short = math.exp(-math.log(2) / params.half_life_short_active_days)
+    decay_long  = math.exp(-math.log(2) / params.half_life_long_active_days)
     for s in state_store.iter_all():
         s.short_alpha = params.alpha_prior + (s.short_alpha - params.alpha_prior) * decay_short
         s.short_beta  = params.beta_prior  + (s.short_beta  - params.beta_prior)  * decay_short

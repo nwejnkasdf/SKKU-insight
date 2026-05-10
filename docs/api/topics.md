@@ -84,14 +84,8 @@ class TraversalTraceDetail(BaseModel):
     last_activity_active_day: int
     score_tail: float                # 점수 (NFR-04 따라 디버그 모드만, 일반 사용자는 마스킹)
 
-class DocumentSummary(BaseModel):
-    document_id: UUID
-    title: str
-    source_name: str
-    source_type: Literal["academic", "vendor_blog", "tech_news"]
-    published_at: datetime
-    url: str
-    related_topics: list[CSOTopicSummary]
+# DocumentSummary 는 contracts.py 의 SOR base 모델 사용 — 본 파일에서 재정의 금지.
+# from app.contracts import DocumentSummary, SourceType  (sdd/contracts.md §5)
 ```
 
 ## 비즈니스 룰

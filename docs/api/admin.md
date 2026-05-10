@@ -83,6 +83,47 @@ class ChangeAdminPasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+# === 수집 (관리자 전용 — collection.md 의 사용자용 schema 와 별도) ===
+
+class ReprocessRequestPayload(BaseModel):
+    """`POST /admin/collection/jobs/{id}/reprocess` 요청 본문."""
+    reason: str | None
+
+class ReprocessRequestView(BaseModel):
+    """재실행 요청 row (UC-05, FR-65)."""
+    request_id: UUID
+    admin_id: UUID
+    job_id: UUID
+    requested_at: datetime
+    status: Literal["queued", "running", "succeeded", "failed"]
+    result_message: str | None
+
+class SourceView(BaseModel):
+    """소스 레지스트리 row."""
+    source_id: UUID
+    name: str
+    source_type: SourceType   # contracts.py SOR enum (sdd/contracts.md §2)
+    url: str
+    trust_level: Literal["high", "medium", "low"]
+    enabled: bool
+    last_success_at: datetime | None
+
+class SourceTogglePatch(BaseModel):
+    """`PATCH /admin/collection/sources/{id}` — 활성/비활성 토글."""
+    enabled: bool
+
+class CollectionStatsResponse(BaseModel):
+    """일일 수집 통계. NFR-10 기준 success_rate < 0.95 시 alert='below_sla'."""
+    period_start: datetime
+    period_end: datetime
+    success_rate: float
+    total_jobs: int
+    failed_jobs: int
+    failures_by_source: dict[str, int]
+    alert: Literal["below_sla"] | None
+
+# === 낚시성 통계 ===
+
 class ClickbaitStatsResponse(BaseModel):
     period_start: datetime
     period_end: datetime
@@ -98,12 +139,13 @@ class ClickbaitBySource(BaseModel):
     clickbait: int
 
 class ClickbaitResultView(BaseModel):
+    """관리자 콘솔에 노출되는 낚시성 판정 결과. decision 은 `error` 도 포함 (분류 실패 시 운영자 가시성)."""
     result_id: UUID
     document_id: UUID
     document_title: str
     model_name: str
     adapter_type: Literal["dora"]
-    decision: Literal["clickbait", "clean"]
+    decision: Literal["clickbait", "clean", "error"]   # contracts.py ClickbaitDecision 일치 (3개)
     confidence: float
     evaluated_at: datetime
 

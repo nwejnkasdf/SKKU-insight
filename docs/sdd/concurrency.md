@@ -304,7 +304,8 @@ A2/A6/A7/A8 에이전트가 자기 모듈 코드 작성 시 본 표를 통과해
 | `interest-bayesian` posterior update | atomic SQL (§4.1) |
 | Active day counter 갱신 | atomic SQL (§4.2) |
 | 모든 LLM 호출 | semaphore (§5), `user_id` 전달 필수 |
-| 일일 수집 잡 트리거 | jitter (§8) |
+| 일일 수집 잡 트리거 | jitter (§8) + user-level lock `RedisKey.collection_lock(user_id)` (동일 사용자 동시 1건 강제) |
+| `POST /admin/collection/jobs/{id}/reprocess` | job_id 자체 idempotency — `RedisKey.collection_lock(user_id)` 또는 ReprocessRequest unique index (api-conventions.md §8) |
 | consent middleware | Redis cache (§7) |
 | CSO 재임포트 | api+worker 재시작 (§9) |
 

@@ -48,6 +48,7 @@
 | C-18. `/admin/auth/refresh` JwtAuthMiddleware 화이트리스트 누락 | refresh endpoint 가 인증 필요로 처리돼 access 만료 후 갱신 불가. `/auth/refresh` 와 동일하게 우회. codex review C-3. | `app/middleware/jwt_auth.py:WHITELIST_PATTERNS` |
 | C-19. LLM 동시성 가드 (`_global_sem`, `_user_sems`) 가 per-process asyncio.Semaphore | `UVICORN_WORKERS>1` 또는 다중 컨테이너에서 전역 `LLM_MAX_CONCURRENT=8` 약속 깨짐 (워커 4 × 8 = 실효 32). Redis 분산 semaphore (Lua atomic acquire/release + INCR/DECR + 60s TTL) 로 교체. `RedisKey.llm_global_active_count()` / `llm_user_active_count(user_id)` 신규. `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30` env 추가. multi-worker 동시성 정책 검수에서 발견. | [`sdd/concurrency.md §5`](sdd/concurrency.md), `app/llm_provider/_concurrency.py`, `app/contracts.py` RedisKey |
 | C-20. multi-worker 정책 부재 | `UVICORN_WORKERS` env 신규 (default 1). DB pool 은 process 독립이므로 운영자가 `UVICORN_WORKERS * PG_API_POOL_MAX + PG_WORKER_POOL_MAX ≤ PostgreSQL max_connections` 가 되도록 조정. docker-compose.yml api command 가 `--workers ${UVICORN_WORKERS:-1}` 사용. env-vars.md §Worker 병렬 정책 에 공식 표 추가. | [`ops/env-vars.md`](ops/env-vars.md) §Worker 병렬 정책, `docker-compose.yml`, `config.py` |
+| C-21. C-15 (rotation Lua CAS) 의 잔여 race window | C-15 fix 는 `verify+mark rotated` 만 Lua, `issue_refresh` (new meta HSET + new index SET) 가 Python 별도 호출이라 T1 'ok' 후 issue 진행 중 T2 'replay' family revoke 가 T1 신규 meta 를 SCAN 누락 가능한 좁은 window 존재. **옵션 B 채택** — `_LUA_VERIFY_ROTATE_ISSUE` 단일 Lua 가 verify · rotate · new meta INSERT · new index SET 4 변경을 단일 unit 으로 처리해 window 완전 제거. Python 은 `new_token = secrets.token_urlsafe(64)` + `new_jti = uuid4()` + `new_hmac = HMAC(new_token)` 만 사전 생성. 사용자 결정 2026-05-11. | [`security/token-handling.md`](security/token-handling.md) §동시 rotation race 차단, `app/security/jwt.py:_LUA_VERIFY_ROTATE_ISSUE` |
 
 ---
 
@@ -146,7 +147,7 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
 | P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex review + multi-worker) | 20 (해결 20 — C-2 부분 해소, C-6~20 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex review + multi-worker 정책으로 15건 해결 |
+| C-급 (인터뷰 식별 + codex review + multi-worker + rotation 옵션 B) | 21 (해결 21 — C-2 부분 해소, C-6~21 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex review + multi-worker 정책 + rotation 옵션 B 로 16건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 

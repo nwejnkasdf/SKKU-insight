@@ -144,27 +144,37 @@ async def revoke_all_user_refresh(user_id: str, redis):
 
 **핵심:** opaque token에서 user_id 직접 추출 불가. HMAC index가 유일한 역추적 경로이므로 회전 시 삭제 대신 `:rotated` 마킹으로 보존. 동일 user의 정상 refresh family는 별도 active index/메타로 관리되므로 영향 0.
 
-### 동시 rotation race 차단 (codex review C-7 → C-15)
+### 동시 rotation race 차단 (옵션 B, decision-backlog C-15 + C-21)
 
 위 Python pseudo-code 는 read-then-write 패턴 — 동일 token 의 동시 2 refresh 요청이 모두 active pointer 를 본 뒤 각자 새 token 을 발급할 수 있다 (family revoke 무력화).
 
-**실제 구현은 Redis Lua 스크립트로 atomic CAS**:
+**실제 구현은 Redis Lua 스크립트로 verify · rotate · issue 를 단일 unit atomic CAS** (`_LUA_VERIFY_ROTATE_ISSUE`):
 
 ```lua
--- KEYS[1] = refresh_index:{HMAC}, KEYS[2] = refresh:{user_id}:{jti} 메타
--- ARGV[1] = "{user_id}:{jti}:rotated"
+-- KEYS[1] = old refresh_index, KEYS[2] = old meta
+-- KEYS[3] = new meta, KEYS[4] = new refresh_index (Python 이 미리 생성한 new_token 의 HMAC)
+-- ARGV[1] = "{uid}:{old_jti}:rotated"
+-- ARGV[2] = "{uid}:{new_jti}:active"
+-- ARGV[3..7] = ttl_seconds, now_iso, ip, ua, old_jti
 local pointer = redis.call('GET', KEYS[1])
 if not pointer then return {'miss', false} end
-local state = pointer 의 마지막 segment
+-- pointer 의 마지막 segment 가 'active' 아니면 'replay'
 if state ~= 'active' then return {'replay', pointer} end
 if redis.call('HGET', KEYS[2], 'active') ~= '1' then return {'replay', pointer} end
--- atomic transition
-redis.call('SET', KEYS[1], ARGV[1], 'EX', TTL)
-redis.call('HSET', KEYS[2], 'active', '0')
+-- atomic: 4 변경 한 unit
+redis.call('SET', KEYS[1], ARGV[1], 'EX', old_ttl)   -- old index :rotated
+redis.call('HSET', KEYS[2], 'active', '0')             -- old meta inactive
+redis.call('HSET', KEYS[3], 'created_at', ARGV[4], ...)  -- new meta INSERT
+redis.call('EXPIRE', KEYS[3], ttl)
+redis.call('SET', KEYS[4], ARGV[2], 'EX', ttl)        -- new active index
 return {'ok', pointer}
 ```
 
-Redis 는 Lua 를 단일 thread 로 실행하므로 동시 2 호출 중 한 호출만 `'ok'`, 다른 호출은 `'replay'` 받아 family revoke. 구현체는 `backend/app/security/jwt.py:_LUA_VERIFY_AND_MARK_ROTATED`.
+Python 은 `new_token = secrets.token_urlsafe(64)`, `new_jti = uuid4()`, `new_hmac = HMAC(new_token)` 를 미리 생성해 KEYS/ARGV 로 전달. Redis 는 Lua 를 단일 thread 로 실행하므로 동시 2 호출 중 한 호출만 `'ok'`, 다른 호출은 `'replay'` 받아 family revoke.
+
+**왜 verify 만 atomic 이 아닌 verify+issue 까지인가** (옵션 B, C-21): C-7 의 1차 fix 는 verify+rotate 만 Lua, issue (new meta + new index) 는 Python 별도 호출 → T1 'ok' 후 issue 진행 중 T2 'replay' family revoke 가 T1 신규 meta 를 SCAN 누락 가능한 좁은 window 존재. 본 Lua 가 issue 까지 단일 unit 으로 묶어 window 완전 제거. 구현체는 `backend/app/security/jwt.py:_LUA_VERIFY_ROTATE_ISSUE`.
+
+`issue_refresh` 함수는 login 경로 (race 없음 — 신규 token 이라 인덱스 충돌 없음) 전용으로 유지.
 
 ### Logout 시 refresh 폐기 (codex review C-2 → C-13)
 

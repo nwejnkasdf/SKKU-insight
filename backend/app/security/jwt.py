@@ -123,26 +123,38 @@ async def issue_refresh(
     return token, jti
 
 
-# Redis Lua: index 검증 + 상태 전이를 atomic CAS 로 (codex review 2026-05-11 C-7).
-# 동시 두 refresh 요청이 같은 active pointer 를 동시에 읽어 둘 다 새 token 을 발급
-# 하는 race 차단. Lua 스크립트는 Redis 가 단일 thread 로 실행 → atomic.
+# Redis Lua: verify + mark rotated + issue new (decision-backlog C-21, 옵션 B).
+# C-7 (Lua CAS) 후속 강화 — 기존에는 verify+mark rotated 만 Lua atomic, issue_refresh
+# (new meta HSET + new index SET) 가 Python 별도 호출이라 좁은 window 가 존재
+# (T1 'ok' 후 issue_refresh 진행 중 T2 'replay' family revoke 가 T1 신규 meta 를
+# 누락 가능). 본 Lua 가 verify·rotate·issue 를 단일 unit 으로 처리해 window 완전 제거.
 #
-# KEYS[1] = refresh_index:{HMAC(token)}
-# KEYS[2] = refresh:{user_id}:{old_jti}  (meta hash)
-# ARGV[1] = rotated_pointer_value  ("{user_id}:{old_jti}:rotated")
+# Python 은 new_token / new_jti / new_token_hmac 를 미리 생성해 KEYS/ARGV 로 전달.
+#
+# KEYS[1] = refresh_index:{HMAC(old_token)}       (old index)
+# KEYS[2] = refresh:{user_id}:{old_jti}            (old meta)
+# KEYS[3] = refresh:{user_id}:{new_jti}            (new meta — Lua 가 INSERT)
+# KEYS[4] = refresh_index:{HMAC(new_token)}        (new index — Lua 가 SET)
+# ARGV[1] = rotated_pointer_value                  ("uid:old_jti:rotated")
+# ARGV[2] = new_active_pointer_value                ("uid:new_jti:active")
+# ARGV[3] = ttl_seconds (str int)
+# ARGV[4] = now_iso (created_at / last_used_at)
+# ARGV[5] = ip
+# ARGV[6] = ua_short
+# ARGV[7] = old_jti (rotated_from)
 #
 # 반환:
-#   {"ok",      pointer}  — atomic transition 성공 (caller 가 새 token 발급)
-#   {"replay",  pointer}  — 이미 rotated/revoked 또는 meta 비활성 (caller 가 family revoke)
-#   {"miss",    nil}      — index 없음 (caller 가 단순 401)
-_LUA_VERIFY_AND_MARK_ROTATED = """
+#   {"ok",      pointer}  — verify+rotate+issue 완료 (new meta/index 이미 active)
+#   {"replay",  pointer}  — 이미 rotated/revoked 또는 meta 비활성 (caller family revoke)
+#   {"miss",    nil}      — index 없음 (caller 단순 401)
+_LUA_VERIFY_ROTATE_ISSUE = """
 local pointer = redis.call('GET', KEYS[1])
 if not pointer then
     return {'miss', false}
 end
-local sep1, sep2 = string.find(pointer, ':', 1, true), nil
+local sep1 = string.find(pointer, ':', 1, true)
 if not sep1 then return {'replay', pointer} end
-sep2 = string.find(pointer, ':', sep1 + 1, true)
+local sep2 = string.find(pointer, ':', sep1 + 1, true)
 if not sep2 then return {'replay', pointer} end
 local state = string.sub(pointer, sep2 + 1)
 if state ~= 'active' then
@@ -152,14 +164,29 @@ local active = redis.call('HGET', KEYS[2], 'active')
 if active ~= '1' then
     return {'replay', pointer}
 end
--- atomic transition: index → :rotated (TTL 유지) + meta active='0'
-local ttl = redis.call('TTL', KEYS[1])
-if ttl and ttl > 0 then
-    redis.call('SET', KEYS[1], ARGV[1], 'EX', ttl)
+local ttl = tonumber(ARGV[3])
+-- 1) old index → :rotated (기존 TTL 유지 — 단 GET 이후 다른 호출이 끼어들 가능성
+--    무시 가능 — 본 Lua 자체가 atomic 이므로 GET TTL→SET 사이에 외부 변경 불가).
+local old_ttl = redis.call('TTL', KEYS[1])
+if old_ttl and old_ttl > 0 then
+    redis.call('SET', KEYS[1], ARGV[1], 'EX', old_ttl)
 else
     redis.call('SET', KEYS[1], ARGV[1])
 end
+-- 2) old meta inactive (감사 로그)
 redis.call('HSET', KEYS[2], 'active', '0')
+-- 3) new meta INSERT — 모든 필드 한 번에
+redis.call('HSET', KEYS[3],
+    'created_at', ARGV[4],
+    'last_used_at', ARGV[4],
+    'ip', ARGV[5],
+    'ua', ARGV[6],
+    'rotated_from', ARGV[7],
+    'active', '1'
+)
+redis.call('EXPIRE', KEYS[3], ttl)
+-- 4) new active index
+redis.call('SET', KEYS[4], ARGV[2], 'EX', ttl)
 return {'ok', pointer}
 """
 
@@ -171,29 +198,26 @@ async def verify_refresh_and_rotate(
     ua: str,
     redis: aioredis.Redis,
 ) -> tuple[str, str, UUID]:
-    """refresh token 검증 + family revoke 감지 + 회전 + 새 (token, jti, user_id) 반환.
+    """refresh token 검증 + family revoke 감지 + 회전 + 새 token 발급 — atomic.
 
-    Lua CAS (codex C-7): index 의 'active' 상태 확인 + ':rotated' 전이 + meta active='0'
-    셋팅을 atomic 단일 연산으로. 동시 race 시 한 호출만 'ok', 나머지는 'replay'.
+    옵션 B (decision-backlog C-21): verify · rotate · issue 를 Lua 단일 unit 으로 처리해
+    C-7 의 잔여 race window (Lua CAS 후 Python issue_refresh 사이) 완전 제거.
+
+    Python 은 new_token / new_jti / new_token_hmac 만 사전 생성. Lua 가 KEYS/ARGV 로
+    받아 모든 Redis 변경 (old index :rotated, old meta inactive, new meta, new index)
+    을 atomic 으로 수행.
 
     'miss'   → 단순 RefreshRevoked (user_id 역추적 불가)
-    'replay' → 이미 회전·폐기됨 → user family revoke 후 RefreshRevoked
-    'ok'     → 새 token 발급 (issue_refresh)
+    'replay' → 이미 회전·폐기 → user family revoke 후 RefreshRevoked
+    'ok'     → 새 token 활성 (Lua 가 이미 INSERT). Python 은 token/jti 만 반환
     """
-    token_hmac = compute_refresh_hmac(refresh_token)
-    # 'placeholder' — pointer 를 모르므로 Lua 가 받은 pointer 그대로 :rotated 치환.
-    # 즉 ARGV[1] 은 Lua 내부에서 동적 substitute (실제 코드는 Lua 가 pointer 의
-    # 마지막 segment 만 ':rotated' 로 swap 하면 더 정확하지만, pointer format 이
-    # `{uid}:{jti}:{state}` 로 고정이므로 ARGV[1] = pointer_without_state + ':rotated' 형태로
-    # caller 가 만들어 전달하는 게 더 단순. 그러나 caller 는 pointer 모르므로 일단
-    # ARGV[1] 을 빈 sentinel 로 두고 Lua 가 pointer 에서 추출).
-    # → 더 단순: 호출 전에 Python 이 GET 으로 pointer 를 한 번 본 뒤 ARGV 만들고
-    # Lua 가 GETSET 으로 atomic swap. 단 그 사이에 다른 worker 가 끼어들 수 있으므로
-    # Lua 안에서 처리하는 게 더 안전. 그래서 ARGV 는 사용하지 않고 Lua 내부에서
-    # pointer 의 ':active' suffix 만 ':rotated' 로 swap 한다.
-    index_key = RedisKey.refresh_index(token_hmac)
-    # 우선 user_id/jti 만 추출하기 위해 1회 GET (전이는 Lua atomic).
-    pointer = await redis.get(index_key)
+    settings = get_settings()
+    ttl_seconds = settings.JWT_REFRESH_DAYS * 86_400
+
+    # 1) 사전 GET — user_id/old_jti 추출 위해 1회 GET. Lua 안에서 다시 검증하므로 race 안전.
+    old_token_hmac = compute_refresh_hmac(refresh_token)
+    old_index_key = RedisKey.refresh_index(old_token_hmac)
+    pointer = await redis.get(old_index_key)
     if pointer is None:
         raise RefreshRevoked("index_miss")
     pointer_str = pointer if isinstance(pointer, str) else pointer.decode()
@@ -205,14 +229,35 @@ async def verify_refresh_and_rotate(
         user_id = UUID(user_id_str)
     except ValueError as exc:
         raise RefreshRevoked("malformed_index") from exc
-    meta_key = RedisKey.refresh_token(user_id, old_jti)
+
+    # 2) Python 에서 new token / jti / hmac 사전 생성 — Lua 의 KEYS/ARGV 로 전달
+    new_token = secrets.token_urlsafe(64)
+    new_jti = str(uuid4())
+    new_token_hmac = compute_refresh_hmac(new_token)
+
+    old_meta_key = RedisKey.refresh_token(user_id, old_jti)
+    new_meta_key = RedisKey.refresh_token(user_id, new_jti)
+    new_index_key = RedisKey.refresh_index(new_token_hmac)
+
     rotated_pointer = f"{user_id_str}:{old_jti}:rotated"
+    new_active_pointer = f"{user_id_str}:{new_jti}:active"
+    now_iso = _now_iso()
+
+    # 3) Lua atomic: verify + rotate + issue 단일 unit
     result = await redis.eval(  # type: ignore[misc]
-        _LUA_VERIFY_AND_MARK_ROTATED,
-        2,
-        index_key,
-        meta_key,
+        _LUA_VERIFY_ROTATE_ISSUE,
+        4,
+        old_index_key,
+        old_meta_key,
+        new_meta_key,
+        new_index_key,
         rotated_pointer,
+        new_active_pointer,
+        str(ttl_seconds),
+        now_iso,
+        ip,
+        ua[:200],
+        old_jti,
     )
     status = _redis_str(result[0]) if result else None
     if status == "miss":
@@ -223,10 +268,7 @@ async def verify_refresh_and_rotate(
     if status != "ok":
         await revoke_all_user_refresh(user_id, redis)
         raise RefreshRevoked(f"unknown_lua_status:{status}")
-    # 새 token + meta + active index
-    new_token, new_jti = await issue_refresh(
-        user_id, ip=ip, ua=ua, redis=redis, rotated_from=old_jti
-    )
+    # Lua 가 new meta + new index 이미 SET 완료 — Python 은 token/jti 반환만
     return new_token, new_jti, user_id
 
 

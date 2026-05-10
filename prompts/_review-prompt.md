@@ -109,7 +109,7 @@
 | `MockProvider` LLM default | `decisions.md §3` |
 | `CodexOAuthProvider` local experimental, 1차 default 아님 | `decisions.md §3`, `sdd/architecture.md` |
 | 30일 grace period 미구현 (즉시 cascade) | `decision-backlog.md C-2` |
-| DoRA 모듈 stub 응답 (P0-1 미해결) | `decision-backlog.md P0-1` |
+| DoRA 모듈 stub 응답 (STUB_MODE env 또는 vLLM 부트 실패 시 자동 폴백) | `decision-backlog.md P0-1`, `clickbait_module/app/main.py` lifespan |
 | 빅테크 RSS URL `# TODO: verify URL` 마커 | A4가 부트 시 자동 검증 — 권고 X |
 | `archived` 5번째 leaf 상태 (SRS는 4 상태) | `srs/09-open-issues-resolved.md §5`, 운영 결정 |
 | 3단계 강등 (active → stale → retract → archived) | `cso-topic-traversal.md §3.2` |

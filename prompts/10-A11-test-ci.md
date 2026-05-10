@@ -31,7 +31,7 @@
 ### 2. GitHub Actions 워크플로
 - `.github/workflows/contracts.yml` — 6 check + OpenAPI/codegen diff (ci-cd.md)
 - `.github/workflows/ci.yml` — lint(ruff) + type(mypy --strict, tsc --strict) + test(pytest, vitest)
-- `.github/workflows/build.yml` — Docker 이미지 빌드 (api, worker, clickbait, admin-console)
+- `.github/workflows/build.yml` — Docker 이미지 빌드 (api, worker, admin-console). clickbait는 옵션(`vars.CLICKBAIT_SELF_HOSTED == 'true'`일 때만; default는 외부 호스팅)
 - `.github/workflows/electron-build.yml` — Windows installer (수동 dispatch, 1차 미사용)
 
 ### 3. AT-01~15 자동 테스트

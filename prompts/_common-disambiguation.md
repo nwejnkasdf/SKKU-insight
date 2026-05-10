@@ -66,7 +66,7 @@
 - **emerging leaf는 active trace path 끝 노드 산하에서만 분기**. core 슬롯 5개 중 1개는 emerging quota.
 - **임베딩 미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein.
 - **NFR-21 30일 grace는 1차 시연 미해소**. 즉시 cascade 진행 (decision-backlog C-2).
-- **DoRA 낚시성 모듈은 P0-1**. 사용자 공유 전까지 stub `decision="clean"`로 진행.
+- **DoRA 낚시성 모듈 P0-1 해결됨 (2026-05-11)**. 모듈 위치 `clickbait_module/`, 서빙 엔진 vLLM(LoRA merge 방식), 호스팅·transport 운영 결정. backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. 모듈 다운/부트 실패 시 자동 stub `decision="clean"` 폴백 + backend는 `ClassifierUnavailable`로 받아 재판정/제외/운영자 로그 처리.
 - **pseudo cold-start Document는 sentinel Source(`name="cold_start_pseudo"`)에 묶음**.
 
 ## 출력 형식 (PR 또는 결과 보고)

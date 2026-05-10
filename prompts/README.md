@@ -19,7 +19,7 @@
 | 0b | A2 backend-foundation | [`01-A2-backend.md`](01-A2-backend.md) | ⬜ | |
 | 0b | A3 cso-topic | [`02-A3-cso-topic.md`](02-A3-cso-topic.md) | ⬜ | |
 | 1 | A4 collection | [`03-A4-collection.md`](03-A4-collection.md) | ⬜ | |
-| 1 | A5 clickbait | [`04-A5-clickbait.md`](04-A5-clickbait.md) | 🟡 P0-1 대기 | DoRA 모듈 경로 사용자 공유 후 |
+| 1 | A5 clickbait | [`04-A5-clickbait.md`](04-A5-clickbait.md) | 🟢 외부 서비스 완료 / 🟡 backend 통합 대기 | clickbait_module/ + vLLM AsyncLLMEngine 작성 완료 (commit 4066b20). backend `app/clickbait_client/`는 A2+A4 완료 후 |
 | 1 | A6 interest-bayesian | [`05-A6-interest-bayesian.md`](05-A6-interest-bayesian.md) | ⬜ | |
 | 2 | A7 leaf-lifecycle + traversal | [`06-A7-leaf-traversal.md`](06-A7-leaf-traversal.md) | ⬜ | |
 | 2 | A8 recommendation | [`07-A8-recommendation.md`](07-A8-recommendation.md) | ⬜ | |

@@ -45,8 +45,14 @@
 | API 명세 8종 + 통신 규약 | ✅ 완료 |
 | DB 스키마 + ERD | ✅ 완료 |
 | 동시성 가드 + 멀티 에이전트 운영 헌법 | ✅ 완료 |
-| **코드 작성 (Phase 0a~4)** | 🟡 대기 — 사용자 명령 시 시작 |
-| 시연 데이터 시드 + 발표 자료 | ⬜ |
+| **Phase 0a — A1 docs + A2-stub** | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
+| **Phase 0b — A2 backend-foundation** | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 17 endpoint 본문 + 35건 결함 해소) |
+| Phase 0b — A3 cso-topic (CSO 임포트 + BroadInterest 시드) | 🟡 다음 |
+| Phase 1 — A4 collection / A5 clickbait (외부 모듈 ✅) / A6 interest-bayesian | ⬜ |
+| Phase 2 — A7 leaf-traversal / A8 recommendation | ⬜ |
+| Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
+| Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
+| 시연 리허설 + 발표 자료 | ⬜ |
 
 ## 빠른 진입
 
@@ -70,29 +76,45 @@
 4. **관리자 콘솔에서 수집 실패 재실행** → 성공
 5. **동의 철회** → 추천 중단 + 재동의/계정삭제 분기
 
-## 빠른 시연 (코드 완성 후)
+## 빠른 시연 (PR #7 머지 후 가능 — A2 완료)
 
 ```bash
-# 1. 깨끗한 부트
+# 1. .env 준비
+cp .env.example .env
+# JWT_SECRET (64+ random), POSTGRES_PASSWORD, ADMIN_BOOTSTRAP_PASSWORD 채우기
+# placeholder 값은 lifespan validator 가 자동 차단 (decision-backlog C-22)
+
+# 2. 깨끗한 부트
 docker compose down -v
 docker compose up -d postgres redis
 
-# 2. DB·CSO·관리자 시드
-make migrate          # alembic upgrade head
-make import-cso       # CSO 14k 노드 임포트
-make create-admin     # 관리자 계정 생성
+# 3. DB·관리자 시드 (A2 산출)
+make migrate          # alembic upgrade head — 8 테이블 + sentinel + SourcePolicy 3행
+make create-admin     # AdminUser 1행 (must_change_password=true)
 
-# 3. 5+ 페르소나 + 14일 인터랙션 시드
-make seed --full
+# 4. (A3 머지 후) CSO 14k 노드 임포트 + BroadInterest 12행 시드
+make import-cso       # A3 산출
 
-# 4. 모든 서비스 부트
-docker compose up -d  # api + worker + clickbait-detector + admin-console
+# 5. (A12 머지 후) 5+ 페르소나 + 14일 인터랙션 시드
+make seed --full      # A12 산출
 
-# 5. Electron 클라이언트
+# 6. 모든 서비스 부트
+docker compose up -d  # postgres + redis + api + worker + admin-console
+                      # clickbait-detector 는 운영 결정 (CLICKBAIT_SERVICE_URL env 로 외부 호스팅)
+
+# 7. (A9 머지 후) Electron 클라이언트
 cd client && npm install && npm start
 ```
 
-기본 LLM provider는 `mock` (deterministic fixture)이라 외부 API 키 없이 동작. 정식 API 시연 시 `LLM_PROVIDER=openai` + `OPENAI_API_KEY` 설정.
+검증 보조 (A2 완료 시점부터 사용 가능):
+
+```bash
+make test       # docker compose exec api pytest tests -v
+make lint       # ruff + mypy --strict
+make check-all  # 6 cross-check (api_docs / schema / env / error_codes / redis_keys / contracts)
+```
+
+기본 LLM provider 는 `mock` (deterministic fixture)이라 외부 API 키 없이 동작. 정식 API 시연 시 `LLM_PROVIDER=openai` + `OPENAI_API_KEY` 설정. multi-worker 시 `UVICORN_WORKERS=N` 환경변수 (Redis 분산 semaphore 가 전역 LLM 캡 보장).
 
 ## 기술 스택
 
@@ -134,4 +156,4 @@ docs/
 
 ---
 
-**다음 액션**: [`AGENTS.md`](AGENTS.md) §"에이전트 분할" 표의 Phase 0a (A2-stub)부터 시작 — `backend/app/contracts.py` + 모든 endpoint signature stub만 작성하는 단일 세션. 사용자 검수 + OpenAPI codegen 후 본격 Phase 0b 진입.
+**다음 액션**: A2 PR #7 머지 → A3 cso-topic ([`prompts/02-A3-cso-topic.md`](prompts/02-A3-cso-topic.md)) — CSO 3.4 임포트 + BroadInterest 12행 시드 + NetworkX 캐시 + `/topics/*` endpoint. A3 완료 후 onboarding cluster_ids 검증이 실제 통과 → end-to-end 시연 시나리오 가능.

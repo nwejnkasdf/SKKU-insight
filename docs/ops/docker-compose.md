@@ -10,26 +10,19 @@
 - `admin-console/Dockerfile`
 - `clickbait_module/Dockerfile` (옵션, 자체 호스팅 시) — clickbait 모듈은 호스팅·transport가 운영 결정. [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조
 
-## 서비스 정의 골격
+## 서비스 정의 (A2 실제 산출 — `docker-compose.yml`)
+
+A2 가 만든 실제 `docker-compose.yml` 은 본 문서의 골격을 따르되 다음과 같이 단순화:
+- `version` 필드 제거 (compose v2+ 에서 deprecated)
+- `x-backend-base` anchor 미사용 (개별 service 명시)
+- api/worker 의 `volumes: ./backend:/app:ro` 제거 — Dockerfile 이 `COPY . /app` 으로 빌드 시점에 포함
+- api `command` 가 `--workers ${UVICORN_WORKERS:-1}` 사용 (멀티 워커 정책, decision-backlog C-20)
+- worker `command` 가 `python -m app.worker` — RQ 2.x 의 `Connection` context manager 제거 + `worker/__init__.py` 가 jobs 패키지 사전 import 로 unpickle 보장
+- admin-console 은 1차 placeholder (Next.js stub — A10 가 본격 구현)
+- clickbait-detector 는 default 미포함 (`CLICKBAIT_SERVICE_URL` env 로 외부 호스팅 우선)
 
 ```yaml
-# docker-compose.yml
-version: "3.9"
-
-x-backend-base: &backend-base
-  build:
-    context: ./backend
-    dockerfile: Dockerfile
-  env_file: .env
-  depends_on:
-    postgres:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-  volumes:
-    - ./backend:/app:ro
-  restart: unless-stopped
-
+# docker-compose.yml (A2 실제 산출)
 services:
   postgres:
     image: postgres:16-alpine
@@ -63,28 +56,40 @@ services:
     restart: unless-stopped
 
   api:
-    <<: *backend-base
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # demo 모드는 --reload 제거
+    build: { context: ./backend, dockerfile: Dockerfile }
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+    command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1}"]
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 3s
       retries: 5
 
   worker:
-    <<: *backend-base
-    command: rq worker --with-scheduler default leaf_lifecycle merge_evaluation summary_generation
+    build: { context: ./backend, dockerfile: Dockerfile }
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
+    command: ["python", "-m", "app.worker"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      api:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "rq info --url $${REDIS_URL} || exit 1"]
+      test: ["CMD-SHELL", "rq info --url $${REDIS_URL_QUEUE} | grep -q '0 workers, 0 queues' && exit 1 || exit 0"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -110,22 +115,21 @@ services:
   #   restart: unless-stopped
 
   admin-console:
-    build:
-      context: ./admin-console
-      dockerfile: Dockerfile
-    env_file: .env
+    # 1차 placeholder (A10 본격 구현 시 build context 교체).
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["sh", "-c", "echo 'admin-console placeholder' && tail -f /dev/null"]
     environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:8000
+      NEXT_PUBLIC_API_BASE: ${API_PUBLIC_BASE}
     ports:
       - "127.0.0.1:3001:3000"
     depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
+      api: { condition: service_healthy }
 
 volumes:
-  pg_data:
-  redis_data:
+  pg_data: {}
+  redis_data: {}
 ```
 
 ## .env 매핑
@@ -136,10 +140,13 @@ volumes:
 |---|---|
 | `${POSTGRES_DB}` | `POSTGRES_DB=insight` |
 | `${POSTGRES_USER}` | `POSTGRES_USER=insight` |
-| `${POSTGRES_PASSWORD}` | `POSTGRES_PASSWORD=...` |
-| `${REDIS_URL}` (worker) | `REDIS_URL=redis://redis:6379/0` |
-| `${LLM_PROVIDER}` | api/worker가 사용 |
-| `${ADMIN_BOOTSTRAP_*}` | api 첫 부팅 admin 생성 |
+| `${POSTGRES_PASSWORD}` | `POSTGRES_PASSWORD=...` (lifespan 이 placeholder 차단, C-22) |
+| `${DATABASE_URL}` | `postgresql+asyncpg://...` (api/worker) |
+| `${REDIS_URL}` | `redis://redis:6379/0` (default DB) |
+| `${REDIS_URL_QUEUE}` (worker) | `redis://redis:6379/2` (RQ 큐) |
+| `${UVICORN_WORKERS}` | default `1`. 멀티 워커 시 LLM 동시성은 Redis 분산 (C-19), DB pool 합산은 운영자 책임 (C-20) |
+| `${LLM_PROVIDER}` | api/worker 가 사용. mock(default) / openai / anthropic / openrouter / codex_oauth |
+| `${ADMIN_BOOTSTRAP_*}` | api 첫 부팅 admin 생성. password 는 정책 통과해야 (C-22) |
 
 ## profiles (선택)
 
@@ -150,15 +157,22 @@ volumes:
 ```bash
 # 1회 setup
 cp .env.example .env
+# JWT_SECRET (64+ random), POSTGRES_PASSWORD, ADMIN_BOOTSTRAP_PASSWORD 채우기
+# placeholder 값은 lifespan validator 가 부팅 시 차단 (C-22)
 docker compose build
 docker compose up -d postgres redis
-make migrate         # alembic upgrade head
-make import-cso      # CSO 임포트 (1회)
-make create-admin    # AdminUser 1행 생성
+make migrate         # alembic upgrade head (8 테이블 + sentinel + SourcePolicy 3행)
+make create-admin    # AdminUser 1행 (must_change_password=true)
+make import-cso      # (A3 머지 후) CSO 임포트 + BroadInterest 12 시드
 
 # 매일 부트
 docker compose up -d
 docker compose logs -f api worker
+
+# A2 가 제공하는 검증 보조
+make test            # docker compose exec api pytest tests -v
+make lint            # ruff + mypy --strict
+make check-all       # 6 cross-check (api_docs / schema / env / error_codes / redis_keys / contracts)
 ```
 
 ## 종료/리셋

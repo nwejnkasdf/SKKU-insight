@@ -50,7 +50,10 @@ class AccountDeletionRequest(BaseModel):
 class AccountDeletionResponse(BaseModel):
     request_id: UUID
     status: Literal["queued"]
-    expected_deletion_by: datetime  # NFR-21: 30일 이내 (1차 시연은 즉시 cascade — decision-backlog.md C-2)
+    # 1차 시연: now() + 5분 (RQ async worker가 CASCADE DELETE 실행, A2 결정 2026-05-11).
+    # 정상 시 30s~2min 내 완료. NFR-21이 명시한 30일 grace period는 post-시연 폴리시
+    # (decision-backlog.md C-2). 폴링 endpoint는 1차 미제공 — 5분 후 자동 완료 가정.
+    expected_deletion_by: datetime
 ```
 
 ## 비즈니스 룰
@@ -63,9 +66,13 @@ class AccountDeletionResponse(BaseModel):
   - 사용자가 재동의하거나 계정 삭제를 선택할 때까지 클라이언트는 UI-05 변형 화면만 제공
 - `POST /consent/account-deletion`:
   - 신규 개인화 처리 즉시 중단 (NFR-21 정합)
-  - **1차 시연은 즉시 cascade 실행** (`decision-backlog.md` C-2). NFR-21이 명시한 30일 grace period는 별도 worker로 soft delete + 지연 cascade가 필요하나 1차 범위에서 미구현. 시연 후 폴리시 단계에서 보강.
-  - 삭제 대상: User, UserConsent, UserEvent, UserInterestState, **UserCSOTraversal**, SavedDocument, HiddenDocument, NotInterestedTopic, DynamicLeafTopic (사용자 소유분), Recommendation 이력
-  - 익명 통계 (ClickbaitResult 집계, CollectionJob 카운트)는 보존
+  - **1차 시연: RQ async 큐잉 + worker가 5분 내 CASCADE DELETE 실행** (A2 결정 2026-05-11, `decision-backlog.md` C-2). 즉시 inline cascade 대신 async로 변경한 이유: large user data 응답 지연 회피 + 향후 grace period 도입 시 동일 worker 함수 재활용. NFR-21이 명시한 30일 grace period는 post-시연 폴리시.
+  - 중복 enqueue 방지: Redis lock `account_deletion:{user_id}` NX EX=600. 중복 시 409 `consent.deletion_in_progress`.
+  - 응답 즉시: 사용자 모든 refresh family revoke + recommendation 캐시 폐기 + consent 캐시 invalidate. 실제 row 삭제는 worker.
+  - Worker function이 단일 트랜잭션에서 `DELETE FROM "user"` (FK CASCADE 자동 전파) + Redis 정리 (`refresh:{user_id}:*`, `recommendation:{user_id}`, `consent:active:{user_id}`, `lock:*:{user_id}`, `events:buffer:{user_id}` DEL).
+  - 삭제 대상 (FK CASCADE로 자동): User, UserConsent, UserEvent, UserInterestState, **UserCSOTraversal**, SavedDocument, HiddenDocument, NotInterestedTopic, DynamicLeafTopic (사용자 소유분), Recommendation 이력.
+  - 익명 통계 (ClickbaitResult 집계, CollectionJob 카운트)는 보존.
+  - RQ retry max 3 + exponential backoff. 5분 초과 실패 시 admin alert (A11 후속).
 
 ## 오류 응답
 

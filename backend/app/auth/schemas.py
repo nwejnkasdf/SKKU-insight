@@ -1,7 +1,7 @@
 """auth Pydantic schemas — docs/api/auth.md.
 
-Phase 0a stub: schema 정의는 정확히 (OpenAPI export 가능). validator 는 Phase 0b 가 추가
-(예: password-policy.md 룰).
+email 정규화 3겹 방어 (auth-flow.md §결정 핀): Pydantic validator 가 첫 겹.
+SignupRequest / LoginRequest 의 email 은 lowercase + trim 후 EmailStr 검증.
 """
 from __future__ import annotations
 
@@ -9,14 +9,23 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
+
+
+def _normalize_email(v: str) -> str:
+    """lowercase + trim. EmailStr 검증 전 단계."""
+    if not isinstance(v, str):
+        return v
+    return v.strip().lower()
 
 
 class SignupRequest(BaseModel):
-    """회원가입 요청. password 정책 검증은 Phase 0b 가 password-policy.md 룰로."""
+    """회원가입 요청. email 정규화 + password 정책 검증 (service 단)."""
 
     email: EmailStr
     password: str
+
+    _normalize_email = field_validator("email", mode="before")(_normalize_email)
 
 
 class SignupResponse(BaseModel):
@@ -32,6 +41,8 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+    _normalize_email = field_validator("email", mode="before")(_normalize_email)
+
 
 class TokenPair(BaseModel):
     """JWT access + refresh 쌍. token_type 은 Bearer 고정."""
@@ -44,6 +55,12 @@ class TokenPair(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    """로그아웃 시 refresh token 함께 폐기 (codex C-2). access jti 는 헤더의 Bearer 에서 추출."""
+
+    refresh_token: str | None = None
 
 
 class MeResponse(BaseModel):

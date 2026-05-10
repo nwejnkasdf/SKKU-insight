@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     LLM_DAILY_TOKEN_BUDGET: int = 1_000_000
     LLM_MAX_CONCURRENT: int = 8
     LLM_MAX_CONCURRENT_PER_USER: int = 2
+    # decision-backlog C-19: 분산 semaphore acquire 시도 timeout (초). 초과 시
+    # LLMBudgetExceeded 와 동일하게 fallback 경로 진입.
+    LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS: int = 30
 
     # === Clickbait module (clickbait_module/ 자체 호스팅 또는 외부) ===
     CLICKBAIT_SERVICE_URL: str = ""
@@ -71,7 +74,8 @@ class Settings(BaseSettings):
 
     # === Admin bootstrap ===
     ADMIN_BOOTSTRAP_EMAIL: str = "admin@insight.test"
-    ADMIN_BOOTSTRAP_PASSWORD: str = "Admin-Bootstrap-2026!"
+    # 정책 위반 회피: "admin" 금칙어 + email local "admin" 포함 차단 룰 통과해야 함.
+    ADMIN_BOOTSTRAP_PASSWORD: str = "Bootstrap-Initial-2026-Strong!"
     ADMIN_BOOTSTRAP_ROLE: AdminRole = AdminRole.SUPER
 
     # === Rate limit (slowapi format) ===
@@ -94,6 +98,7 @@ class Settings(BaseSettings):
     LIFECYCLE_EVALUATOR: Literal["hybrid_d", "batch_llm", "rule_only"] = "hybrid_d"
     MERGE_EVALUATION_CRON: str = "0 3 * * 1"
     INTEREST_DECAY_CRON: str = "0 0 * * *"
+    NAVER_CLEANUP_CRON: str = "0 17 * * *"  # decision-backlog P1-6, NFR-25
 
     # === Concurrency guards (sdd/concurrency.md) ===
     EVENT_BATCH_SIZE: int = 20
@@ -112,6 +117,14 @@ class Settings(BaseSettings):
     API_PUBLIC_BASE: str = "http://localhost:8000"
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     STRUCTLOG_RENDER: Literal["json", "console"] = "json"
+
+    # === Process / worker (decision-backlog C-20) ===
+    # uvicorn worker process 수. 1=single-process (asyncio 만), N>1=multi-process.
+    # multi-process 시 LLM semaphore 와 동시성 가드는 Redis-distributed 로 동작
+    # (`app/llm_provider/_concurrency.py`). DB pool 은 process 별 독립이므로
+    # 총 connection = UVICORN_WORKERS * PG_API_POOL_MAX + (worker container) *
+    # PG_WORKER_POOL_MAX 가 PostgreSQL `max_connections` 를 넘지 않도록 운영자가 조정.
+    UVICORN_WORKERS: int = 1
 
 
 @lru_cache(maxsize=1)

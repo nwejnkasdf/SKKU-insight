@@ -80,20 +80,42 @@ UI-01 가입 / UI-05 변경 화면:
 
 ## 저장
 
-- `passlib[bcrypt]` 사용
+- **`bcrypt` 라이브러리 직접 호출** (passlib 미사용 — A2 결정 2026-05-11)
 - cost (log_rounds) = 12
-- 검증: `bcrypt.verify(plain, hashed)`
+- 검증: `bcrypt.checkpw(prep(plain), hashed)`
+- **SHA-256 hex pre-hash** 사용 — bcrypt 4.x 의 72 byte 한도 회피 + 정책의 128자/UTF-8 한국어 지원
 - 향후 `argon2` 마이그레이션 시 dual-hash 마이그레이션 룰 (사용자 다음 로그인 시 자동 재해시)
 
+### 왜 passlib 이 아닌가 (decision-backlog C-11)
+
+passlib 1.7.4 (마지막 릴리즈 2020-10) 이 bcrypt 4.x 와 호환 불가:
+- `_bcrypt.__about__` 속성 제거 — passlib 의 version detection 실패
+- bcrypt 4.x 의 72 byte ValueError 강제 — passlib detect_wrap_bug 가 255 byte 입력으로 실패
+
+passlib 의 추가 기능 (multi-scheme, deprecation hint, needs_update) 은 1차 시연에 불필요.
+
+### 구현 (`backend/app/security/password.py`)
+
 ```python
-from passlib.context import CryptContext
+import bcrypt
+import hashlib
 
-pwd_context = CryptContext(schemes=["bcrypt"], default="bcrypt", bcrypt__rounds=settings.bcrypt_cost)
+def _prep(password: str) -> bytes:
+    """SHA-256 hex digest → 64 ASCII bytes (bcrypt 72byte 한도 + null byte 없음)."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest().encode("ascii")
 
-def hash_password(p: str) -> str: return pwd_context.hash(p)
-def verify_password(p: str, h: str) -> bool: return pwd_context.verify(p, h)
-def needs_rehash(h: str) -> bool: return pwd_context.needs_update(h)
+def hash_password(p: str) -> str:
+    salt = bcrypt.gensalt(rounds=settings.BCRYPT_COST)
+    return bcrypt.hashpw(_prep(p), salt).decode("ascii")
+
+def verify_password(p: str, h: str) -> bool:
+    try:
+        return bcrypt.checkpw(_prep(p), h.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
 ```
+
+SHA-256 pre-hash 보안 영향: bcrypt 자체 cost 12 (≈ 4,096 round) + sha-256 1 round. sha-256 충돌 확률 무시 가능 (2^128 entropy 유지).
 
 ## 변경 시
 

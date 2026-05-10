@@ -20,7 +20,12 @@
 class User(Base):
     __tablename__ = "user"
     user_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    # email 은 **lowercase + trim 정규화 후 저장**. 3겹 방어 (auth-flow.md):
+    #   1) Pydantic validator (요청 경계)
+    #   2) service 계층 (방어적, CLI/시드도 통과)
+    #   3) DB functional index `LOWER(email)` partial UNIQUE (raw SQL bypass 차단)
+    # 대소문자·양끝 공백 변형 우회 차단. column 자체는 case-preserved storage X — 정규화된 값만 저장.
+    email: Mapped[str] = mapped_column(String(320), index=False, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -30,11 +35,20 @@ class User(Base):
     # 자세히는 algorithms/cso-topic-traversal.md §5.
     active_day_counter: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_active_calendar_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-
-    # __table_args__: UNIQUE(email) WHERE deleted_at IS NULL  (Postgres partial index)
+    # 로그인 성공 시 갱신 (auth-flow.md §2 시퀀스, api/auth.md §비즈니스 룰).
+    # 본 컬럼은 decision-backlog C-10 으로 schema.md 에 추가됨 (A2 2026-05-11).
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 ```
 
-인덱스: `ix_user_email` UNIQUE WHERE deleted_at IS NULL.
+인덱스(Alembic raw DDL):
+
+```sql
+CREATE UNIQUE INDEX ix_user_email
+  ON "user" (LOWER(email))
+  WHERE deleted_at IS NULL;
+```
+
+functional index 사유: 클라이언트가 `Test@TEST.com` ↔ `test@test.com` 으로 중복 가입을 시도해도 차단. service/Pydantic 정규화가 실수로 빠져도 DB 단에서 거름. 조회도 항상 `WHERE LOWER(email) = :normalized_email` 패턴 사용.
 
 ### AdminUser
 
@@ -139,7 +153,7 @@ class UserCSOTraversal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 ```
 
-CHECK (`status IN ('active','stale','archived')`). CHECK (`array_length(path, 1) >= 1`). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용). path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
+CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용). path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
 
 > **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3.
 
@@ -461,9 +475,17 @@ class TopicLinkageError(Base):
 
 ## 시드 데이터
 
-- BroadInterest: 12 행 (cluster 매핑)
-- SourcePolicy: 3 행 (academic, vendor_blog, tech_news)
-- Source: ~50 행 ([`sources-registry.md`](sources-registry.md)) **+ sentinel 1 행** (`name="cold_start_pseudo"`, `enabled=false`, `source_type="vendor_blog"`, `url="internal://cold-start-pseudo"`, `trust_level="low"`) — pseudo cold-start Document의 FK 충족용. 자세히는 [`../algorithms/cold-start.md §pseudo-document`](../algorithms/cold-start.md)
+- BroadInterest: 12 행 (cluster 매핑) — **A3가 CSO 임포트 후 시드** (`cso_seed_topic_id` FK 의존). A2 마이그레이션은 빈 테이블만 생성.
+- SourcePolicy: **3 행 시드 정확값** (A2 마이그레이션이 op.bulk_insert):
+
+  | source_category | trust_level | collection_rule | enabled |
+  |---|---|---|---|
+  | `academic` | `high` | `{}` | `true` |
+  | `vendor_blog` | `high` | `{}` | `true` |
+  | `tech_news` | `medium` | `{}` | `true` |
+
+  trust_level 분포는 [`sources-registry.md`](sources-registry.md)의 trust 분포에서 추론. `collection_rule={}`는 1차 시드의 placeholder — A4가 운영 단계에서 보강.
+- Source: ~50 행 ([`sources-registry.md`](sources-registry.md)) — A4가 시드 / **+ A2 마이그레이션이 sentinel 1 행** (`name="cold_start_pseudo"`, `enabled=false`, `source_type="vendor_blog"`, `url="internal://cold-start-pseudo"`, `trust_level="low"`) — pseudo cold-start Document의 FK 충족용. 자세히는 [`../algorithms/cold-start.md §pseudo-document`](../algorithms/cold-start.md)
 - AdminUser: 1 행 (`scripts/create_admin.py`로 생성, [`../ops/admin-bootstrap.md`](../ops/admin-bootstrap.md))
 - UserCSOTraversal: 시드 페르소나 사용 시 페르소나별 1~3 trace 생성, 14일치 인터랙션과 함께 path 시뮬레이션 ([`seed-personas.md`](seed-personas.md))
 

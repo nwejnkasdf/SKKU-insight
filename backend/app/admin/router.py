@@ -1,19 +1,32 @@
-"""admin router — `/admin/*` 단일 prefix. Phase 0a stub.
+"""admin router — `/admin/*` 단일 prefix.
 
+A2 본문 구현: 인증 4 + 사용자 목록 1 (5 endpoint).
+다른 endpoint 는 Phase 0b A3/A4/A5/A6/A8 가 본문 채움 (stub 유지).
 `/admin/collection/*` 6 endpoint 는 본 router 단일 SOR (사용자 결정 2026-05-11).
 docs: api/admin.md (전체), api/collection.md (§수집 — 사용자용 2 endpoint 만).
 """
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response, status
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, Query, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.contracts import CollectionJobStatus, PagedResponse
+from app.db.models import AdminUser
+from app.db.session import get_session
+from app.redis import get_redis
+from app.security.deps import get_current_admin
+from app.security.rate_limit import limiter
 
+from . import auth_service, users_service
 from .schemas import (
     AdminEventView,
     AdminLoginRequest,
+    AdminLogoutRequest,
     AdminRefreshRequest,
     AdminTokenPair,
     AdminUserInterestState,
@@ -33,8 +46,15 @@ from .schemas import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _redis_default() -> aioredis.Redis:
+    return get_redis("default")
+
+
+_settings = get_settings()
+
+
 # ============================================================
-# 인증 (4)
+# 인증 (4) — A2 본문 구현
 # ============================================================
 
 
@@ -43,9 +63,16 @@ router = APIRouter(prefix="/admin", tags=["admin"])
     response_model=AdminTokenPair,
     summary="관리자 로그인",
 )
-async def admin_login(req: AdminLoginRequest) -> AdminTokenPair:
+@limiter.limit(_settings.RATE_LIMIT_LOGIN)
+async def admin_login_endpoint(
+    request: Request,
+    req: AdminLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminTokenPair:
     """JWT aud='admin'. 부트스트랩 직후 must_change_password=true."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+    return await auth_service.admin_login(
+        req, request=request, db=db, redis=_redis_default()
+    )
 
 
 @router.post(
@@ -53,8 +80,15 @@ async def admin_login(req: AdminLoginRequest) -> AdminTokenPair:
     response_model=AdminTokenPair,
     summary="관리자 토큰 갱신",
 )
-async def admin_refresh(req: AdminRefreshRequest) -> AdminTokenPair:
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit("60/hour")
+async def admin_refresh_endpoint(
+    request: Request,
+    req: AdminRefreshRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminTokenPair:
+    return await auth_service.admin_refresh(
+        req, request=request, db=db, redis=_redis_default()
+    )
 
 
 @router.post(
@@ -62,8 +96,18 @@ async def admin_refresh(req: AdminRefreshRequest) -> AdminTokenPair:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="관리자 로그아웃",
 )
-async def admin_logout() -> Response:
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit("30/minute")
+async def admin_logout_endpoint(
+    request: Request,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    payload: AdminLogoutRequest | None = None,
+) -> Response:
+    _ = admin  # auth 미들웨어가 이미 jti 셋팅 + get_current_admin 가 must_change_password 예외 처리
+    refresh_token = payload.refresh_token if payload else None
+    await auth_service.admin_logout(
+        request=request, redis=_redis_default(), refresh_token=refresh_token
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -71,8 +115,17 @@ async def admin_logout() -> Response:
     status_code=status.HTTP_204_NO_CONTENT,
     summary="관리자 비밀번호 변경 (부트스트랩 시 강제)",
 )
-async def admin_change_password(req: ChangeAdminPasswordRequest) -> Response:
-    raise NotImplementedError("Phase 0b A2에서 구현")
+@limiter.limit("10/hour")
+async def admin_change_password_endpoint(
+    request: Request,
+    req: ChangeAdminPasswordRequest,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    await auth_service.admin_change_password(
+        admin, req, request=request, db=db, redis=_redis_default()
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ============================================================
@@ -218,12 +271,24 @@ async def admin_retry_topic_linkage(error_id: UUID) -> TopicLinkageErrorView:
     response_model=PagedResponse[AdminUserListItem],
     summary="사용자 목록",
 )
-async def admin_list_users(
+@limiter.limit(_settings.RATE_LIMIT_DEFAULT)
+async def admin_list_users_endpoint(
+    request: Request,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> PagedResponse[AdminUserListItem]:
-    """role 별 email 마스킹 — operator/read_only 부분 마스킹, super 전체."""
-    raise NotImplementedError("Phase 0b A2에서 구현")
+    """role 별 email 마스킹 (decision-backlog C-9): super 전체,
+    operator/read_only 는 length≥2 시 `g***d@x`, length=1 시 `***@x`.
+    """
+    return await users_service.list_users(
+        admin,
+        cursor=cursor,
+        limit=limit,
+        db=db,
+        redis=_redis_default(),
+    )
 
 
 @router.get(

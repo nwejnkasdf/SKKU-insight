@@ -295,6 +295,24 @@ class RedisKey:
         return f"llm:tokens:{date_str}"
 
     @staticmethod
+    def llm_global_active_count() -> str:
+        """전역 LLM 동시 호출 카운터 — multi-worker 분산 semaphore (C-19)."""
+        return "llm:active:global"
+
+    @staticmethod
+    def llm_user_active_count(user_id: UUID) -> str:
+        """사용자별 LLM 동시 호출 카운터 — multi-worker 분산 semaphore (C-19)."""
+        return f"llm:active:user:{user_id}"
+
+    @staticmethod
+    def account_deletion_pending(user_id: UUID) -> str:
+        """계정 삭제 진행 중 lock (codex v2 #2 → C-22). 본 키 존재 시 JwtAuthMiddleware
+        가 access token 도 차단해 worker 완료 전까지 personalization API 호출 봉쇄.
+        consent.service.request_account_deletion 가 SET, worker 가 DEL.
+        """
+        return f"account_deletion:{user_id}"
+
+    @staticmethod
     def dwell_tick_count(user_id: UUID, document_id: UUID) -> str:
         """dwell_tick 카운터 (atomic SQL UPSERT 사용 시 보통 불필요)."""
         return f"dwell:{user_id}:{document_id}"

@@ -70,68 +70,141 @@ FIELDS:
   - ip: string (last refresh issuer's IP)
   - ua: string (User-Agent abbreviated)
   - rotated_from: previous_jti | null
-  - active: "1" (deletion = revoke)
-
-VALUE LOOKUP:
-  - 입력 refresh_token → 인덱스 키 별도: refresh_index:{token_hmac} → "{user_id}:{jti}"
+  - active: "1" (활성) | "0" (회전/명시 폐기됨)
 ```
 
-### 인덱스 키
+### 인덱스 키 (HMAC `:rotated` 마커 패턴 — A2 결정 2026-05-11)
 
-refresh_token 자체는 opaque이므로 메인 메타 키를 빠르게 찾기 위한 인덱스가 필요.
+refresh_token 자체는 opaque이므로 메인 메타 키를 빠르게 찾기 위한 인덱스가 필요. **회전 시 old index를 삭제하지 않고 값을 `:rotated`로 OVERWRITE**해 user_id 역추적 + family revoke 가능하게 함.
 
 ```
-KEY: refresh_index:{HMAC(JWT_SECRET, refresh_token)}
-VALUE: "{user_id}:{jti}"
-TTL: 14d
+KEY: refresh_index:{HMAC_SHA256(JWT_SECRET, refresh_token)}
+VALUE: "{user_id}:{jti}:active"   # 정상
+       | "{user_id}:{jti}:rotated" # 이미 회전된 토큰 (재사용 시 family revoke 트리거)
+       | "{user_id}:{jti}:revoked" # 명시 폐기 (logout, family revoke 등)
+TTL: 14d (rotate 시 새 active index도 14d, old index는 TTL 유지)
 ```
 
-검증:
+검증 + replay 감지:
 
 ```python
-async def verify_refresh(refresh_token: str) -> RefreshContext:
-    idx = f"refresh_index:{hmac_sha256(settings.jwt_secret, refresh_token)}"
-    pointer = await redis.get(idx)
+async def verify_refresh(refresh_token: str, redis) -> RefreshContext:
+    idx_key = f"refresh_index:{hmac_sha256(settings.jwt_secret, refresh_token)}"
+    pointer = await redis.get(idx_key)
     if not pointer:
-        raise RefreshRevoked()
-    user_id, jti = pointer.split(":")
+        # HMAC index 미스 → 토큰이 14d 초과 만료됐거나 완전 위조.
+        # user_id 역추적 불가 → 단순 RefreshRevoked.
+        raise RefreshRevoked(reason="index_miss")
+    user_id, jti, state = pointer.split(":")
+    if state in ("rotated", "revoked"):
+        # 이미 회전됐거나 명시 폐기된 토큰이 다시 들어옴 = 탈취 의심
+        # → user_id 추출 가능 → family revoke (모든 refresh 폐기)
+        await revoke_all_user_refresh(user_id, redis)
+        raise RefreshRevoked(reason="replay_detected")
+    # state == "active"
     meta = await redis.hgetall(f"refresh:{user_id}:{jti}")
     if not meta or meta.get("active") != "1":
-        raise RefreshRevoked()
+        # 메타와 index가 일관되지 않음 (race 또는 부분 폐기) → family revoke
+        await revoke_all_user_refresh(user_id, redis)
+        raise RefreshRevoked(reason="meta_inactive")
     return RefreshContext(user_id=user_id, jti=jti, meta=meta)
 ```
 
 ### 회전 (Rotation)
 
 ```python
-async def rotate_refresh(ctx: RefreshContext):
+async def rotate_refresh(ctx: RefreshContext, old_token: str, redis):
     new_token = secrets.token_urlsafe(64)
     new_jti = uuid4()
-    await redis.delete(f"refresh:{ctx.user_id}:{ctx.jti}")
-    await redis.delete(f"refresh_index:{hmac_sha256(secret, ctx.original_token)}")
+    # 1) old index 값을 :rotated 로 OVERWRITE (삭제 X — TTL 유지). 이후 재사용 시 replay 감지.
+    old_idx = f"refresh_index:{hmac_sha256(secret, old_token)}"
+    await redis.set(old_idx, f"{ctx.user_id}:{ctx.jti}:rotated", keepttl=True)
+    # 2) old meta hash 도 active="0" 으로 마킹 (TTL 그대로, 감사 추적용)
+    await redis.hset(f"refresh:{ctx.user_id}:{ctx.jti}", "active", "0")
+    # 3) 새 meta hash + 새 active index 생성
     await redis.hset(f"refresh:{ctx.user_id}:{new_jti}", mapping={
         "created_at": now_iso(), "last_used_at": now_iso(),
         "ip": request.ip, "ua": request.ua_short(),
         "rotated_from": str(ctx.jti), "active": "1",
     })
     await redis.expire(f"refresh:{ctx.user_id}:{new_jti}", 14 * 86400)
-    await redis.set(f"refresh_index:{hmac_sha256(secret, new_token)}", f"{ctx.user_id}:{new_jti}", ex=14*86400)
+    await redis.set(
+        f"refresh_index:{hmac_sha256(secret, new_token)}",
+        f"{ctx.user_id}:{new_jti}:active",
+        ex=14 * 86400,
+    )
     return new_token, new_jti
+
+
+async def revoke_all_user_refresh(user_id: str, redis):
+    """user namespace의 모든 refresh hash 폐기. index는 TTL 자연 만료 (SCAN으로 못 찾음)."""
+    async for key in redis.scan_iter(match=f"refresh:{user_id}:*"):
+        await redis.delete(key)
 ```
 
-회전 후 **이전 토큰 재사용 시 즉시 모든 refresh 폐기** (탈취 의심):
+**핵심:** opaque token에서 user_id 직접 추출 불가. HMAC index가 유일한 역추적 경로이므로 회전 시 삭제 대신 `:rotated` 마킹으로 보존. 동일 user의 정상 refresh family는 별도 active index/메타로 관리되므로 영향 0.
+
+### 동시 rotation race 차단 (옵션 B, decision-backlog C-15 + C-21)
+
+위 Python pseudo-code 는 read-then-write 패턴 — 동일 token 의 동시 2 refresh 요청이 모두 active pointer 를 본 뒤 각자 새 token 을 발급할 수 있다 (family revoke 무력화).
+
+**실제 구현은 Redis Lua 스크립트로 verify · rotate · issue 를 단일 unit atomic CAS** (`_LUA_VERIFY_ROTATE_ISSUE`):
+
+```lua
+-- KEYS[1] = old refresh_index, KEYS[2] = old meta
+-- KEYS[3] = new meta, KEYS[4] = new refresh_index (Python 이 미리 생성한 new_token 의 HMAC)
+-- ARGV[1] = "{uid}:{old_jti}:rotated"
+-- ARGV[2] = "{uid}:{new_jti}:active"
+-- ARGV[3..7] = ttl_seconds, now_iso, ip, ua, old_jti
+local pointer = redis.call('GET', KEYS[1])
+if not pointer then return {'miss', false} end
+-- pointer 의 마지막 segment 가 'active' 아니면 'replay'
+if state ~= 'active' then return {'replay', pointer} end
+if redis.call('HGET', KEYS[2], 'active') ~= '1' then return {'replay', pointer} end
+-- atomic: 4 변경 한 unit
+redis.call('SET', KEYS[1], ARGV[1], 'EX', old_ttl)   -- old index :rotated
+redis.call('HSET', KEYS[2], 'active', '0')             -- old meta inactive
+redis.call('HSET', KEYS[3], 'created_at', ARGV[4], ...)  -- new meta INSERT
+redis.call('EXPIRE', KEYS[3], ttl)
+redis.call('SET', KEYS[4], ARGV[2], 'EX', ttl)        -- new active index
+return {'ok', pointer}
+```
+
+Python 은 `new_token = secrets.token_urlsafe(64)`, `new_jti = uuid4()`, `new_hmac = HMAC(new_token)` 를 미리 생성해 KEYS/ARGV 로 전달. Redis 는 Lua 를 단일 thread 로 실행하므로 동시 2 호출 중 한 호출만 `'ok'`, 다른 호출은 `'replay'` 받아 family revoke.
+
+**왜 verify 만 atomic 이 아닌 verify+issue 까지인가** (옵션 B, C-21): C-7 의 1차 fix 는 verify+rotate 만 Lua, issue (new meta + new index) 는 Python 별도 호출 → T1 'ok' 후 issue 진행 중 T2 'replay' family revoke 가 T1 신규 meta 를 SCAN 누락 가능한 좁은 window 존재. 본 Lua 가 issue 까지 단일 unit 으로 묶어 window 완전 제거. 구현체는 `backend/app/security/jwt.py:_LUA_VERIFY_ROTATE_ISSUE`.
+
+`issue_refresh` 함수는 login 경로 (race 없음 — 신규 token 이라 인덱스 충돌 없음) 전용으로 유지.
+
+### Logout 시 refresh 폐기 (codex review C-2 → C-13)
+
+`/auth/logout` (및 `/admin/auth/logout`) 요청 body 에 `refresh_token` 도 포함해야 한다. server 는:
+
+1. access jti 를 `jwt_denylist:{jti}` 에 추가 (잔여 TTL)
+2. body 의 refresh token HMAC index 를 GET → user_id/jti 추출
+3. index 값을 `:revoked` 로 OVERWRITE (TTL 유지) + meta `active='0'`
+
+body 가 비어 있으면 access 만 폐기되고 refresh 는 유지 — **보안 결함이므로 클라이언트는 항상 refresh body 전달 권장**. 구현체는 `backend/app/security/jwt.py:revoke_refresh_by_token`.
+
+### Account deletion worker 의 refresh_index 처리 (codex review C-1 → C-16)
+
+worker 가 사용자 삭제 시 `refresh_index:*` 전역 SCAN/DEL 하면 **다른 모든 사용자의 index 까지 삭제** → 다른 사용자 강제 로그아웃. 따라서 worker 는 `refresh:{user_id}:*` 만 namespace SCAN. `refresh_index:{HMAC}` 키는 단방향 HMAC 이라 user 로 prefix 잡기 불가 — TTL 14d 만료에 위임 + 다음 refresh 시도 시 meta 가 이미 삭제됐으므로 family revoke 트리거.
+
+### Deletion gate — access 토큰 차단 (codex review C-23)
+
+`/consent/account-deletion` 202 응답 후 worker 가 DB row 삭제 전까지 access JWT 는 잔여 TTL (≤15분) 동안 유효 → 사용자가 personalization API 계속 호출 가능. **JwtAuthMiddleware 가 `RedisKey.account_deletion_pending(user_id)` 존재 시 access 차단** (`user` audience 한정 — admin endpoint 는 별도 흐름).
 
 ```python
-async def detect_replay(refresh_token: str):
-    idx = f"refresh_index:{hmac_sha256(secret, refresh_token)}"
-    if not await redis.exists(idx):
-        # 토큰이 인덱스에 없는데 클라이언트가 들고 왔다 = 회전 후 재사용 또는 폐기됨
-        # 보수적: 사용자의 모든 refresh 폐기
-        await revoke_all_refresh(user_id=resolve_user_from_token_hint(refresh_token))
-        raise RefreshRevoked()
+# app/middleware/jwt_auth.py (요지)
+if sub_str and expected_aud == TokenAudience.USER:
+    user_uuid = UUID(sub_str)
+    if await redis.exists(RedisKey.account_deletion_pending(user_uuid)):
+        return 401 + ErrorCode.CONSENT_DELETION_IN_PROGRESS
 ```
 
-(사용자 hint 없이 토큰만으로 user를 찾기 위해 별도 keyless 매핑이 필요할 수 있음 — 1차 시연용은 단순 `RefreshRevoked` 응답으로도 충분.)
+- lock 은 `consent.service.request_account_deletion` 가 SET (TTL 600s)
+- worker 가 row 삭제 + Redis 정리 완료 시 명시 DEL
+- 시연 중 사용자는 deletion 진행 동안 401 받음 → 클라이언트는 로그아웃 처리
 
 ## Access 토큰 denylist
 

@@ -1,0 +1,2 @@
+# MockProvider fixture 디렉토리. JSON 파일은 A8 cold-start + 후속 LLM 호출 시점에 추가.
+# 본 파일은 빈 디렉토리 유지용 marker.

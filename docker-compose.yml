@@ -1,0 +1,113 @@
+# SKKU InSight — A2 Phase 0b docker-compose.
+# 5 서비스 default: postgres, redis, api, worker, admin-console.
+# clickbait-detector 는 옵션 (외부 호스팅이 default — backend 는 CLICKBAIT_SERVICE_URL env 로만 호출).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "rq info --url $${REDIS_URL_QUEUE} | grep -q '0 workers, 0 queues' && exit 1 || exit 0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  admin-console:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["sh", "-c", "echo 'admin-console 빈 컨테이너 — A10 가 Next.js 부트' && tail -f /dev/null"]
+    environment:
+      NEXT_PUBLIC_API_BASE: ${API_PUBLIC_BASE}
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # clickbait-detector:
+  #   build:
+  #     context: ./clickbait_module
+  #   ports:
+  #     - "127.0.0.1:8100:8100"
+  #   volumes:
+  #     - ./clickbait_module/adapter:/app/adapter:ro
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+  #     interval: 15s
+  #     timeout: 3s
+  #     retries: 3
+
+volumes:
+  pg_data: {}
+  redis_data: {}

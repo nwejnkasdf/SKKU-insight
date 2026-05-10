@@ -1,0 +1,61 @@
+# SKKU InSight — A2 Phase 0b Makefile.
+# 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
+
+.PHONY: help dev demo migrate create-admin reset-password test lint check-all stop down clean
+
+help:
+	@echo "주요 타깃:"
+	@echo "  make dev            - docker compose up -d (postgres, redis, api, worker, admin-console)"
+	@echo "  make demo           - dev + 데모용 cron 더 자주 (COLLECTION_CRON=COLLECTION_CRON_DEMO)"
+	@echo "  make migrate        - alembic upgrade head (api 컨테이너 안에서)"
+	@echo "  make create-admin   - AdminUser 부트스트랩 INSERT"
+	@echo "  make reset-password EMAIL=user@x NEW=newpw - 사용자 비번 강제 변경 (P2-5)"
+	@echo "  make test           - pytest backend/tests (docker compose 실서비스 사용)"
+	@echo "  make lint           - ruff + mypy --strict"
+	@echo "  make check-all      - 6 cross-check scripts + ruff + mypy"
+	@echo "  make stop           - docker compose stop (데이터 유지)"
+	@echo "  make down           - docker compose down (네트워크 제거)"
+	@echo "  make clean          - docker compose down -v (볼륨 삭제 — destructive)"
+
+dev:
+	docker compose up -d
+	@echo "API: http://localhost:8000 | Admin: http://localhost:3001"
+
+demo: dev
+	@echo "demo 모드 — COLLECTION_CRON_DEMO 가 적용되려면 .env 의 COLLECTION_CRON 을 COLLECTION_CRON_DEMO 값으로 swap"
+
+migrate:
+	docker compose exec api alembic upgrade head
+
+create-admin:
+	docker compose exec api python -m scripts.create_admin
+
+reset-password:
+	@if [ -z "$(EMAIL)" ] || [ -z "$(NEW)" ]; then echo "EMAIL=... NEW=... 필요"; exit 1; fi
+	docker compose exec api python -m scripts.reset_password --email "$(EMAIL)" --new-password "$(NEW)"
+
+test:
+	docker compose exec -e TESTING=1 api pytest backend/tests -v
+
+lint:
+	docker compose exec api ruff check app/ scripts/
+	docker compose exec api mypy --strict app/
+
+check-all:
+	python scripts/check_api_docs.py
+	python scripts/check_schema.py
+	python scripts/check_env.py
+	python scripts/check_error_codes.py
+	python scripts/check_redis_keys.py
+	python scripts/check_contracts.py
+	@echo "[OK] 6 cross-check 통과"
+
+stop:
+	docker compose stop
+
+down:
+	docker compose down
+
+clean:
+	@read -p "볼륨까지 삭제합니다 (Postgres + Redis 데이터 손실). 계속하시려면 'yes' 입력: " ans; \
+	if [ "$$ans" = "yes" ]; then docker compose down -v; else echo "취소"; fi

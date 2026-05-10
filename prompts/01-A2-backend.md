@@ -25,8 +25,8 @@ Phase 0a stub의 본문을 채운다. **인증·동의·온보딩·사용자 모
 ## 산출
 
 ### 1. Alembic + DB 모델
-- `backend/alembic/` 초기화 + 첫 migration: User, AdminUser, UserConsent, UserCSOTraversal, BroadInterest(12 시드), CSOTopic, Source(+ sentinel `cold_start_pseudo` 시드), SourcePolicy(3 시드)
-- **단** A3가 CSO 임포트 담당. 본 세션은 빈 CSOTopic 테이블 + Source sentinel만.
+- `backend/alembic/` 초기화 + 첫 migration: User, AdminUser, UserConsent, UserCSOTraversal, **BroadInterest(테이블만 — 시드는 A3 책임. `cso_seed_topic_id` FK 가 `cso_topic.cso_topic_id` 의존이므로 CSO 임포트 후 시드 필요)**, CSOTopic(빈 테이블 — A3 가 시드), Source(+ sentinel `cold_start_pseudo` 시드), SourcePolicy(3 시드)
+- **단** A3가 CSO 임포트 + BroadInterest 12 시드 담당. 본 세션은 빈 CSOTopic + 빈 BroadInterest 테이블 + Source sentinel만.
 - nullable composite PK 룰 (DocumentTopic, NotInterestedTopic, UserInterestState UNIQUE)은 본 세션 범위 외 — A3·A6·A8이 담당. 단 partial unique index 패턴은 schema.md 예시 그대로 따름.
 - active_day_counter, last_active_calendar_date 컬럼 포함 (User).
 

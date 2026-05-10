@@ -19,14 +19,14 @@ flowchart LR
 | Var | 예시 |
 |---|---|
 | `ADMIN_BOOTSTRAP_EMAIL` | `admin@insight.test` |
-| `ADMIN_BOOTSTRAP_PASSWORD` | `Admin-Bootstrap-2026!` |
+| `ADMIN_BOOTSTRAP_PASSWORD` | `Bootstrap-Initial-2026-Strong!` (decision-backlog C-22 — 옛 default `Admin-Bootstrap-2026!` 은 정책 위반 — "admin" 금칙어 + email local part 포함) |
 | `ADMIN_BOOTSTRAP_ROLE` | `super` |
 
-`ADMIN_BOOTSTRAP_PASSWORD`는 [`../security/password-policy.md`](../security/password-policy.md) 룰을 만족해야 한다.
+`ADMIN_BOOTSTRAP_PASSWORD`는 [`../security/password-policy.md`](../security/password-policy.md) 룰을 만족해야 하며, lifespan validator 가 `change-this-to-*` 같은 placeholder 패턴도 차단한다 (C-22).
 
 ## CLI 스크립트
 
-`scripts/create_admin.py`:
+`backend/scripts/create_admin.py` — A2 실제 산출 (사용 패턴은 동일, 구현 변경):
 
 ```python
 """부트스트랩 또는 추가 관리자 생성.
@@ -34,48 +34,66 @@ flowchart LR
     python -m scripts.create_admin                       # .env 의 ADMIN_BOOTSTRAP_* 사용
     python -m scripts.create_admin --email a@b.com --role operator   # 인자 우선
 """
+import argparse
 import asyncio
-import os
-import sys
-from passlib.hash import bcrypt
-from app.db import async_session
-from app.admin.models import AdminUser
+from datetime import UTC, datetime
 
-async def main(email: str | None = None, password: str | None = None, role: str = "super"):
-    email = email or os.environ.get("ADMIN_BOOTSTRAP_EMAIL")
-    password = password or os.environ.get("ADMIN_BOOTSTRAP_PASSWORD")
-    role = os.environ.get("ADMIN_BOOTSTRAP_ROLE", role)
-    if not email or not password:
-        print("missing ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD", file=sys.stderr)
-        sys.exit(2)
-    if role not in {"super", "operator", "read_only"}:
-        print(f"invalid role: {role}", file=sys.stderr); sys.exit(2)
-    enforce_password_policy(password)   # ../security/password-policy.md
-    async with async_session() as s:
-        existing = await s.execute(select(AdminUser).where(AdminUser.email == email))
-        if existing.scalar_one_or_none():
-            print(f"AdminUser {email} already exists", file=sys.stderr)
-            sys.exit(1)
+from sqlalchemy import func, select
+
+from app.config import get_settings
+from app.contracts import AdminRole
+from app.db.models import AdminUser
+from app.db.session import AsyncSessionLocal
+from app.security.password import (
+    PolicyViolation,
+    enforce_password_policy,
+    hash_password,
+)
+
+
+async def _create(email: str, password: str, role: str) -> int:
+    email_normalized = email.strip().lower()
+    if role not in {r.value for r in AdminRole}:
+        return 1
+    try:
+        enforce_password_policy(password, email=email_normalized)
+    except PolicyViolation as exc:
+        print(f"[FAIL] {exc.sub_code} — {exc.message}")
+        return 1
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(
+            select(AdminUser).where(func.lower(AdminUser.email) == email_normalized)
+        )
+        if existing.scalars().first() is not None:
+            return 1
         admin = AdminUser(
-            email=email,
-            password_hash=bcrypt.using(rounds=int(os.environ.get("BCRYPT_COST", 12))).hash(password),
+            email=email_normalized,
+            password_hash=hash_password(password),  # bcrypt 직접 + SHA-256 hex pre-hash (C-11)
             role=role,
             status="active",
             must_change_password=True,
+            created_at=datetime.now(UTC),
         )
-        s.add(admin)
-        await s.commit()
-        print(f"created admin {admin.admin_id} role={role}")
+        session.add(admin)
+        await session.commit()
+    return 0
 
-if __name__ == "__main__":
-    import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--email")
-    p.add_argument("--password")
-    p.add_argument("--role", default="super")
-    args = p.parse_args()
-    asyncio.run(main(args.email, args.password, args.role))
+
+def main(argv: list[str] | None = None) -> int:
+    settings = get_settings()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--email", default=settings.ADMIN_BOOTSTRAP_EMAIL)
+    parser.add_argument("--password", default=settings.ADMIN_BOOTSTRAP_PASSWORD)
+    parser.add_argument("--role", default=settings.ADMIN_BOOTSTRAP_ROLE.value,
+                        choices=[r.value for r in AdminRole])
+    args = parser.parse_args(argv)
+    return asyncio.run(_create(args.email, args.password, args.role))
 ```
+
+**구현 차이점** (decision-backlog C-11):
+- `passlib.hash.bcrypt` 미사용 — passlib 1.7.4 가 bcrypt 4.x 와 호환 깨짐 (`__about__` 제거, 72-byte ValueError).
+- `app.security.password.hash_password` 가 **bcrypt 직접 + SHA-256 hex pre-hash** (64 ASCII bytes — bcrypt 72-byte 한도 + null byte 회피, UTF-8 한국어 128자 정책 지원).
+- email 은 lowercase + trim 정규화 (3겹 방어, C-7).
 
 ## Makefile 타깃
 
@@ -89,12 +107,13 @@ create-operator:
 	docker compose run --rm api python -m scripts.create_admin --role operator
 ```
 
-## 첫 로그인 강제 비밀번호 변경
+## 첫 로그인 강제 비밀번호 변경 (server-side 가드, decision-backlog C-14)
 
-1. 관리자 콘솔 (Next.js, `/admin-console`)에서 `ADMIN_BOOTSTRAP_EMAIL` + `ADMIN_BOOTSTRAP_PASSWORD`로 로그인.
+1. 관리자 콘솔 (Next.js)에서 `ADMIN_BOOTSTRAP_EMAIL` + `ADMIN_BOOTSTRAP_PASSWORD` 로 로그인.
 2. 응답에 `must_change_password=true`.
-3. 클라이언트는 즉시 비밀번호 변경 모달 표시. 변경 전에는 모든 다른 화면 접근 차단.
-4. `POST /admin/auth/change-password` 호출 → `must_change_password=false`로 갱신.
+3. **server-side**: `get_current_admin` Depends 가 `must_change_password=true` admin 의 `/admin/*` 호출을 409 `admin.must_change_password` 로 차단. **예외 경로**: `/admin/auth/change-password` + `/admin/auth/logout` 두 endpoint 만 통과.
+4. 클라이언트도 별도로 비밀번호 변경 모달을 즉시 표시 (사용성 — 다른 admin API 호출 시 받는 409 의존하지 않음).
+5. `POST /admin/auth/change-password` 호출 → `must_change_password=false` UPDATE + 모든 admin refresh family revoke.
 
 `POST /admin/auth/change-password` 본문:
 
@@ -104,7 +123,7 @@ class ChangeAdminPasswordRequest(BaseModel):
     new_password: str
 ```
 
-`new_password`도 password-policy 검증.
+`new_password` 도 password-policy 검증. 비번 변경 성공 시 모든 admin refresh 가 family revoke 되므로 재로그인 필요.
 
 ## 검증 체크리스트
 

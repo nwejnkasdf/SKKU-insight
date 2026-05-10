@@ -13,7 +13,7 @@
 새 에이전트는 다음 4개를 순서대로 읽으면 작업 시작 가능.
 
 1. **[`docs/decisions.md`](docs/decisions.md)** — 12+ 라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원. SRS와 충돌 시 본 파일이 우선 (단 SRS의 FR/NFR/AT 식별자·표는 보존).
-2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 백로그. **P0 0건 (모두 해소됨, 2026-05-11). P1 활성 7건 + P2 활성 5건 모두 default·stub 경로가 정의돼 있다** — 모든 에이전트 즉시 작업 시작 가능.
+2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 + C-급 백로그. **P0 0건. P1 활성 7건 + P2 활성 5건은 default·stub 경로 정의됨. C-급 32건 모두 해소** (A2 자체 검수 + Codex review v1·v2·v3 + multi-worker + 옵션 B + mypy strict 26 + 초기 결정 11, 2026-05-11).
 3. **[`docs/sdd/contracts.md`](docs/sdd/contracts.md)** + **[`docs/sdd/agent-orchestration.md`](docs/sdd/agent-orchestration.md)** — 모든 enum·error code·Redis key는 `backend/app/contracts.py` 단일 SOR. 멀티 에이전트 5겹 방어와 Phase별 순차 호출 룰.
 4. **자기 모듈에 해당하는 `docs/` 하위 디렉토리** — 후술 §에이전트 분할 표.
 
@@ -27,34 +27,42 @@
 ├── AGENTS.md                          # 본 파일 — 에이전트 진입점
 ├── CLAUDE.md                          # AGENTS.md로 redirect 한 장
 ├── SKKU_InSight_SRS.{md,docx,pdf}     # 원본 SRS v0.3 (보존)
+├── docker-compose.yml                # ✅ A2: 5 서비스 (postgres/redis/api/worker/admin-console)
+├── Makefile                          # ✅ A2: dev/migrate/create-admin/test/lint/check-all/clean
+├── .env.example                      # ✅ A2: env-vars.md 골격 + NAVER_CLEANUP_CRON + UVICORN_WORKERS
 ├── docs/                              # 산출 문서 54+ 파일
 │   ├── README.md                      # docs 인덱스
 │   ├── decisions.md                   # 결정 매트릭스 (SOR)
-│   ├── decision-backlog.md            # P0/P1/P2
+│   ├── decision-backlog.md            # P0/P1/P2 + C-급 (A2 후 32건 해소)
 │   ├── srs/                           # SRS 분할본 10개
-│   ├── sdd/                           # 설계: 아키텍처·데이터 흐름·배포·모듈 경계·기술 스택
-│   │   ├── architecture.md
-│   │   ├── data-flow.md
-│   │   ├── deployment.md
-│   │   ├── module-boundaries.md
-│   │   ├── tech-stack.md
-│   │   ├── concurrency.md             # 동시성 가드 (10-20명)
-│   │   ├── api-conventions.md         # HTTP 통신 규약 + OpenAPI codegen
-│   │   ├── contracts.md               # contracts.py SOR 명세
-│   │   └── agent-orchestration.md     # 멀티 에이전트 운영 헌법
-│   ├── api/                           # FastAPI 엔드포인트 명세 8개
-│   │   └── (auth/consent/onboarding/topics/interest/collection/recommendation/admin)
-│   ├── algorithms/                    # 7개
-│   │   └── (interest-bayesian/cso-topic-traversal/leaf-topic-lifecycle/recommendation-ranking/cold-start/clickbait-integration/cso-mapping)
-│   ├── data/                          # 5개 (schema/erd/sources-registry/cso-import/seed-personas)
-│   ├── ops/                           # 5개 (docker-compose/env-vars/ci-cd/admin-bootstrap/runbooks)
-│   ├── security/                      # 5개 (auth-flow/token-handling/rate-limiting/password-policy/threat-model)
-│   └── ux/                            # 4개 (wireframes/ui-states/i18n/client-behaviors)
-├── backend/                          # ✅ Phase 0a A2-stub 산출 (FastAPI + 53 endpoint stubs + contracts.py SOR)
+│   ├── sdd/                           # 9: 아키텍처·데이터 흐름·배포·모듈 경계·기술 스택·동시성·API 규약·계약·에이전트 오케스트레이션
+│   ├── api/        (8)                # auth/consent/onboarding/topics/interest/collection/recommendation/admin
+│   ├── algorithms/ (7)                # interest-bayesian/cso-topic-traversal/leaf-topic-lifecycle/recommendation-ranking/cold-start/clickbait-integration/cso-mapping
+│   ├── data/       (5)                # schema/erd/sources-registry/cso-import/seed-personas
+│   ├── ops/        (5)                # docker-compose/env-vars/ci-cd/admin-bootstrap/runbooks
+│   ├── security/   (5)                # auth-flow/token-handling/rate-limiting/password-policy/threat-model
+│   └── ux/         (4)                # wireframes/ui-states/i18n/client-behaviors
+├── backend/                          # ✅ A2 본문 완료 (PR #7)
+│   ├── Dockerfile                    # python:3.12-slim
+│   ├── pyproject.toml                # FastAPI + Pydantic + SQLAlchemy async + bcrypt + rq + rq-scheduler + slowapi + structlog + httpx + networkx
+│   ├── .env.example                  # backend 단독 부트용 (compose 미사용 시)
+│   ├── alembic.ini + alembic/env.py + versions/0001_initial_a2_tables.py
+│   ├── app/
+│   │   ├── main.py + lifespan.py + redis.py + config.py + contracts.py
+│   │   ├── db/{base, engine, session, models/*}        # 8 모델 (User/AdminUser/UserConsent/UserCSOTraversal/BroadInterest/CSOTopic/Source/SourcePolicy)
+│   │   ├── security/{password, jwt, rate_limit, consent_cache, idempotency, deps}  # + common_passwords.txt
+│   │   ├── auth/, consent/, onboarding/, admin/        # 17 endpoint 본문 (service + router)
+│   │   ├── topic/, interest/, collection/, recommendation/  # stub 유지 (A3/A6/A4/A8)
+│   │   ├── middleware/{request_id, jwt_auth, consent_gate, exception_handler, structlog_mask}
+│   │   ├── llm_provider/{protocol, mock, openai, anthropic, openrouter, codex_oauth, _concurrency}  # Redis 분산 semaphore
+│   │   ├── worker.py + scheduler.py + worker/jobs/{account_deletion(완료), cold_start/naver_cleanup/collection/interest_decay/merge_evaluation(stub)}
+│   ├── scripts/{create_admin, reset_password, export_openapi}
+│   └── tests/{conftest + security/admin/llm_provider unit + auth/consent integration + fixtures/mock_llm/}
+├── scripts/                          # ✅ A2: 6 cross-check (api_docs / schema / env / error_codes / redis_keys / contracts) + _common.py
+├── prompts/                          # 에이전트별 kickoff prompts (A1 ✅ / A2-stub ✅ / A2 ✅ / 나머지 ⬜)
 ├── clickbait_module/                 # ✅ vLLM + DoRA 분류기 자체 서비스 (P0-1 해결)
 └── (이하 후속 에이전트가 만듦)
-    client/  admin-console/  workers/  llm-adapter/
-    scripts/  .github/                # repo-root scripts (check_*.py, codegen 등)
+    client/  admin-console/  .github/
 ```
 
 ## 핵심 결정 매트릭스 (압축)
@@ -78,7 +86,9 @@
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein |
 | 수집 소스 | 학술 4종 (arXiv/OpenAlex/Semantic Scholar/DBLP) + 빅테크 RSS 30+ + 뉴스 (네이버 BS4 / TC / Verge / Wired / MIT TR / IEEE Spectrum) + sentinel `cold_start_pseudo` |
 | 시드 | 5+ 페르소나 + 14일치 인터랙션 (active day 기반) |
-| 동시성 | 10-20명 가정. single-flight + user-mutex + atomic SQL + LLM semaphore + batch flush + consent cache + jitter |
+| 동시성 | 10-20명 가정. single-flight + user-mutex + atomic SQL + **LLM Redis 분산 semaphore** (multi-worker 안전, C-19) + batch flush + consent cache + jitter |
+| Worker 정책 | `UVICORN_WORKERS=1` default. N>1 시 DB pool 합산 = N × `PG_API_POOL_MAX` + `PG_WORKER_POOL_MAX` ≤ PostgreSQL `max_connections` (C-20) |
+| Refresh rotation | Redis Lua `_LUA_VERIFY_ROTATE_ISSUE` (verify + mark `:rotated` + new meta INSERT + new index SET 단일 atomic, C-21). HMAC `:rotated` 마커로 family revoke |
 
 ## 작업 규칙 (모든 에이전트 공통, 14조)
 
@@ -115,21 +125,21 @@
 
 각 에이전트는 **자기 디렉토리 + 의존 인접 인터페이스만** 컨텍스트로 받는다.
 
-| Phase | ID | 산출 | 1순위 참조 |
+| Phase | ID | 산출 | 상태 |
 |---|---|---|---|
-| 0a (게이트) | **A1 docs-bootstrap** | 본 `docs/` (완료) | — |
-| 0a (게이트) | **A2-stub** | `backend/app/contracts.py`, 모든 router endpoint signature(`raise NotImplementedError`), Pydantic schemas, `scripts/export_openapi.py` → 사용자 검수 + codegen | `decisions.md`, `sdd/contracts.md`, `sdd/api-conventions.md`, `sdd/agent-orchestration.md`, `api/*` 8개 |
-| 0b | **A2 backend-foundation** | A2-stub 본문 채움. docker-compose, Alembic, 인증·동의·사용자·**onboarding**, 보안, DB pool 분리, sentinel Source 시드 | `decisions.md`, `sdd/tech-stack.md`, `sdd/module-boundaries.md`, `sdd/concurrency.md`, `data/schema.md`, `api/auth.md`, `api/consent.md`, `api/onboarding.md`, `security/*`, `ops/docker-compose.md`, `ops/env-vars.md` |
-| 0b | **A3 cso-topic** | CSO 임포트, NetworkX 캐시, Topic·CSOTopic, 그래프 탐색 API | `algorithms/cso-mapping.md`, `data/cso-import.md`, `data/schema.md`, `api/topics.md` |
-| 1 | **A4 collection** | 소스 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버 BS4), CollectionJob, jitter, dedup | `data/sources-registry.md`, `data/schema.md`, `api/collection.md`, `sdd/data-flow.md` |
-| 1 | **A5 clickbait** | 사용자 제공 DoRA 모듈 wrap (P0-1 해결 후) | `algorithms/clickbait-integration.md`, `data/schema.md`(ClickbaitResult), `ops/env-vars.md` |
-| 1 | **A6 interest-bayesian** | 행동 로그 API, atomic UPSERT, **active day 기반 시간 감쇠**, 1-hop propagation | `algorithms/interest-bayesian.md`, `algorithms/cso-topic-traversal.md`, `data/schema.md`, `api/interest.md` |
-| 2 | **A7 leaf-lifecycle + traversal** | LifecycleEvaluator + D 하이브리드 + **TraversalEngine**(extend/retract/split/archive) + leaf 재배치 LLM + 3단계 강등 | `algorithms/cso-topic-traversal.md`, `algorithms/leaf-topic-lifecycle.md`, `sdd/module-boundaries.md` |
-| 2 | **A8 recommendation** | core/adjacent/discovery + fallback + Cold-start (current/adjacent/proactive 1:1) + first trace 생성 + emerging quota | `algorithms/recommendation-ranking.md`, `algorithms/cold-start.md`, `algorithms/cso-topic-traversal.md`, `api/recommendation.md`, `sdd/concurrency.md` |
-| 3 | **A9 electron-client** | UI-01~05, safeStorage, 한국어 i18n, Page Visibility dwell_tick, 비동기 cold-start 폴링. **codegen된 api.ts만 사용** | `ux/wireframes.md`, `ux/ui-states.md`, `ux/i18n.md`, `ux/client-behaviors.md`, `api/*` 8개, `security/auth-flow.md` |
-| 3 | **A10 admin-console** | UI-06 Next.js 콘솔. **codegen된 api.ts만 사용** | `ux/wireframes.md`(UI-06), `api/admin.md`, `ops/admin-bootstrap.md` |
-| 4 | **A11 test-ci** | pytest, vitest, GitHub Actions, AT 자동화, contracts.yml 6종 cross-check | `ops/ci-cd.md`, `sdd/agent-orchestration.md §5`, `srs/08-acceptance-tests.md` |
-| 4 | **A12 demo-seed** | 5+ 페르소나 + 14일 active day 인터랙션 시뮬레이션 + LLM mock fixture 캡처 | `data/seed-personas.md`, `data/schema.md`, `decisions.md` §9 |
+| 0a (게이트) | **A1 docs-bootstrap** | 본 `docs/` 54+ 파일 | ✅ 완료 |
+| 0a (게이트) | **A2-stub** | `backend/app/contracts.py`, 53 endpoint signature stub, Pydantic schemas, `scripts/export_openapi.py` | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
+| 0b | **A2 backend-foundation** | A2-stub 본문 17 endpoint + Alembic 1번 migration (8 테이블) + 보안·동시성·LLM·worker·scheduler·middleware·tests·docker-compose·Makefile·6 cross-check | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 35건 결함 해소, `ruff`·`mypy --strict`·`pytest`·6 check 통과) |
+| 0b | **A3 cso-topic** | CSO 3.4 임포트, NetworkX 캐시, BroadInterest 12행 시드, 그래프 탐색 API | 🟡 다음 작업 |
+| 1 | **A4 collection** | 소스 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버 BS4), CollectionJob, jitter, dedup | ⬜ |
+| 1 | **A5 clickbait** | 사용자 제공 DoRA 모듈 wrap | ✅ 외부 서비스 ([PR #2](https://github.com/nwejnkasdf/SKKU-insight/pull/2)) / 🟡 backend 통합 대기 |
+| 1 | **A6 interest-bayesian** | 행동 로그 API, atomic UPSERT, active day 기반 시간 감쇠, 1-hop propagation | ⬜ |
+| 2 | **A7 leaf-lifecycle + traversal** | LifecycleEvaluator + D 하이브리드 + TraversalEngine(extend/retract/split/archive) + leaf 재배치 LLM + 3단계 강등 | ⬜ |
+| 2 | **A8 recommendation** | core/adjacent/discovery + fallback + Cold-start + first trace 생성 + emerging quota | ⬜ |
+| 3 | **A9 electron-client** | UI-01~05, safeStorage, 한국어 i18n, codegen된 api.ts 사용 | ⬜ |
+| 3 | **A10 admin-console** | UI-06 Next.js 콘솔, codegen된 api.ts 사용 | ⬜ |
+| 4 | **A11 test-ci** | pytest 통합, vitest, GitHub Actions, AT 자동화 (6 cross-check 는 A2 가 이미 작성) | ⬜ |
+| 4 | **A12 demo-seed** | 5+ 페르소나 + 14일 active day 인터랙션 시뮬레이션 + LLM mock fixture 캡처 | ⬜ |
 
 ### 의존 그래프
 
@@ -189,4 +199,4 @@ cd client && npm start
 4. 영향 큰 변경은 [`docs/decision-backlog.md`](docs/decision-backlog.md)에 기록.
 5. `docs/sdd/contracts.md` 변경 시 `backend/app/contracts.py` PR로 사용자 승인 받음.
 
-마지막 갱신: 2026-05-11 (P0-1·P1-8·P2-6·P2-7 해소 + Phase 0a A2-stub 완료 + 39 drift fix).
+마지막 갱신: 2026-05-11 (Phase 0b A2 본문 완료 — PR #7. 17 endpoint 본문 + 인프라 + 35건 C-급 결함 해소. `ruff` · `mypy --strict` · `pytest` · 6 cross-check 통과).

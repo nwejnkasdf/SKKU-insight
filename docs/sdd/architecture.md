@@ -30,9 +30,9 @@
                                                               │
             ┌─────────────────────────────────────────────────┴────────────┐
             │  Source Adapters    │  Clickbait DoRA   │  LLM Adapter         │
-            │  arXiv / OpenAlex / │  (사용자 보유      │  Mock (default) /    │
-            │  S2 / DBLP / RSS /  │   파인튜닝 모듈)   │  OpenAI / Anthropic /│
-            │  네이버 크롤러      │                    │  OpenRouter /        │
+            │  arXiv / OpenAlex / │  (vLLM 기반,       │  Mock (default) /    │
+            │  S2 / DBLP / RSS /  │   외부 서비스;     │  OpenAI / Anthropic /│
+            │  네이버 크롤러      │  transport 자유)   │  OpenRouter /        │
             │                     │                    │  CodexOAuth (exp)    │
             └─────────────────────┴────────────────────┴──────────────────────┘
 ```
@@ -74,8 +74,8 @@ core/adjacent/discovery 후보 생성 + 신뢰도 임계 + fallback. Cold-start�
 ### Source Adapters
 어댑터는 공통 `SourceAdapter` 인터페이스(`fetch(topic_query, since) -> List[RawDocument]`)를 만족. 6 종 구현체.
 
-### Clickbait DoRA (services/clickbait-detector)
-사용자 보유 DoRA 파인튜닝된 `A.x 4.0 light` 모듈 wrapper. **2차 문헌(테크 뉴스) 1차 정제 단계에만** 호출. 모듈 위치는 사용자 공유 후 결정 → <!-- TODO: DoRA 모듈 경로 사용자 공유 받은 뒤 갱신 -->. 입출력 계약은 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md).
+### Clickbait DoRA (외부 서비스, vLLM 기반; transport-agnostic 계약)
+사용자 보유 DoRA 파인튜닝된 `A.X-4.0-Light` 모듈 wrapper. **2차 문헌(테크 뉴스) 1차 정제 단계에만** 호출. 모듈 위치 = `clickbait_module/`, 서빙 엔진 = vLLM (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 결정으로 backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. 입출력 계약은 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md).
 
 ### LLM Adapter (llm-adapter)
 `LLMProvider` 추상 인터페이스 + 5 구현체. 기본은 **`MockProvider`** (deterministic fixture per prompt hash) — 누구나 클론 즉시 부트되고 CI/시연 안정성을 보장. 정식 호출용으로 `OpenAIAPIProvider`, `AnthropicAPIProvider`, `OpenRouterProvider`. 로컬 실험용으로 `CodexOAuthProvider` (openclaw/hermes 방식의 비공식 OAuth 세션 — **본인 토이 빌드 전용, 배포·시연 환경 기본값 아님**). 환경변수 `LLM_PROVIDER`로 토글. 모델 슬롯은 `LLM_MODEL_HIGH` (동적 리프 생성·병합), `LLM_MODEL_MEDIUM` (요약·추천 이유). 호출은 retry + token budget guard.

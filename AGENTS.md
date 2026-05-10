@@ -52,7 +52,8 @@
 │   └── ux/                            # 4개 (wireframes/ui-states/i18n/client-behaviors)
 └── (코드 디렉토리는 후속 에이전트가 만든다)
     backend/  client/  admin-console/  workers/  llm-adapter/
-    services/clickbait-detector/  scripts/  .github/
+    clickbait_module/  scripts/  .github/
+    services/clickbait-detector/   ← 옵션, 자체 도커 호스팅 시에만
 ```
 
 ## 핵심 결정 매트릭스 (압축)
@@ -72,7 +73,7 @@
 | Trace operation | extend/retract/split/archive 룰 기반. LLM은 leaf 재배치에만 (retract/split). **3단계 강등** active→stale→retract→archive |
 | Leaf 라이프사이클 | D 하이브리드 (신규 식별·병합만 LLM, 승격·강등 룰). emerging는 active trace path 끝 산하에서만 분기. core 슬롯 5개 중 1개 emerging quota |
 | LLM 어댑터 | **`MockProvider` (default)** + OpenAI/Anthropic/OpenRouter/CodexOAuth(local experimental). 환경변수 `LLM_PROVIDER` 토글 |
-| 낚시성 | DoRA 파인튜닝 `A.x 4.0 light` 모듈 wrap (사용자 보유, P0-1 대기) |
+| 낚시성 | DoRA 파인튜닝 `A.X-4.0-Light` 모듈 wrap (사용자 보유, P0-1 대기) |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein |
 | 수집 소스 | 학술 4종 (arXiv/OpenAlex/Semantic Scholar/DBLP) + 빅테크 RSS 30+ + 뉴스 (네이버 BS4 / TC / Verge / Wired / MIT TR / IEEE Spectrum) + sentinel `cold_start_pseudo` |
 | 시드 | 5+ 페르소나 + 14일치 인터랙션 (active day 기반) |

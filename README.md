@@ -32,7 +32,7 @@
 - **3 카테고리 ↔ 3 슬롯 1:1**. `current/adjacent/proactive` (모델) ↔ `core/adjacent/discovery` (추천) 가 자연스럽게 매핑.
 - **Active day 회계**. 모든 시간 임계(라이프사이클·베이지안 감쇠)가 wallclock이 아니라 "사용자가 인터랙션한 날"의 단조증가 카운터 기반. 시험기간 잠수해도 trace가 깨지지 않음.
 - **Beta-Bernoulli 베이지안 + 1-hop propagation**. atomic SQL UPSERT로 race condition 방어, leaf 활동이 부모 노드 점수로 propagate.
-- **DoRA 파인튜닝 `A.x 4.0 light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글.
+- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글.
 - **10-20명 동시성 가드**: single-flight + user-level Redis mutex + atomic SQL + LLM semaphore + batch flush + consent cache.
 
 ## 진행 상황
@@ -130,7 +130,7 @@ docs/
 - 본 프로젝트는 **성균관대 소프트웨어공학개론 조별과제 산출물**
 - CSO (Computer Science Ontology) 데이터 © KMI Open University, CC BY 4.0
 - 모든 외부 소스(arXiv·빅테크 블로그 RSS·네이버뉴스)는 각 사이트 이용 정책 준수 (메타데이터·요약·링크 중심 저장, 원문 무단 복제 금지 — NFR-25)
-- DoRA 파인튜닝된 `A.x 4.0 light` 낚시성 탐지 모듈은 본인 보유분으로 통합 예정
+- DoRA 파인튜닝된 `A.X-4.0-Light` 낚시성 탐지 모듈은 본인 보유분으로 통합 예정
 
 ---
 

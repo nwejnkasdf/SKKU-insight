@@ -1,0 +1,10 @@
+{
+  "base_model": "./A.X-4.0-Light",
+  "ans0": "0",
+  "ans1": "1",
+  "id0": 56,
+  "id1": 57,
+  "eos_id": 27,
+  "max_seq_length": 4096,
+  "attn_impl": "flash_attention_2"
+}

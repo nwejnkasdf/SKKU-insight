@@ -37,7 +37,7 @@
 
 | 항목 | 결정 | 한 줄 근거 |
 |---|---|---|
-| 낚시성 탐지 | **사용자 보유 DoRA 파인튜닝된 `A.x 4.0 light` 모듈을 통합**. 위치는 추후 사용자 공유 → `services/clickbait-detector` 컨테이너로 wrapping. **2차 문헌(테크 뉴스) 수집 단계 1차 정제에만 사용** | NFR-09, FR-30 직접 충족 |
+| 낚시성 탐지 | **사용자 보유 DoRA 파인튜닝된 `A.X-4.0-Light` 모듈을 통합**. 모듈 위치 = `clickbait_module/`, 서빙 엔진 = **vLLM**(DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 결정으로 backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. **2차 문헌(테크 뉴스) 수집 단계 1차 정제에만 사용** | NFR-09, FR-30 직접 충족 |
 | 그 외 LLM 작업 | `LLMProvider` 추상으로 **모델 슬롯**만 고정. 슬롯 `high` = 동적 리프 생성·병합, `medium` = 섹션형 요약·추천 이유. 1차는 누구나 클론 즉시 부트되도록 `MockProvider`(deterministic fixture)를 기본값으로 사용하고, 실제 LLM 호출이 필요한 기능은 `OpenAIAPIProvider` 등 정식 API로 토글 | 모델 의존 표현 회피, 재현성 |
 | LLM 어댑터 | `LLMProvider` 추상 + 5 구현체: **`MockProvider` (default, CI/시연 fixture)**, `OpenAIAPIProvider`, `AnthropicAPIProvider`, `OpenRouterProvider`, **`CodexOAuthProvider` (local experimental)**. 환경변수 `LLM_PROVIDER`로 토글. CodexOAuth는 비공식 OAuth 세션을 사용하므로 로컬 실험·개인 토이 빌드에만 권장하고 배포·시연 환경의 기본값이 아니다 | 신뢰성 + 본인 빌드용 도피선 둘 다 확보 |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI + 제목 정규화 + Levenshtein | 인프라 단순화 |

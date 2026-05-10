@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.contracts import ErrorCode, ErrorResponse, TokenAudience
+from app.contracts import ErrorCode, ErrorResponse, RedisKey, TokenAudience
 from app.db.session import AsyncSessionLocal
 from app.redis import get_redis
 from app.security.consent_cache import is_consent_active
@@ -66,7 +66,7 @@ class ConsentGateMiddleware(BaseHTTPMiddleware):
             return _forbidden(request)
 
         # 캐시 우선 — DB 세션은 캐시 miss 시에만
-        cached = await redis.get(f"consent:active:{user_id}")
+        cached = await redis.get(RedisKey.consent_active_cache(user_id))
         if cached is not None:
             if cached != "1":
                 return _forbidden(request)

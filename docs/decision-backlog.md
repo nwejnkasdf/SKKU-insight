@@ -37,6 +37,8 @@
 | C-7. User.email 대소문자 변형 우회 가능 | 3겹 정규화 방어: Pydantic validator + service 계층 + DB functional index `LOWER(email)` partial UNIQUE. | [`data/schema.md`](data/schema.md) User, [`security/auth-flow.md`](security/auth-flow.md) §결정 핀, [`api/auth.md`](api/auth.md) 비즈니스 룰 |
 | C-8. SourcePolicy 3행 시드 trust_level 미명시 | (academic, high), (vendor_blog, high), (tech_news, medium), 모두 `collection_rule={}` + `enabled=true`. A2 마이그레이션에 op.bulk_insert. | [`data/schema.md`](data/schema.md) §시드 |
 | C-9. /admin/users 마스킹 1글자 local part 처리 | 길이≥2: 첫·마지막 글자 유지 + `***`. 길이=1: 전체 마스킹 fallback `***@domain`. | [`api/admin.md`](api/admin.md) 비즈니스 룰 |
+| C-10. User.last_login_at 컬럼이 schema.md User 정의에 누락 (auth-flow.md / api/auth.md 는 갱신 명시) | `last_login_at: DateTime(timezone=True), nullable=True` 컬럼 추가. auth/service.login 이 UPDATE. A2 자체 검수에서 발견. | [`data/schema.md`](data/schema.md) User |
+| C-11. passlib + bcrypt 4.x 호환성 깨짐 | passlib 1.7.4 가 bcrypt 4.x 의 `__about__` 제거·72byte ValueError 처리 못 함. `passlib` 의존 제거 + `bcrypt` 직접 호출 + SHA-256 hex pre-hash 패턴 (64 ASCII bytes — 72 한도 + null 회피). UTF-8 한국어 128자 정책 보장. A2 자체 검수에서 발견. | [`security/password-policy.md`](security/password-policy.md) §저장 |
 
 ---
 
@@ -135,7 +137,7 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
 | P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별) | 9 (해결 9 — C-2 부분 해소, C-6~9 신규 해결 A2) | (없음) | A2 (2026-05-11) — 본 세션 docs 정합 단계에서 4건 해결 |
+| C-급 (인터뷰 식별) | 11 (해결 11 — C-2 부분 해소, C-6~11 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 단계 + 자체 검수에서 6건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 

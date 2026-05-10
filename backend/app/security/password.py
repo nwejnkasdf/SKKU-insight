@@ -7,13 +7,19 @@
 4. 금칙어 `{insight, skku, admin, password, qwerty}` 포함 차단
 5. 양끝 whitespace 차단
 
-bcrypt cost = `settings.BCRYPT_COST` (default 12, passlib log_rounds).
+bcrypt cost = `settings.BCRYPT_COST` (default 12).
+
+passlib 미사용 — bcrypt 4.x 와 passlib 1.7 호환성 깨짐 (bcrypt 가 `__about__` 제거).
+직접 `bcrypt` 라이브러리 호출. UTF-8 한국어 + 128자 정책 모두 지원하기 위해
+SHA-256 hex pre-hash (64 ASCII bytes — bcrypt 72 byte 한도 통과 + null byte 없음).
+보안적으로 동등 — sha256 충돌 확률 무시 가능.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
-from passlib.context import CryptContext
+import bcrypt
 
 from app.config import get_settings
 from app.contracts import ErrorCode
@@ -22,11 +28,6 @@ _DENY_LIST_PATH = Path(__file__).parent / "common_passwords.txt"
 _FORBIDDEN_TERMS = frozenset({"insight", "skku", "admin", "password", "qwerty"})
 
 _settings = get_settings()
-_pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    bcrypt__rounds=_settings.BCRYPT_COST,
-    deprecated="auto",
-)
 _deny_list: frozenset[str] = frozenset(
     line.strip().lower()
     for line in _DENY_LIST_PATH.read_text(encoding="utf-8").splitlines()
@@ -38,23 +39,34 @@ class PolicyViolation(Exception):
     """비밀번호 정책 위반. router 가 422 + ErrorResponse 로 변환."""
 
     def __init__(self, sub_code: str, message: str) -> None:
-        self.sub_code = sub_code  # too_short / too_long / common / contains_user_info / whitespace / forbidden_term
+        self.sub_code = sub_code
         self.message = message
         self.code = ErrorCode.AUTH_WEAK_PASSWORD
         super().__init__(message)
 
 
+def _prep(password: str) -> bytes:
+    """bcrypt 입력 정규화 — SHA-256 hex digest (64 ASCII bytes).
+
+    이유:
+    - bcrypt 4.x 는 72 byte 초과 입력을 ValueError 로 거부 (이전 버전은 silent truncate)
+    - 정책은 최대 128자 허용 + UTF-8 한국어 1자=3byte → 최대 384 byte
+    - SHA-256 hex 는 64 ASCII bytes — 한도 통과 + null byte 없음 + 충돌 무시 가능
+    """
+    return hashlib.sha256(password.encode("utf-8")).hexdigest().encode("ascii")
+
+
 def hash_password(plain: str) -> str:
-    """bcrypt 해시 (cost=BCRYPT_COST). 결과 길이 ~60 자."""
-    return _pwd_context.hash(plain)
+    """bcrypt 해시 (cost=BCRYPT_COST). 결과 길이 ~60자 ASCII."""
+    salt = bcrypt.gensalt(rounds=_settings.BCRYPT_COST)
+    return bcrypt.hashpw(_prep(plain), salt).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """bcrypt verify. False 시 invalid_credentials. timing attack 안전."""
     try:
-        return _pwd_context.verify(plain, hashed)
-    except ValueError:
-        # 해시 형식 오류 — 마이그레이션 실패 등. 보수적으로 False.
+        return bcrypt.checkpw(_prep(plain), hashed.encode("ascii"))
+    except (ValueError, TypeError):
         return False
 
 

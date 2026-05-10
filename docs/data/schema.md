@@ -35,6 +35,9 @@ class User(Base):
     # 자세히는 algorithms/cso-topic-traversal.md §5.
     active_day_counter: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_active_calendar_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # 로그인 성공 시 갱신 (auth-flow.md §2 시퀀스, api/auth.md §비즈니스 룰).
+    # 본 컬럼은 decision-backlog C-10 으로 schema.md 에 추가됨 (A2 2026-05-11).
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 ```
 
 인덱스(Alembic raw DDL):

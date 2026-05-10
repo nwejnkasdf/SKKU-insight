@@ -21,11 +21,26 @@ DOCS_API_DIR = repo_root() / "docs" / "api"
 
 
 def collect_docs_codes() -> set[str]:
+    """docs/api/*.md 의 ErrorCode 표·문장에서 `area.specific` 형태만 추출.
+
+    제외: 파일명 (`auth.md`), 단순 도메인 (`example.com`).
+    포함 룰: `area.specific[.subspecific]` — area/specific 모두 영문 소문자 + 언더스코어.
+    파일 확장자 단어 (md/py/sh 등) 와 도메인 TLD 단어 (com/test 등) 차단.
+    """
+    extension_or_tld = {
+        "md", "py", "sh", "yaml", "yml", "json", "toml", "ini", "txt",
+        "com", "net", "org", "io", "test", "local", "dev",
+    }
     found: set[str] = set()
-    pattern = re.compile(r"`([a-z]+\.[a-z_]+(?:\.[a-z_]+)?)`")
+    pattern = re.compile(r"`([a-z][a-z0-9_]*\.[a-z][a-z0-9_]+(?:\.[a-z][a-z0-9_]+)?)`")
     for md in DOCS_API_DIR.glob("*.md"):
         for match in pattern.finditer(md.read_text(encoding="utf-8")):
-            found.add(match.group(1))
+            code = match.group(1)
+            parts = code.split(".")
+            # 파일 확장자 패턴 (foo.md, bar.py) 제외
+            if len(parts) == 2 and parts[1] in extension_or_tld:
+                continue
+            found.add(code)
     return found
 
 
@@ -42,16 +57,13 @@ def main() -> int:
         for v in sorted(missing_in_docs):
             print(f"  - {v}")
     # docs 에만 있는 코드는 정보 — 후속 에이전트가 enum 추가할 예정일 수 있음
-    docs_dotted = {c for c in docs_codes if "." in c and "/" not in c}
-    extra_in_docs = docs_dotted - enum_dotted
-    # 노이즈 패턴 제거 (e.g. file 경로 sample 등)
-    extra_in_docs = {c for c in extra_in_docs if len(c.split(".")) <= 3}
+    extra_in_docs = docs_codes - enum_dotted
     if extra_in_docs:
         print("[INFO] docs/api/*.md 에는 있지만 ErrorCode enum 에 없는 코드 (검토 필요):")
         for v in sorted(extra_in_docs):
             print(f"  - {v}")
 
-    print(f"\nenum 점 표기 {len(enum_dotted)} / docs dotted {len(docs_dotted)}")
+    print(f"\nenum 점 표기 {len(enum_dotted)} / docs dotted {len(docs_codes)}")
     return 1 if failed else 0
 
 

@@ -63,16 +63,18 @@ def register_cron_jobs() -> None:
     conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)
     scheduler = Scheduler(queue_name="default", connection=conn)
     try:
-        # idempotent: 기존 같은 id 의 job 모두 cancel
-        existing_ids = {job.id for job in scheduler.get_jobs()}
+        # idempotent: 기존 job 을 list 로 1회만 materialize (rq-scheduler 의 get_jobs() 가
+        # generator 인 점을 고려해 두 번째 iter 시 빈 결과가 되지 않도록 보장).
+        existing_jobs = list(scheduler.get_jobs())
+        existing_by_id: dict[str, object] = {}
+        for job in existing_jobs:
+            existing_by_id[job.id] = job
         for reg in JOB_REGISTRATIONS:
             job_id = reg["id"]
             cron_expr = getattr(settings, reg["cron_attr"])
-            if job_id in existing_ids:
-                # 기존 job cancel
-                for job in scheduler.get_jobs():
-                    if job.id == job_id:
-                        scheduler.cancel(job)
+            existing = existing_by_id.get(job_id)
+            if existing is not None:
+                scheduler.cancel(existing)
                 logger.info("scheduler: cancelled existing job_id=%s", job_id)
             scheduler.cron(
                 cron_expr,

@@ -47,11 +47,15 @@ SCAN_DIR = BACKEND_DIR / "app"
 
 
 def find_violations() -> list[tuple[Path, int, str]]:
-    """raw f-string Redis 키 사용 위치 검출."""
+    """raw f-string Redis 키 사용 위치 검출.
+
+    무시 대상:
+    - wildcard `*` 포함 SCAN 패턴 (RedisKey 의 정확 키 생성 범위 외)
+    - EXPLICIT_ALLOWED_KEYS prefix (`account_deletion:`, `idemp:`)
+    """
     violations: list[tuple[Path, int, str]] = []
     pattern_prefixes = REDIS_KEY_PREFIXES
     pattern_alt = "|".join(re.escape(p) for p in pattern_prefixes)
-    # f"<prefix>...{var}..." 또는 f'<prefix>...{var}...' 매칭
     fstring_regex = re.compile(
         r'f["\\\']((?:' + pattern_alt + r')[^"\\\']*)["\\\']'
     )
@@ -61,8 +65,16 @@ def find_violations() -> list[tuple[Path, int, str]]:
         text = py_path.read_text(encoding="utf-8")
         for line_no, line in enumerate(text.splitlines(), start=1):
             m = fstring_regex.search(line)
-            if m:
-                violations.append((py_path, line_no, line.strip()))
+            if not m:
+                continue
+            matched_key = m.group(1)
+            # SCAN 와일드카드 패턴 — RedisKey SOR 범위 외 (prefix 매칭, 정확 키 X)
+            if "*" in matched_key:
+                continue
+            # 명시 허용 키 (account_deletion:, idemp:) — A2 결정으로 RedisKey 외 사용 허가
+            if any(allowed in matched_key for allowed in EXPLICIT_ALLOWED_KEYS):
+                continue
+            violations.append((py_path, line_no, line.strip()))
     return violations
 
 

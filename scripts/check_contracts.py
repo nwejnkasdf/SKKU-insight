@@ -37,41 +37,54 @@ CHECKS = [
 ]
 
 
+def _extract_check_clause(text: str, check_name: str) -> str | None:
+    """CheckConstraint(...) 호출에서 SQL clause 추출. 인자 순서 무관, multiline 처리.
+
+    `sa.CheckConstraint("role IN ('super',...)", name="ck_admin_user_role")` 또는
+    `name="..."` 가 먼저 오는 변형 모두 지원.
+    """
+    # 1) name="<check_name>" 의 위치 찾기
+    name_pattern = re.compile(rf'name="{re.escape(check_name)}"')
+    name_match = name_pattern.search(text)
+    if not name_match:
+        return None
+    # 2) name 주변의 CheckConstraint(...) 블록 찾아 첫 string argument 추출
+    # 가장 가까운 앞의 CheckConstraint( 부터 뒤의 ) 까지
+    name_pos = name_match.start()
+    pre = text[:name_pos]
+    cc_idx = pre.rfind("CheckConstraint(")
+    if cc_idx < 0:
+        return None
+    # CheckConstraint( 다음에 오는 따옴표 시작 위치 찾기 (multiline ok)
+    after = text[cc_idx + len("CheckConstraint(") :]
+    str_match = re.match(r'\s*"([^"]*)"', after, re.DOTALL)
+    if not str_match:
+        return None
+    return str_match.group(1)
+
+
 def main() -> int:
     failed = False
+    matched_any = {check["name"]: False for check in CHECKS}
     for migration in sorted(ALEMBIC_DIR.glob("*.py")):
         text = migration.read_text(encoding="utf-8")
         for check in CHECKS:
-            if check["name"] not in text:
-                # 본 migration 이 해당 CHECK 를 정의하지 않으면 skip
+            clause = _extract_check_clause(text, check["name"])
+            if clause is None:
                 continue
-            # CHECK 제약의 IN (...) 안 값들 추출
-            pattern = re.compile(
-                rf'name="{check["name"]}".*?"([^"]+\sIN\s*\([^)]+\))"', re.DOTALL
-            )
-            match = pattern.search(text)
-            if not match:
-                # 다른 패턴: CheckConstraint("role IN ('super',...)", name="ck_...")
-                pattern2 = re.compile(
-                    r'CheckConstraint\(\s*"([^"]+\sIN\s*\([^)]+\))"\s*,'
-                    rf'\s*name="{check["name"]}"',
-                    re.DOTALL,
-                )
-                match = pattern2.search(text)
-            if not match:
-                print(
-                    f"[WARN] {migration.name} 에 CHECK 제약 {check['name']} "
-                    "패턴 매칭 실패 — 정규식 점검 필요."
-                )
-                continue
-            constraint_sql = match.group(1)
+            matched_any[check["name"]] = True
             for v in check["enum_values"]:
-                if f"'{v}'" not in constraint_sql:
+                if f"'{v}'" not in clause:
                     print(
                         f"[FAIL] {check['label']}.{v} 가 {migration.name} "
-                        f"의 CHECK {check['name']} 에 없음."
+                        f"의 CHECK {check['name']} 에 없음.\n"
+                        f"  clause: {clause}"
                     )
                     failed = True
+    for check in CHECKS:
+        if not matched_any[check["name"]]:
+            # 본 A2 범위 외 CHECK (LeafTopicStatus 등) 는 아직 migration 없음 — OK
+            pass
     print("\nCHECK 정합 검사 완료")
     return 1 if failed else 0
 

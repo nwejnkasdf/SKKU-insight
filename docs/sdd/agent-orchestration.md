@@ -101,18 +101,20 @@ CI에서 PR마다 실행:
 
 ```yaml
 # .github/workflows/contracts.yml
-- run: python scripts/check_api_docs.py
-- run: python scripts/check_schema.py
-- run: python scripts/check_env.py
-- run: python scripts/check_error_codes.py
-- run: python scripts/check_redis_keys.py
-- run: python scripts/check_contracts.py
-- run: python scripts/export_openapi.py && git diff --exit-code openapi.json
+- run: python -m scripts.check_api_docs
+- run: python -m scripts.check_schema
+- run: python -m scripts.check_env
+- run: python -m scripts.check_error_codes
+- run: python -m scripts.check_redis_keys
+- run: python -m scripts.check_contracts
+- run: cd backend && python -m scripts.export_openapi > openapi.json && cd .. && git diff --exit-code openapi.json
 - run: cd client && npm run codegen && git diff --exit-code src/generated
 - run: cd backend && mypy --strict app/
 - run: cd backend && ruff check
 - run: cd client && npm run typecheck
 ```
+
+(repo root 의 `scripts/` 를 패키지로 import 하려면 `python -m scripts.X` 표기 필수 — `python scripts/X.py` 실행은 `from scripts._common import ...` 가 `__main__` context 에서 실패함.)
 
 `git diff --exit-code` 로 codegen 결과가 commit과 일치하는지 강제. 시그니처 변경 후 codegen 안 하면 CI 실패.
 

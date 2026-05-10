@@ -42,12 +42,12 @@ lint:
 	docker compose exec api mypy --strict app/
 
 check-all:
-	python scripts/check_api_docs.py
-	python scripts/check_schema.py
-	python scripts/check_env.py
-	python scripts/check_error_codes.py
-	python scripts/check_redis_keys.py
-	python scripts/check_contracts.py
+	python -m scripts.check_api_docs
+	python -m scripts.check_schema
+	python -m scripts.check_env
+	python -m scripts.check_error_codes
+	python -m scripts.check_redis_keys
+	python -m scripts.check_contracts
 	@echo "[OK] 6 cross-check 통과"
 
 stop:

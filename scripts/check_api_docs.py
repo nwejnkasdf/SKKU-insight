@@ -25,6 +25,15 @@ ROW_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# FastAPI auto-generated / 인프라 endpoint — docs 검증 범위 외
+CODE_PATH_WHITELIST = {
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/openapi.json",
+    "/health",
+}
+
 
 def code_endpoints() -> set[tuple[str, str]]:
     """FastAPI app 의 (METHOD, path) 집합."""
@@ -33,6 +42,8 @@ def code_endpoints() -> set[tuple[str, str]]:
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None) or set()
         if not path or not isinstance(methods, set):
+            continue
+        if path in CODE_PATH_WHITELIST:
             continue
         for method in methods:
             if method in {"HEAD", "OPTIONS"}:
@@ -47,7 +58,9 @@ def docs_endpoints() -> set[tuple[str, str]]:
         text = md_path.read_text(encoding="utf-8")
         for match in ROW_PATTERN.finditer(text):
             method = match.group(1).upper()
-            path = match.group(2).strip()
+            raw_path = match.group(2).strip()
+            # query string / fragment 제거 — endpoint path 만 비교
+            path = raw_path.split("?", 1)[0].split("#", 1)[0]
             docs.add((method, path))
     return docs
 

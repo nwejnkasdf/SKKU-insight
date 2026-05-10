@@ -192,7 +192,11 @@ class AdminInterestTopicView(BaseModel):
 
 - 모든 `/admin/*` 응답은 `aud="admin"` 클레임 검증 (FR-60). 일반 사용자 토큰 → 403 즉시.
 - 부트스트랩 admin은 첫 로그인 시 `must_change_password=true`로 강제 비번 변경.
-- 사용자 이메일은 운영자 권한에서는 부분 마스킹 (예: `g***d@gmail.com`). super만 전체 노출.
+- **`/admin/users` 응답의 email 마스킹 정확 규칙** (NFR-04):
+  - `super` 권한: 전체 email 원문 그대로 노출
+  - `operator` / `read_only` 권한: local part 길이에 따라
+    - **길이 ≥ 2**: 첫글자 + `***` + 마지막글자 + `@` + 도메인 (예: `gywnd123@gmail.com` → `g***3@gmail.com`)
+    - **길이 = 1**: 전체 local part 마스킹 fallback (예: `a@gmail.com` → `***@gmail.com`)
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
 
 ## 오류 응답

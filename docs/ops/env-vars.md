@@ -91,6 +91,7 @@
 | `LIFECYCLE_EVALUATOR` | `hybrid_d` | hybrid_d | batch_llm | rule_only |
 | `MERGE_EVALUATION_CRON` | `0 3 * * 1` | 매주 월 03:00 UTC |
 | `INTEREST_DECAY_CRON` | `0 0 * * *` | 매일 자정 UTC (단 active day 차이 없으면 no-op) |
+| `NAVER_CLEANUP_CRON` | `0 17 * * *` | UTC 기준 매일 17시 (KST 02:00). 토픽 매핑 없는 `content_type=tech_news` Document 30일 경과 시 삭제 (NFR-25 정합, `decision-backlog.md` P1-6). A2가 scheduler stub 등록, A4가 본문 |
 
 ## 동시성 가드
 
@@ -190,6 +191,7 @@ COLLECTION_USER_JITTER_SECONDS=300
 LIFECYCLE_EVALUATOR=hybrid_d
 MERGE_EVALUATION_CRON=0 3 * * 1
 INTEREST_DECAY_CRON=0 0 * * *
+NAVER_CLEANUP_CRON=0 17 * * *
 
 # === Concurrency guards ===
 EVENT_BATCH_SIZE=20

@@ -106,6 +106,7 @@ CI에서 PR마다 실행:
 - run: python scripts/check_env.py
 - run: python scripts/check_error_codes.py
 - run: python scripts/check_redis_keys.py
+- run: python scripts/check_contracts.py
 - run: python scripts/export_openapi.py && git diff --exit-code openapi.json
 - run: cd client && npm run codegen && git diff --exit-code src/generated
 - run: cd backend && mypy --strict app/
@@ -114,6 +115,34 @@ CI에서 PR마다 실행:
 ```
 
 `git diff --exit-code` 로 codegen 결과가 commit과 일치하는지 강제. 시그니처 변경 후 codegen 안 하면 CI 실패.
+
+### Ownership 표 (어느 에이전트가 무엇을 만드는가)
+
+**`scripts/check_*.py` 6종 (A2 결정 2026-05-11):**
+
+| 스크립트 | 비교 대상 | 소유 에이전트 |
+|---|---|---|
+| `check_api_docs.py` | OpenAPI export ↔ `docs/api/*.md` endpoint 표 | **A2** |
+| `check_schema.py` | SQLAlchemy `Base.metadata` ↔ `docs/data/schema.md` 모델 코드 블록 | **A2** |
+| `check_env.py` | `Settings.__fields__` ↔ `docs/ops/env-vars.md` 표 ↔ `.env.example` 3-way | **A2** |
+| `check_error_codes.py` | `app.contracts.ErrorCode` ↔ `docs/api/*.md` 오류 표 | **A2** |
+| `check_redis_keys.py` | `app.contracts.RedisKey` 메서드 prefix ↔ `docs/sdd/concurrency.md` + AST 스캔으로 raw f-string Redis 키 검출 | **A2** |
+| `check_contracts.py` | enum 값 ↔ Alembic CHECK SQL + RedisKey SOR 외부 raw 검출 | **A2** |
+
+사유: CI 게이트의 일관성. 한 에이전트가 6종 모두 작성·유지하면 docs↔코드 정합 검증 패턴이 통일. 이후 모든 PR이 CI에서 동일 게이트 통과.
+
+**RQ + rq-scheduler cron job 등록 (A2 결정 2026-05-11):**
+
+| job | cron env | A2 stub 등록 | 본문 구현 책임 |
+|---|---|---|---|
+| `account_deletion_job` | (event-driven, enqueue) | A2 본문 구현 | A2 |
+| `cold_start_job` | (event-driven, enqueue) | A2 stub | **A8** |
+| `naver_cleanup_job` | `NAVER_CLEANUP_CRON` | A2 stub + scheduler 등록 | **A4** |
+| `collection_job` | `COLLECTION_CRON` | A2 stub + scheduler 등록 | **A4** |
+| `interest_decay_job` | `INTEREST_DECAY_CRON` | A2 stub + scheduler 등록 | **A6** |
+| `merge_evaluation_job` | `MERGE_EVALUATION_CRON` | A2 stub + scheduler 등록 | **A7** |
+
+사유: 본 결정의 5겹 방어 §4(strict type)와 정합. 단일 진입점 `backend/app/scheduler.py`이 모든 cron 등록을 통합 관리. 후속 에이전트는 자기 job의 함수 본문만 채움 → cron 등록·env 소비 보일러플레이트 중복 0.
 
 ## 6. 에이전트 작업 표준 프롬프트
 

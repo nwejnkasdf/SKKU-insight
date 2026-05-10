@@ -27,7 +27,16 @@
 | C-4. emerging leaf 노출 경로 부재 | traversal trace 모델 도입으로 자연 해소: emerging은 active trace path 끝 산하에서만 분기되어 current 카테고리 = core 슬롯에 자연 포함. core 슬롯 5개 중 1개는 emerging quota | `algorithms/cso-topic-traversal.md §6.2`, `algorithms/recommendation-ranking.md` Core 섹션 |
 | C-5. 사용자 × CSO 토픽 상태 머신·전이 룰 (인터뷰에서 신규 식별) | `UserCSOTraversal` trace 객체 도입 + active day 기반 라이프사이클로 해소. SRS Open Issue 5로 등록 | `algorithms/cso-topic-traversal.md` 전체, `decisions.md §4` |
 
-> **C-2 (NFR-21 30일 grace period)**는 여전히 미해소. 1차 시연은 즉시 cascade로 진행하되, 시연 후 폴리시 단계에서 soft delete + worker 도입 검토. 운영 시 NFR-21 정합 주의.
+> **C-2 (NFR-21 30일 grace period)** — A2 (2026-05-11) **부분 해소**: 1차 시연은 RQ async + worker function이 5분 내 CASCADE 실행으로 변경 (즉시 inline cascade가 아닌 async). NFR-21의 30일 grace는 여전히 post-시연 폴리시 단계. async worker 자체가 향후 grace period 도입 시 동일 함수 재활용 경로를 제공. 운영 시 NFR-21 완전 정합 주의. 자세히는 [`api/consent.md`](api/consent.md) 비즈니스 룰.
+
+### C-급 신규 해결 (A2 본문 세션, 2026-05-11)
+
+| ID | 원래 제기된 문제 | 해소 위치 |
+|---|---|---|
+| C-6. Refresh replay 감지 시 user_id 역추적 불가 (opaque token) | HMAC index `:rotated` 마커 패턴으로 해결: rotation 시 `refresh_index:{HMAC(old)}` 키를 삭제하지 않고 값을 `{user_id}:{jti}:rotated`로 OVERWRITE (TTL 유지). 재사용 감지 시 user_id 추출 → `revoke_all_user_refresh()` family revoke. | [`security/token-handling.md`](security/token-handling.md) §회전, [`security/auth-flow.md`](security/auth-flow.md) §3 |
+| C-7. User.email 대소문자 변형 우회 가능 | 3겹 정규화 방어: Pydantic validator + service 계층 + DB functional index `LOWER(email)` partial UNIQUE. | [`data/schema.md`](data/schema.md) User, [`security/auth-flow.md`](security/auth-flow.md) §결정 핀, [`api/auth.md`](api/auth.md) 비즈니스 룰 |
+| C-8. SourcePolicy 3행 시드 trust_level 미명시 | (academic, high), (vendor_blog, high), (tech_news, medium), 모두 `collection_rule={}` + `enabled=true`. A2 마이그레이션에 op.bulk_insert. | [`data/schema.md`](data/schema.md) §시드 |
+| C-9. /admin/users 마스킹 1글자 local part 처리 | 길이≥2: 첫·마지막 글자 유지 + `***`. 길이=1: 전체 마스킹 fallback `***@domain`. | [`api/admin.md`](api/admin.md) 비즈니스 룰 |
 
 ---
 
@@ -65,6 +74,7 @@
 - **원본**: `data/schema.md:352`
 - **default**: 매일 02:00 KST cron. 모든 토픽 매핑이 사라지고 `created_at` 으로부터 30일 경과한 `content_type=tech_news` Document는 삭제. SRS의 NFR-25 (외부 원문 무단 복제 금지) 정합.
 - **stub**: `workers/cleanup/naver_news_cleanup.py` 에 위 룰 구현. `COLLECTION_CRON` 과 별도 `NAVER_CLEANUP_CRON=0 17 * * *` (UTC) 환경변수.
+- **A2 (2026-05-11) 부분 완료**: `backend/app/scheduler.py`에 rq-scheduler cron job stub `naver_cleanup_job`을 `NAVER_CLEANUP_CRON` env로 등록. 함수 본문은 `raise NotImplementedError("A4에서 구현")`. `NAVER_CLEANUP_CRON`은 `docs/ops/env-vars.md` 표 + `.env.example`에도 정식 카탈로그. **잔여**: A4가 본문 구현.
 
 ### P1-7. SRS docx 와이어프레임 PNG 추출 경로
 - **원본**: 본 정리 작업에서 신규 식별. SRS 분할 파일과 `ux/wireframes.md` 의 PNG 링크 부재 안내(이미 본 정리 작업으로 박스 추가됨).
@@ -123,8 +133,9 @@
 | 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
-| P1 | 8 (해결 1, 활성 7) | (없음) | reasonable default + stub |
+| P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
 | P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
+| C-급 (인터뷰 식별) | 9 (해결 9 — C-2 부분 해소, C-6~9 신규 해결 A2) | (없음) | A2 (2026-05-11) — 본 세션 docs 정합 단계에서 4건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
 

@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     LIFECYCLE_EVALUATOR: Literal["hybrid_d", "batch_llm", "rule_only"] = "hybrid_d"
     MERGE_EVALUATION_CRON: str = "0 3 * * 1"
     INTEREST_DECAY_CRON: str = "0 0 * * *"
+    NAVER_CLEANUP_CRON: str = "0 17 * * *"  # decision-backlog P1-6, NFR-25
 
     # === Concurrency guards (sdd/concurrency.md) ===
     EVENT_BATCH_SIZE: int = 20

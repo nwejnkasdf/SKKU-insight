@@ -77,9 +77,11 @@ class ErrorResponse(BaseModel):
 
 ## 비즈니스 룰
 
+- **Email 정규화 3겹**: 모든 endpoint(signup/login/me)의 email 필드는 `email.strip().lower()` 정규화 후 처리·저장. 클라이언트가 `Test@TEST.com` 보내도 백엔드는 `test@test.com`으로 통일. 1) Pydantic validator(요청 경계) + 2) service 계층(방어적) + 3) DB functional index `LOWER(email)` partial UNIQUE — 3겹 ([`../security/auth-flow.md`](../security/auth-flow.md), [`../data/schema.md`](../data/schema.md) User).
 - 신규 가입 시 UserConsent는 별도 `/consent` 호출로 등록한다 (FR-05, FR-11).
 - 로그인 성공 시 `last_login_at` 갱신.
 - 로그아웃은 Redis의 `refresh:{user_id}:{jti}` 키를 삭제. access_token의 `jti`는 deny-list에 짧게 추가 (15분 TTL).
+- **Refresh replay 감지**: 회전된 토큰 재사용 시 user의 모든 refresh family revoke (HMAC `:rotated` 마커 패턴, [`../security/token-handling.md`](../security/token-handling.md)).
 - 모든 응답은 `X-Request-Id` 헤더 포함 (구조화 로그 상관관계용).
 
-<!-- TODO: A2가 OpenAPI 스펙 자동 생성 시 본 표와 cross-check -->
+OpenAPI는 `scripts/check_api_docs.py`가 본 표와 자동 cross-check (A2 구현).

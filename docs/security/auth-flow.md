@@ -8,7 +8,9 @@
 - **JWT Access**: 15분, HS256, 클레임 `{sub, aud, exp, iat, jti, iss}`
 - **JWT Refresh**: opaque random 64바이트 token (서명 없음). Redis에 메타 저장 (`refresh:{user_id}:{jti} → {created_at, last_used_at, ip, ua}`)
 - **Refresh 만료**: 14일
+- **Refresh replay 감지**: HMAC index `:rotated` 마커 패턴으로 family revoke ([`token-handling.md`](token-handling.md))
 - **Electron 토큰 보관**: `safeStorage` (OS 키체인). 메모리에 평문 access만 유지
+- **Email 정규화 3겹 방어**: Pydantic validator(요청 경계) + service 계층(방어적) + DB functional index `LOWER(email)` partial UNIQUE. 대소문자·양끝 공백 변형 우회 차단. CLI/시드/raw SQL bypass도 차단.
 
 ## 1. 회원가입
 
@@ -24,15 +26,17 @@ sequenceDiagram
     U->>E: 이메일, 비밀번호 입력
     E->>E: 클라이언트 측 비밀번호 길이/복잡도 사전 검증
     E->>API: POST /auth/signup
-    API->>Sec: enforce_password_policy(password)
+    API->>API: Pydantic validator: email = email.strip().lower()  (1겹)
+    API->>Sec: enforce_password_policy(password, email)
     alt 정책 위반
         API-->>E: 422 + auth.weak_password
         E->>U: 정책 안내 표시
     end
     API->>Sec: bcrypt(cost=12) hash(password)
     Sec-->>API: password_hash
-    API->>DB: INSERT User(email, password_hash) ON CONFLICT(email) RAISE
-    alt email 중복
+    API->>API: service: email = email.strip().lower()  (2겹 방어)
+    API->>DB: INSERT User(email, ...) — functional UNIQUE LOWER(email) (3겹) ON CONFLICT RAISE
+    alt email 중복 (대소문자 변형 포함 차단됨)
         API-->>E: 409 + auth.email_taken
     else 성공
         DB-->>API: user_id
@@ -58,7 +62,8 @@ sequenceDiagram
     U->>E: 이메일, 비밀번호
     E->>API: POST /auth/login
     Note over API: rate limit 5/분/IP (slowapi)
-    API->>DB: SELECT User WHERE email
+    API->>API: email = email.strip().lower()  (Pydantic + service)
+    API->>DB: SELECT User WHERE LOWER(email) = :email AND deleted_at IS NULL
     alt User 없음 또는 deleted_at != NULL
         API-->>E: 401 + auth.invalid_credentials
         Note over API: 의도적 동일 메시지 (Username Enumeration 방지)
@@ -69,7 +74,8 @@ sequenceDiagram
     end
     API->>Sec: build_access_token(user_id, aud="user")
     API->>Sec: random_refresh_token() + jti
-    API->>Redis: SET refresh:{user_id}:{jti} {created_at, ip, ua} EX 14d
+    API->>Redis: HSET refresh:{user_id}:{jti} {created_at, ip, ua, active:"1"} EX 14d
+    API->>Redis: SET refresh_index:{HMAC(token)} "{user_id}:{jti}:active" EX 14d
     API->>DB: UPDATE User SET last_login_at=now()
     API-->>E: 200 + {access_token, refresh_token, expires_in:900, token_type:Bearer}
     E->>E: safeStorage에 access+refresh 저장
@@ -86,20 +92,30 @@ sequenceDiagram
     participant Sec
 
     E->>API: POST /auth/refresh {refresh_token}
-    API->>API: extract_jti_from(refresh_token) -- 우리는 opaque이므로 token 자체가 키 일부
-    API->>Redis: GET refresh:{user_id}:{jti}
-    alt 없음 (폐기)
+    API->>Redis: GET refresh_index:{HMAC(JWT_SECRET, refresh_token)}
+    alt index 미스 (만료 14d 초과 또는 위조)
+        API-->>E: 401 + auth.refresh_revoked (단일 revoke, user 역추적 불가)
+    end
+    Note over API: pointer = "{user_id}:{jti}:state"
+    alt state == "rotated" 또는 "revoked" (이미 회전·폐기된 토큰 재사용 = 탈취 의심)
+        API->>Redis: SCAN refresh:{user_id}:* + DEL (family revoke)
         API-->>E: 401 + auth.refresh_revoked
     end
-    API->>Sec: verify_refresh_token(refresh_token, redis_meta)
-    Sec-->>API: ok
-    API->>Sec: rotate (issue new refresh + new jti)
-    API->>Redis: DEL old + SET new refresh:{user_id}:{new_jti} EX 14d
+    API->>Redis: HGETALL refresh:{user_id}:{jti}
+    alt meta.active != "1" (race 또는 부분 폐기)
+        API->>Redis: family revoke
+        API-->>E: 401 + auth.refresh_revoked
+    end
+    API->>Sec: rotate
+    API->>Redis: SET refresh_index:{HMAC(old)} "{user_id}:{jti}:rotated" KEEPTTL  (old 삭제 X)
+    API->>Redis: HSET refresh:{user_id}:{jti} active "0"  (old 메타 마킹)
+    API->>Redis: HSET refresh:{user_id}:{new_jti} {..., active:"1"} EX 14d
+    API->>Redis: SET refresh_index:{HMAC(new)} "{user_id}:{new_jti}:active" EX 14d
     API->>Sec: build_access_token(user_id, aud)
     API-->>E: 200 + new {access_token, refresh_token}
 ```
 
-refresh rotation: 매 갱신마다 새 jti. 도난된 토큰을 한 번 사용하면 정상 사용자도 끊겨서 즉시 인지.
+refresh rotation: 매 갱신마다 새 jti + 새 HMAC index. **old index는 삭제하지 않고 `:rotated` 마킹 → 재사용 시 family revoke**. 도난된 토큰을 한 번 사용하면 user_id 역추적 가능해 모든 refresh 폐기 + 정상 사용자도 즉시 인지.
 
 ## 4. 로그아웃
 

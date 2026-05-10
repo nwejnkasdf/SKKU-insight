@@ -18,10 +18,10 @@
 
 ## 산출
 
-### 1. `clickbait_module/` (default) 또는 `services/clickbait-detector/` (자체 도커 호스팅 옵션)
+### 1. `clickbait_module/` (default 단일 위치)
 - 모듈 위치 = `clickbait_module/`. **서빙 엔진 = vLLM** (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching).
 - `clickbait_module/app/main.py` — FastAPI `/classify` (POST), `/health` (GET). vLLM `AsyncLLMEngine`을 lifespan에서 로드 (DoRA 사전 머지된 일반 base 모델). 머지 스크립트는 `clickbait_module/scripts/merge_adapter.py`.
-- 호스팅·transport는 운영 결정. 자체 도커 호스팅 시 `services/clickbait-detector/Dockerfile`로 분리 가능 (옵션). [`../docs/algorithms/clickbait-integration.md`](../docs/algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조.
+- 호스팅·transport는 운영 결정. 자체 도커 호스팅 시 `clickbait_module/Dockerfile` (옵션, 본 PR 범위 외). [`../docs/algorithms/clickbait-integration.md`](../docs/algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조.
 - 입출력 스키마는 `algorithms/clickbait-integration.md` "인터페이스 계약" 그대로
 - 모델 메타: `model_name="ax-4.0-light-dora-clickbait-v1"`, `adapter_type="dora"`
 - vLLM·DoRA 호환성 (P1-8 해결됨, LoRA merge 방식) + logprob 추출 (P2-7 해결됨, `SamplingParams(max_tokens=1, logprobs=K, temperature=0.0)` + 2-class softmax). 잔여 = GPU 환경 머지 + 학습 평가 1건 sanity check (운영 작업)

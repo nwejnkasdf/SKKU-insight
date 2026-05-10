@@ -24,7 +24,7 @@
 - 호스팅·transport는 운영 결정. 자체 도커 호스팅 시 `services/clickbait-detector/Dockerfile`로 분리 가능 (옵션). [`../docs/algorithms/clickbait-integration.md`](../docs/algorithms/clickbait-integration.md) §호스팅·transport 추상화 참조.
 - 입출력 스키마는 `algorithms/clickbait-integration.md` "인터페이스 계약" 그대로
 - 모델 메타: `model_name="ax-4.0-light-dora-clickbait-v1"`, `adapter_type="dora"`
-- vLLM·DoRA 호환성 검증 (P1-8) + logprob 추출 방식 결정 (P2-7)을 코드 작업 시작 시 1회 수행
+- vLLM·DoRA 호환성 (P1-8 해결됨, LoRA merge 방식) + logprob 추출 (P2-7 해결됨, `SamplingParams(max_tokens=1, logprobs=K, temperature=0.0)` + 2-class softmax). 잔여 = GPU 환경 머지 + 학습 평가 1건 sanity check (운영 작업)
 
 ### 2. backend `app/clickbait_client/`
 - `ClickbaitClassifier` Protocol 구현체 `AxDoraClassifierClient`

@@ -54,7 +54,7 @@ Phase 0a stub의 본문을 채운다. **인증·동의·온보딩·사용자 모
 - Idempotency-Key 헤더 처리 (concurrency.md §3)
 
 ### 5. docker-compose.yml
-- postgres / redis / api / worker / clickbait-detector(stub) / admin-console(stub) 6 서비스
+- postgres / redis / api / worker / admin-console(stub) 5 서비스 default. clickbait-detector는 옵션(자체 도커 호스팅 시에만; default는 외부 호스팅으로 backend env `CLICKBAIT_SERVICE_URL`이 외부 URL 가리킴)
 - `docs/ops/docker-compose.md` 골격 그대로
 - DB pool 분리 (api 30 / worker 10) — config.py 에서
 

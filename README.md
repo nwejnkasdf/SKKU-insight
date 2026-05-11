@@ -32,7 +32,8 @@
 - **3 카테고리 ↔ 3 슬롯 1:1**. `current/adjacent/proactive` (모델) ↔ `core/adjacent/discovery` (추천) 가 자연스럽게 매핑.
 - **Active day 회계**. 모든 시간 임계(라이프사이클·베이지안 감쇠)가 wallclock이 아니라 "사용자가 인터랙션한 날"의 단조증가 카운터 기반. 시험기간 잠수해도 trace가 깨지지 않음.
 - **Beta-Bernoulli 베이지안 + 1-hop propagation**. atomic SQL UPSERT로 race condition 방어, leaf 활동이 부모 노드 점수로 propagate.
-- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글.
+- **(v13 라운드)** 수집은 **LLM tool-use(web search) 단일 경로** — 6 source 어댑터 폐기. user trace 의 active leaf 를 LLM 에 입력 → LLM 이 자율 query 결정 + 웹 검색 + Document INSERT. NFR-25 정합은 prompt instruction (self-summary) 으로.
+- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글. clickbait_module 은 1차 시연 default 비활성 (사용자 News 소스 명시 활성화 시만).
 - **10-20명 동시성 가드**: single-flight + user-level Redis mutex + atomic SQL + LLM semaphore + batch flush + consent cache.
 
 ## 진행 상황
@@ -48,7 +49,8 @@
 | **Phase 0a — A1 docs + A2-stub** | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
 | **Phase 0b — A2 backend-foundation** | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 17 endpoint 본문 + 35건 결함 해소) |
 | **Phase 0b — A3 cso-topic** | ✅ 완료 (5 PR-stack — CSO 3.4 임포트 + NetworkX + 7 endpoint + 11 ORM + 3 라운드 감사 fix 15건) |
-| Phase 1 — A4 collection / A5 clickbait (외부 모듈 ✅) / A6 interest-bayesian | 🟡 다음 |
+| **v13 라운드 — A4 Topic-driven Pivot** | ✅ docs 정합 완료 (2026-05-11). 6 source 어댑터 폐기 → LLM tool-use 검색 단일 경로. [`docs/decisions.md §10`](docs/decisions.md) |
+| Phase 1 — A4 collection (LLM 검색 기반) / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian | 🟡 A4 본문 구현 대기 |
 | Phase 2 — A7 leaf-traversal / A8 recommendation | ⬜ |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
@@ -170,4 +172,4 @@ docs/
 
 ---
 
-**다음 액션**: A3 5 PR-stack 머지 → A4 collection ([`prompts/03-A4-collection.md`](prompts/03-A4-collection.md)) — 소스 어댑터 (arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버 BS4) + CollectionJob + jitter + dedup. A4 완료 후 `/topics/{id}/documents` endpoint 본문 채워지고 추천 후보 풀 확보 → A8 추천 파이프라인 가능.
+**다음 액션** (v13 라운드 pivot 반영): A4 collection 본문 구현 ([`prompts/03-A4-collection.md`](prompts/03-A4-collection.md)) — `LLMProvider.search_with_tools()` 확장 + Document/DocumentTopic/CollectionJob ORM + alembic 0003 + dedup + orchestrator + `/topics/{id}/documents` cross-cutting. 6 source 어댑터는 미구현(폐기). A4 완료 후 추천 후보 풀 확보 → A8 추천 파이프라인 가능. 자세히는 [`docs/decisions.md §10`](docs/decisions.md).

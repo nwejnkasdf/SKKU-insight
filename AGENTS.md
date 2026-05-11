@@ -12,7 +12,7 @@
 
 새 에이전트는 다음 4개를 순서대로 읽으면 작업 시작 가능.
 
-1. **[`docs/decisions.md`](docs/decisions.md)** — 12+ 라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원. SRS와 충돌 시 본 파일이 우선 (단 SRS의 FR/NFR/AT 식별자·표는 보존).
+1. **[`docs/decisions.md`](docs/decisions.md)** — 13 라운드 결정 매트릭스 압축본 (v13 = A4 Topic-driven Pivot, 2026-05-11). 모든 코드 결정의 단일 진실 공급원. SRS와 충돌 시 본 파일이 우선 (단 SRS의 FR/NFR/AT 식별자·표는 보존).
 2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 + C-급 백로그. **P0 0건. P1 활성 7건 + P2 활성 5건은 default·stub 경로 정의됨. C-급 32건 모두 해소** (A2 자체 검수 + Codex review v1·v2·v3 + multi-worker + 옵션 B + mypy strict 26 + 초기 결정 11, 2026-05-11).
 3. **[`docs/sdd/contracts.md`](docs/sdd/contracts.md)** + **[`docs/sdd/agent-orchestration.md`](docs/sdd/agent-orchestration.md)** — 모든 enum·error code·Redis key는 `backend/app/contracts.py` 단일 SOR. 멀티 에이전트 5겹 방어와 Phase별 순차 호출 룰.
 4. **자기 모듈에 해당하는 `docs/` 하위 디렉토리** — 후술 §에이전트 분할 표.
@@ -86,7 +86,7 @@
 | LLM 어댑터 | **`MockProvider` (default)** + OpenAI/Anthropic/OpenRouter/CodexOAuth(local experimental). 환경변수 `LLM_PROVIDER` 토글 |
 | 낚시성 | DoRA 파인튜닝 `A.X-4.0-Light` 모듈 (✅ `clickbait_module/` 자체 vLLM 서비스, P0-1 해결 2026-05-11) |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein |
-| 수집 소스 | 학술 4종 (arXiv/OpenAlex/Semantic Scholar/DBLP) + 빅테크 RSS 30+ + 뉴스 (네이버 BS4 / TC / Verge / Wired / MIT TR / IEEE Spectrum) + sentinel `cold_start_pseudo` |
+| 수집 모델 | **(v13 라운드 pivot, 2026-05-11)** `LLMProvider.search_with_tools()` 단일 경로 (web 검색 도구). user trace JSON 입력 → LLM 자율 query → Document INSERT. Source 테이블 = sentinel `llm_search` + `cold_start_pseudo` 2행. publisher 정보는 `Document.raw` JSONB. 6 source 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버BS4) **폐기**. 자세히는 [`docs/decisions.md §10`](docs/decisions.md). |
 | 시드 | 5+ 페르소나 + 14일치 인터랙션 (active day 기반) |
 | 동시성 | 10-20명 가정. single-flight + user-mutex + atomic SQL + **LLM Redis 분산 semaphore** (multi-worker 안전, C-19) + batch flush + consent cache + jitter |
 | Worker 정책 | `UVICORN_WORKERS=1` default. N>1 시 DB pool 합산 = N × `PG_API_POOL_MAX` + `PG_WORKER_POOL_MAX` ≤ PostgreSQL `max_connections` (C-20) |
@@ -133,8 +133,8 @@
 | 0a (게이트) | **A2-stub** | `backend/app/contracts.py`, 53 endpoint signature stub, Pydantic schemas, `scripts/export_openapi.py` | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
 | 0b | **A2 backend-foundation** | A2-stub 본문 17 endpoint + Alembic 1번 migration (8 테이블) + 보안·동시성·LLM·worker·scheduler·middleware·tests·docker-compose·Makefile·6 cross-check | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 35건 결함 해소, `ruff`·`mypy --strict`·`pytest`·6 check 통과) |
 | 0b | **A3 cso-topic** | CSO 3.4 임포트 (`scripts/import_cso.py`) + NetworkX 메모리 캐시 + BroadInterest 12행 시드 (`config/broad_interests.toml`) + 7 endpoint 본문 (`/documents` 1개만 A4·A8 의존 NotImplementedError) + alembic 0002 (cso_topic_parent · dynamic_leaf_topic · dynamic_leaf_topic_cso_topic) + ORM 11 모델 | ✅ 완료 (5 PR-stack: docs-drift 70f077d + A2 ORM hotfix d1663d7 + A3 본문 645d450 + 자체감사 fix 57ef185 + Codex 감사 fix ba10e10 + Codex 재감사 fix 8bb7062 — `ruff`·`mypy --strict 100 files`·`pytest 65/65`·6 check 통과. 3 라운드 독립 감사 Critical 6 fix + Suggested 9 fix + 11 신규 backlog) |
-| 1 | **A4 collection** | 소스 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버 BS4), CollectionJob, jitter, dedup | ⬜ |
-| 1 | **A5 clickbait** | 사용자 제공 DoRA 모듈 wrap | ✅ 외부 서비스 ([PR #2](https://github.com/nwejnkasdf/SKKU-insight/pull/2)) / 🟡 backend 통합 대기 |
+| 1 | **A4 collection** | **(v13 라운드 pivot)** LLM tool-use 검색 + Document/DocumentTopic/CollectionJob 영속 + dedup + jitter + `/topics/{id}/documents` 본문 (cross-cutting) | 🟡 docs 정합 완료 / 구현 대기 |
+| 1 | **A5 clickbait** | 사용자 제공 DoRA 모듈 wrap | ✅ 외부 서비스 ([PR #2](https://github.com/nwejnkasdf/SKKU-insight/pull/2)) / **(v13 라운드)** backend 통합은 default 비활성 — 사용자 News 소스 활성화 시만 |
 | 1 | **A6 interest-bayesian** | 행동 로그 API, atomic UPSERT, active day 기반 시간 감쇠, 1-hop propagation | ⬜ |
 | 2 | **A7 leaf-lifecycle + traversal** | LifecycleEvaluator + D 하이브리드 + TraversalEngine(extend/retract/split/archive) + leaf 재배치 LLM + 3단계 강등 | ⬜ |
 | 2 | **A8 recommendation** | core/adjacent/discovery + fallback + Cold-start + first trace 생성 + emerging quota | ⬜ |
@@ -201,4 +201,6 @@ cd client && npm start
 4. 영향 큰 변경은 [`docs/decision-backlog.md`](docs/decision-backlog.md)에 기록.
 5. `docs/sdd/contracts.md` 변경 시 `backend/app/contracts.py` PR로 사용자 승인 받음.
 
-마지막 갱신: 2026-05-11 (Phase 0b A3 cso-topic 완료 — 5 PR-stack. CSO 3.4 임포트 + NetworkX 그래프 + 7 endpoint 본문 + 11 ORM 모델 + alembic 0002. 3 라운드 독립 감사 (Opus 4.7 자체 + Codex GPT-5.5 1st·2nd) — Critical 6 fix + Suggested 9 fix + 11 신규 backlog. `ruff` · `mypy --strict 100 files` · `pytest 65/65` · 6 cross-check 통과. **다음 작업**: A4 collection 또는 A6 interest-bayesian.
+마지막 갱신: 2026-05-11 (**v13 라운드 — A4 Topic-driven Pivot**). A4 collection 본문 구현 직전 사용자 토의에서 합의된 fundamental design pivot 을 docs SOR 에 박음 — 6 source 어댑터(arxiv/openalex/s2/dblp/RSS/네이버BS4) 폐기 후 `LLMProvider.search_with_tools()` 단일 경로로 전환. 사용자 원안("에이전트 기반 추천 시스템의 하네스 + 토픽이 먼저고 문서가 나중") 회복. P1-6 / P2-3 / P2-4 무효 마킹, C-33 (pivot) 신규. SRS FR-22~25 식별자 보존 + v13 해석 박스. **다음 작업**: A4 본문 구현 (별도 세션) — Document/DocumentTopic/CollectionJob ORM + alembic 0003 + LLMProvider.search_with_tools 확장 + dedup + orchestrator + `/topics/{id}/documents` cross-cutting. 자세히는 [`docs/decisions.md §10`](docs/decisions.md), [`prompts/03-A4-collection.md`](prompts/03-A4-collection.md).
+
+이전: 2026-05-11 (Phase 0b A3 cso-topic 완료 — 5 PR-stack. CSO 3.4 임포트 + NetworkX 그래프 + 7 endpoint 본문 + 11 ORM 모델 + alembic 0002. 3 라운드 독립 감사. `ruff` · `mypy --strict 100 files` · `pytest 65/65` · 6 cross-check 통과).

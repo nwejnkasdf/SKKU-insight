@@ -8,7 +8,7 @@
 
 | 경로 | 목적 | 주된 독자 |
 |---|---|---|
-| `docs/decisions.md` | 12+ 라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원 | 모든 에이전트 |
+| `docs/decisions.md` | 13 라운드 결정 매트릭스 압축본 (v13 = A4 Topic-driven Pivot, 2026-05-11). 모든 코드 결정의 단일 진실 공급원 | 모든 에이전트 |
 | `docs/decision-backlog.md` | 모든 `<!-- TODO: -->` 마커를 P0/P1/P2로 분류하고 default/stub 전략 명시 | 모든 에이전트 |
 | `docs/srs/` | SRS v0.3 분할본. 원본 텍스트와 표 보존 | 요구사항 추적용 |
 | `docs/sdd/` | 소프트웨어 설계 문서: 아키텍처, 데이터 흐름, 배포, 모듈 경계, 기술 스택, **동시성 가드**, **API 통신 규약** | A2~A10 |
@@ -30,8 +30,8 @@
 - **A3. cso-topic** ✅ — CSO 3.4 임포트, NetworkX 캐시, Topic·CSOTopic 테이블, 그래프 탐색 7 endpoint — 5 PR-stack (docs-drift + a2-orm-hotfix + a3-engine + 2 라운드 audit fix)
 
 ### Phase 1 — Data·정제 (Phase 0 후 병렬)
-- **A4. collection** — 소스 레지스트리, 어댑터(arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버 BS4), CollectionJob (FR-21~29)
-- **A5. clickbait** — 사용자 제공 DoRA 모듈 wrap, ClickbaitResult 저장 (FR-30~34)
+- **A4. collection** — **(v13 라운드 pivot, 2026-05-11)** `LLMProvider.search_with_tools()` 단일 경로 + Document/DocumentTopic/CollectionJob ORM + dedup + jitter + `/topics/{id}/documents` cross-cutting (FR-21~29 식별자 보존, v13 라운드 해석)
+- **A5. clickbait** — 사용자 제공 DoRA 모듈 wrap, ClickbaitResult 저장 (FR-30~34). **(v13 라운드)** 1차 시연 default 비활성 — 사용자가 News 소스 명시 활성화 시만 호출
 - **A6. interest-bayesian** — 행동 로그 API, Beta-Bernoulli 업데이트, 시간 감쇠, `interest_params.toml` (FR-12~20)
 
 ### Phase 2 — 추천 핵심 (Phase 1 후)

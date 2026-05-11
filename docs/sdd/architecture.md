@@ -50,8 +50,8 @@
 ### traversal-engine (사용자 × CSO trace)
 `UserCSOTraversal` trace 객체 운영. 사용자 인터랙션을 받아 active trace에 매칭(extend) 또는 새 trace 생성, retract/split/archive 룰 기반 평가, leaf 재배치 LLM 호출. **사용자 관심 모델의 핵심**으로, 단일 노드가 아닌 path 자체가 추론 단위. user-level Redis lock으로 동시성 직렬화 ([`../sdd/concurrency.md §3`](concurrency.md)). 자세히는 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md).
 
-### collection-orchestrator
-사용자별 일일 수집 작업을 스케줄링·디스패치. 사용자 관심 토픽 + 소스 레지스트리(`sources.yaml`) 교차 → 6 어댑터(arXiv, OpenAlex, Semantic Scholar, DBLP, RSS, 네이버 BS4)에 위임. 결과를 Document 테이블에 저장하면서 URL/DOI/제목 정규화 기반 dedup. FR-21~29.
+### collection-orchestrator (v13 라운드 pivot, 2026-05-11)
+사용자별 일일 수집 작업을 스케줄링·디스패치. **v13 pivot**: 6 어댑터 폐기 → `LLMProvider.search_with_tools()` 호출로 통일. 사용자 active trace JSON 을 LLM 에 입력 → LLM 이 web 검색 도구로 자료 fetch → Document 테이블 INSERT (source_id = sentinel `llm_search`, publisher 정보는 `Document.raw` JSONB). URL/DOI/제목 정규화 기반 dedup. FR-21~29 (v13 라운드 해석: [`../decisions.md §10`](../decisions.md)).
 
 ### leaf-lifecycle (LLM)
 `LifecycleEvaluator` 추상 인터페이스의 D 하이브리드 구현체. 신규 동적 리프 식별과 병합 평가만 LLM 호출. emerging/active/stale/archived 상태 전이는 `topic_lifecycle.toml` 임계 룰. FR-14~16. 자세한 알고리즘은 [`../algorithms/leaf-topic-lifecycle.md`](../algorithms/leaf-topic-lifecycle.md).
@@ -71,11 +71,13 @@ core/adjacent/discovery 후보 생성 + 신뢰도 임계 + fallback. Cold-start�
 ### Workers (RQ)
 일일 수집·라이프사이클 평가·병합 평가·요약 생성 작업을 비동기 처리. FastAPI와 동일 컨테이너 이미지 + ENTRYPOINT만 다름.
 
-### Source Adapters
-어댑터는 공통 `SourceAdapter` 인터페이스(`fetch(topic_query, since) -> List[RawDocument]`)를 만족. 6 종 구현체.
+### ~~Source Adapters~~ (v13 라운드 폐기, 2026-05-11)
+~~어댑터는 공통 `SourceAdapter` 인터페이스(`fetch(topic_query, since) -> List[RawDocument]`)를 만족. 6 종 구현체.~~
 
-### Clickbait DoRA (외부 서비스, vLLM 기반; transport-agnostic 계약)
-사용자 보유 DoRA 파인튜닝된 `A.X-4.0-Light` 모듈 wrapper. **2차 문헌(테크 뉴스) 1차 정제 단계에만** 호출. 모듈 위치 = `clickbait_module/`, 서빙 엔진 = vLLM (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 결정으로 backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. 입출력 계약은 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md).
+A4 Topic-driven Pivot 으로 폐기. `app/source_adapters/` 디렉토리 미생성. 수집은 `LLMProvider.search_with_tools()` 단일 경로.
+
+### Clickbait DoRA (외부 서비스, vLLM 기반; transport-agnostic 계약) — v13 라운드 발동 조건 변경
+사용자 보유 DoRA 파인튜닝된 `A.X-4.0-Light` 모듈 wrapper. **(v13 라운드, 2026-05-11)**: 1차 시연 default 비활성. 사용자가 News 소스 명시 활성화 시만 LLM 검색 응답에 post-filter 로 호출. 모듈 위치 = `clickbait_module/`, 서빙 엔진 = vLLM (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 결정으로 backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. 입출력 계약은 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md).
 
 ### LLM Adapter (llm-adapter)
 `LLMProvider` 추상 인터페이스 + 5 구현체. 기본은 **`MockProvider`** (deterministic fixture per prompt hash) — 누구나 클론 즉시 부트되고 CI/시연 안정성을 보장. 정식 호출용으로 `OpenAIAPIProvider`, `AnthropicAPIProvider`, `OpenRouterProvider`. 로컬 실험용으로 `CodexOAuthProvider` (openclaw/hermes 방식의 비공식 OAuth 세션 — **본인 토이 빌드 전용, 배포·시연 환경 기본값 아님**). 환경변수 `LLM_PROVIDER`로 토글. 모델 슬롯은 `LLM_MODEL_HIGH` (동적 리프 생성·병합), `LLM_MODEL_MEDIUM` (요약·추천 이유). 호출은 retry + token budget guard.

@@ -3,7 +3,7 @@
 본 저장소의 모든 에이전트(Claude·Codex·사람) 가이드는 단일 파일 [`AGENTS.md`](AGENTS.md)에 통합돼 있다. **본 파일은 redirect 한 장이며 여기서 읽기를 멈추지 말고 다음 두 파일을 직접 열어보라.**
 
 1. [`AGENTS.md`](AGENTS.md) — 에이전트 진입점, 디렉토리 지도, 작업 규칙 14조, 5겹 방어, 에이전트 분할표 (A1·A2-stub·A2~A12).
-2. [`docs/decisions.md`](docs/decisions.md) — 12+ 라운드 결정 매트릭스 (단일 진실 공급원).
+2. [`docs/decisions.md`](docs/decisions.md) — 13 라운드 결정 매트릭스 (단일 진실 공급원, v13 = A4 Topic-driven Pivot 2026-05-11).
 3. [`docs/decision-backlog.md`](docs/decision-backlog.md) — P0/P1/P2 미해결 항목 + default/stub.
 4. [`docs/sdd/contracts.md`](docs/sdd/contracts.md) + [`docs/sdd/agent-orchestration.md`](docs/sdd/agent-orchestration.md) — 멀티 에이전트 안전장치(contracts SOR + Phase 0a stub-only + 5겹 방어).
 5. (사람용 프로젝트 소개) [`README.md`](README.md).

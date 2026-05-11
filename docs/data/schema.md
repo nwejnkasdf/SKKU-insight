@@ -308,6 +308,14 @@ class Document(Base):
 
 UNIQUE: `(canonical_url)` (NULL 허용 partial), UNIQUE: `(doi)` (NULL 허용 partial). 중복 제거는 `algorithms/recommendation-ranking.md` + `collection` 모듈에서 (URL/DOI/normalized_title + Levenshtein).
 
+> **v13 라운드 — Document 컬럼 의미 갱신 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 어댑터 6종 폐기 후 컬럼 의미 일부 변경. 컬럼 이름·타입 변경 없음 (alembic 0003 ALTER 불필요). `raw` JSONB 컬럼 (decisions.md 가 "Document.extra" 로 추상 표기) 이 다음을 담는다:
+> - `publisher_domain` (e.g. "arxiv.org", "openai.com") — LLM 검색 응답의 source 도메인
+> - `publisher_label` (e.g. "arXiv", "OpenAI Blog") — 사람이 읽는 표시명
+> - `trust_hint` (high / medium / low) — LLM 또는 도메인 기반 휴리스틱
+> - `llm_meta` ({"provider":"openai", "model":"gpt-5.5", "search_id":"...", "confidence":0.8}) — 검색 호출 메타데이터
+>
+> `source_id` 는 sentinel `llm_search` 1행으로 통일 (Source.name="llm_search"). 학술 4종 / 빅테크 30+ / 네이버BS4 어댑터는 미구현. `content_type` 은 LLM 응답의 publisher_domain 기반 휴리스틱 매핑 (academic_paper / vendor_blog / tech_news).
+
 ### DocumentTopic
 
 > ⚠️ **수정 사유**: 초기 안은 `(document_id, cso_topic_id, leaf_topic_id)` 복합 PK였으나 후 두 컬럼이 `nullable=True`라서 PostgreSQL의 PK = NOT NULL 강제와 충돌. 또한 일반 UNIQUE 제약은 `NULL ≠ NULL` 의미론으로 NULL 포함 조합의 중복을 막지 못한다. **surrogate UUID PK + 케이스별 partial UNIQUE INDEX** 패턴으로 수정.

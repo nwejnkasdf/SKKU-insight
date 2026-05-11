@@ -2,6 +2,15 @@
 
 본 파일은 **사용자용 수집 잡 API**의 명세이다. 관리자 콘솔 영역(`/admin/collection/*` 6개)은 [`admin.md §수집`](admin.md)이 단일 SOR이며 본 파일은 본문에서 다루지 않는다 (사용자 결정 2026-05-11 — endpoint·schema 중복 제거). 관련 FR: FR-21~29.
 
+> **v13 라운드 박스 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 다음 비즈니스 룰 갱신. **endpoint 시그니처는 보존** — `GET /collection/jobs/me`, `POST /collection/jobs/me/run-now` 그대로.
+> - **CollectionJob.source_id**: NOT NULL. 1차 시연은 sentinel `llm_search` 1행만 — 실제 publisher 는 `Document.raw->>'publisher_domain'`.
+> - **JobType**: 1차 시연은 `daily_collect` 만 사용 (leaf_lifecycle / merge_evaluation / summary_generation 은 후속 phase).
+> - **run-now rate limit**: 1/hour/user 강제. trigger 흐름 = daily cron + manual run-now (onboarding/login 자동 미사용).
+> - **응답 history**: cursor pagination, default limit=20 / max=100 (PageMeta envelope).
+> - **수집 모델**: 6 어댑터 폐기 → `LLMProvider.search_with_tools()` 단일 호출 경로. trace JSON → web 검색 도구 → Document INSERT.
+> - **외부 실패 정책**: FAILED/SKIPPED 구분 + RQ retry 3회 exponential (60s/300s/900s). LLM 호출 timeout → CollectionJob.status=FAILED + failure_reason.
+> - **NFR-25 정합**: LLM prompt 에 self-summary instruction → Document.summary 가 LLM 본인 말 요약.
+
 > **API 통신 규약**: [`../sdd/api-conventions.md`](../sdd/api-conventions.md) 따름. list endpoint는 PagedResponse envelope.
 
 > **관리자 영역은 별도 SOR**: `/admin/collection/jobs`, `/admin/collection/jobs/{id}`, `/admin/collection/jobs/{id}/reprocess`, `/admin/collection/sources`, `/admin/collection/sources/{id}` (PATCH), `/admin/collection/stats` 6 endpoint와 그 전용 schema(`ReprocessRequestPayload`, `ReprocessRequestView`, `SourceView`, `SourceTogglePatch`, `CollectionStatsResponse`)는 모두 [`admin.md §스키마`](admin.md) 참조. 본 파일은 사용자용 2 endpoint와 양 영역이 공유하는 schema(`JobStatus`, `JobType`, `CollectionJobView`, `CollectionJobPublicView`, `CollectionJobMeResponse`, `RunNowResponse`)만 정의한다.

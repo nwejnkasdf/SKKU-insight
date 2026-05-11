@@ -1,5 +1,30 @@
 # 소스 레지스트리 (`sources.yaml`)
 
+> **v13 라운드 — 무효 마킹 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 본 파일의 YAML schema·학술 4종·빅테크 30+·테크 뉴스 6+ 목록 **모두 무효**. 이유: 6 source 어댑터 (arxiv/openalex/s2/dblp/RSS/네이버BS4) 미구현 → `sources.yaml` 파일 생성 안 함. Source 테이블 시드는 **sentinel 1행 `llm_search`** + 기존 `cold_start_pseudo` (A2 시드) 만. publisher 정보는 `Document.raw` JSONB ([`schema.md` Document 섹션 참조](schema.md)). 본 문서는 SRS 식별자 보존 및 향후 어댑터 도입 가능성 위해 원본 보존 — **운영에는 사용 X**. 관련 backlog 항목 [P1-6](../decision-backlog.md), [P2-3](../decision-backlog.md), [P2-4](../decision-backlog.md) 무효 마킹 완료.
+
+## v13 라운드 — 신규 Source 시드 (2026-05-11)
+
+```yaml
+# Alembic 0001 (A2 가 이미 시드) + Alembic 0003 (A4 가 추가 예정)
+- name: cold_start_pseudo                # A2 alembic 0001 (sentinel for cold-start pseudo Document)
+  source_type: tech_news                  # arbitrary — sentinel
+  trust_level: medium
+  enabled: false                          # cold-start orchestrator 만 참조
+  extra: { sentinel: true, description: "cold-start LLM pseudo Document FK 충족" }
+
+- name: llm_search                        # A4 alembic 0003 (sentinel for LLM tool-use 검색 결과)
+  source_type: vendor_blog                # arbitrary — Document.raw 가 publisher 결정
+  trust_level: high
+  enabled: true
+  extra: { sentinel: true, description: "v13 pivot: LLM 검색 결과 통일 source" }
+```
+
+본 2행만 운영. 학술 / 빅테크 / 뉴스 분류는 `Document.raw->>'publisher_domain'` 기반 휴리스틱.
+
+---
+
+## (이하: v1~v12 시기 원본 보존, v13 pivot 으로 무효 — 향후 어댑터 도입 시 참조)
+
 본 파일은 SKKU InSight의 수집 대상 소스 레지스트리 스키마와 초기 항목 골격을 정의한다. 결정 매트릭스 §5에 따라 학술 4종 + 빅테크 30+ + 테크 뉴스 6+ = 50–80개를 시드로 등록한다. 본 YAML은 Alembic seed로 Source 테이블에 INSERT한다.
 
 ## YAML 스키마

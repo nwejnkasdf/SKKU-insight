@@ -61,14 +61,18 @@
 | 추천 슬롯 | core 5 / adjacent 3 / discovery 2 (SRS), fallback 룰 SRS FR-42·43 그대로. **core 5개 중 1개는 emerging leaf 우선** (C-4 해소). 신뢰도 임계 `recommendation.toml` | FR-37~43 |
 | Cold-start | **LLM이 온보딩 입력(선택 CSO + 가입 메타)을 보고 첫 10개 추천 직접 생성**. 사용자가 첫 카드 클릭 시점에 그 cso_topic이 root인 trace 1건 생성 | UC-01 매끄러움 |
 
-## 5. 소스
+## 5. 소스 (v13 라운드 pivot 반영, 2026-05-11)
 
 | 카테고리 | 결정 | 한 줄 근거 |
 |---|---|---|
-| 학술 | **arXiv (cs.*) + OpenAlex + Semantic Scholar + DBLP** 4종 모두 | 학술 커버리지 극대화 |
-| 빅테크 공식 채널 | **YAML registry(50–80개) + DB Source 테이블**. 사용자 관심 토픽과 교차해 동적 호출 | FR-24, EV-03 |
-| 테크 뉴스 | **네이버뉴스 IT/과학 (BeautifulSoup 크롤링) + TechCrunch / The Verge / Wired + MIT Technology Review / IEEE Spectrum** | 한·영 병행 |
-| 네이버 종속성 | **DB에서 토픽이 부모, 토픽 삭제 시 cascade 삭제** | 정책 명시 |
+| **수집 모델** | **LLM tool-use (web search) topic-driven pull**. 사용자 trace 의 active leaf 를 LLM 에 입력 → LLM 이 web 검색 도구로 자료 fetch → Document 저장 | 프로젝트 원안 ("에이전트 기반 추천 시스템 하네스" + "ChatGPT 같은 검색 활용 + 토픽이 먼저고 문서가 나중") 회복 |
+| **Source 테이블** | **sentinel 1행 `llm_search` 통일**. publisher 정보 (arxiv.org, openai.com 등) 는 `Document.extra` JSONB | 어댑터 폐기 후 Source 의미 축소. schema migration 최소 |
+| **소스 어댑터 6종** | **폐기**. `app/source_adapters/` 디렉토리 생성 안 함. arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버BS4 어댑터 모두 미구현 | 본 모델에서 불필요. 향후 supplement 필요 시 별도 결정 |
+| **NFR-25 정합 (외부 원문 무단 복제 금지)** | LLM 검색 prompt 에 "abstract 를 본인 말로 1~2문장 요약" instruction → Document.abstract = self-summary | 추가 LLM 호출 없이 정합 |
+| **클릭베이트 필터** | **default 비활성**. 사용자가 News 소스 명시 활성화 시 post-LLM filter 로만 동작 | LLM 이 1차 필터링하므로 기본 불필요. clickbait_module 코드 자체는 보존 |
+| ~~빅테크 공식 채널 YAML registry~~ | ~~(폐기)~~ | v13 라운드 pivot |
+| ~~네이버뉴스 IT/과학 BS4~~ | ~~(폐기)~~ | v13 라운드 pivot |
+| ~~네이버 종속성 cascade~~ | ~~(폐기)~~ | v13 라운드 pivot |
 
 ## 6. 데이터·운영
 
@@ -95,8 +99,8 @@
 | 0 | A1 docs-bootstrap | 본 `docs/` 디렉토리 |
 | 0 | A2 backend-foundation | FastAPI 부트, docker-compose, Alembic, 인증·동의·사용자, 보안 |
 | 0 | A3 cso-topic | CSO 임포트, NetworkX 캐시, 그래프 탐색 API |
-| 1 | A4 collection | 소스 어댑터, CollectionJob |
-| 1 | A5 clickbait | DoRA 모듈 wrap |
+| 1 | A4 collection | **(v13 pivot)** LLM tool-use 검색 + Document/DocumentTopic/CollectionJob 영속 + dedup + jitter |
+| 1 | A5 clickbait | **(v13 pivot)** DoRA 모듈 wrap. 1차 시연 default 비활성. 사용자 News 소스 활성화 시만 호출 |
 | 1 | A6 interest-bayesian | 행동 로그 API, Beta-Bernoulli |
 | 2 | A7 leaf-lifecycle | LifecycleEvaluator + LLM 프롬프트 |
 | 2 | A8 recommendation | core/adjacent/discovery + fallback + Cold-start |
@@ -110,7 +114,75 @@
 | M | 완료 정의 |
 |---|---|
 | **M0** | docs/ 골격, FastAPI 부트, 인증 동작, CSO 임포트 |
-| **M1** | arXiv 1일치 수집·낚시성 필터·관심도 업데이트 end-to-end |
+| **M1** | **(v13 pivot)** LLM tool-use 검색 1일치 수집 + 관심도 업데이트 end-to-end |
 | **M2** | 시드 페르소나로 대시보드 10개 (Cold-start + 점진 개선) |
 | **M3** | Electron 6화면 + 관리자 웹 동작 |
 | **M4** | AT-01~15 체크리스트 통과, 데모 스크립트 |
+
+## 10. v13 라운드 — A4 Topic-driven Pivot (2026-05-11)
+
+본 라운드는 A4 collection 본문 구현 직전 사용자 토의에서 합의된 **fundamental design pivot** 을 SOR 에 박는다. 이전 v1~v12 라운드의 학술 어댑터 중심 모델을 LLM tool-use 검색 중심 모델로 전환.
+
+### 배경
+프로젝트 원안은 "에이전트 기반 추천 시스템의 하네스 — ChatGPT 같은 검색 활용 — 토픽이 먼저고 문서가 나중". 그러나 IEEE 830 SRS 양식 작성 + A3 cso-topic engine 구현 과정에서 학술 IR 패턴(arxiv·openalex 어댑터 6종 push-from-sources)으로 표류. A4 본문 작성 직전 사용자가 인지 후 pivot 결정.
+
+### Pivot 결정 매트릭스
+
+| 영역 | v1~v12 (push-from-sources) | v13 (LLM tool-use pull) |
+|---|---|---|
+| 수집 모델 | 6 source 어댑터 cron pull | LLM 이 trace topic 받아 web 검색 도구 호출 |
+| Source 어댑터 | arXiv / OpenAlex / Semantic Scholar / DBLP / RSS / 네이버BS4 (6종) | **폐기** |
+| Source 테이블 | 소스별 row (50+) + SourcePolicy trust_level | sentinel 1행 `llm_search` + Document.extra publisher |
+| Query 구성 | source 별 topic_keyword query | LLM 이 trace JSON 통째 받아 스스로 query 결정 (agent-driven) |
+| LLM 호출 위치 | Document 별 cso_topic 매핑 (medium slot 1회/doc) | trace leaf 별 검색 + 매핑 통합 (medium slot 1회/leaf) |
+| Clickbait 필터 | tech_news 모든 Document 강제 | 사용자가 News 소스 명시 활성화 시만 |
+| NFR-25 정합 | metadata 만 저장 | LLM self-summary (prompt instruction) |
+| 비용 모델 | API 호출 무료 + LLM 분류 medium slot | LLM 검색 호출 (검색 도구 사용량 + 토큰) |
+| Mock fixture | 어댑터별 HTTP 응답 JSON | `prompt_hash → search_result JSON` (기존 MockProvider 패턴 확장) |
+| 시연 발화 | "RSS 파서 6종이 모은 자료" | "Claude 가 검색해서 추천한다" |
+
+### 사용자 결정 (4 batch AskUserQuestion)
+
+| 결정 | 값 |
+|---|---|
+| LLM provider | Provider-agnostic toggle (LLM_PROVIDER env). MockProvider default + OpenAI/Anthropic 정식 토글 |
+| Query 구성 | LLM 이 user trace JSON 통째 받아 스스로 query 결정 (agent-driven) |
+| Source 테이블 | sentinel 1행 `llm_search` + publisher Document.extra JSONB |
+| Clickbait | 폐기 X. 1차 시연 default 비활성. 사용자가 News 소스 활성화 시 post-LLM filter |
+| CollectionJob 단위 | (user × source). source 가 단일 sentinel 이라 실효 user 별 1건 |
+| Trigger | daily cron + manual `POST /collection/jobs/me/run-now` (1/h). Onboarding/login 자동 trigger 미사용 |
+| Jitter | deterministic hash(user_id, YYYYMMDD) % 300초 |
+| Document.PK | UUID v4 + canonical_url partial unique (NOT NULL 일 때만) |
+| Dedup 우선순위 | DOI → canonical_url → URL 정규화(utm_*/fbclid/gclid 제거 + lowercase host) → title 정규화 + Levenshtein ≥ 0.90 |
+| 외부 실패 정책 | FAILED/SKIPPED 구분 + RQ retry 3회 exponential (60s/300s/900s) |
+| /collection/jobs/me history | cursor pagination (default 20 / max 100) |
+| /topics/{id}/documents | A4 가 같이 채움 (cross-cutting) |
+| NFR-25 정합 | LLM 검색 prompt 에 "abstract 본인 말로 1~2문장 요약" instruction. 추가 호출 없음 |
+
+### 폐기 또는 의미 변경 항목
+
+- **§5 소스 매트릭스**: 학술 4종 / 빅테크 50-80개 / 테크 뉴스 NaverBS4 → **모두 폐기**
+- **A4 산출**: 소스 어댑터 6종 + sources.yaml + RSS URL 검증 → **폐기**
+- **decision-backlog P1-6** (네이버뉴스 야간 정리): pivot 으로 **무효** (NaverBS4 미사용)
+- **decision-backlog P2-3** (RSS URL 검증): pivot 으로 **무효**
+- **decision-backlog P2-4** (빅테크 50-80 확장): pivot 으로 **무효**
+- **SRS FR-22~25** (소스 정의): 본 v13 라운드와 충돌. SRS 식별자는 보존하되 명세 내용을 v13 라운드 기준으로 해석 (헌법 §2 — SRS 식별자 보존, decisions.md 우선)
+- **SRS NFR-25** (외부 원문 무단 복제 금지): self-summary 정책으로 정합. NFR 식별자 보존
+- **UC-04** (Main Flow): 1번 항목 "학술 소스, 빅테크 공식 채널, 테크 뉴스에서 수집" → "LLM tool-use 로 사용자 trace 토픽 검색" 으로 의미 갱신
+
+### 본 라운드가 만들거나 갱신하는 docs
+
+| 파일 | 갱신 내용 |
+|---|---|
+| 본 파일 §5, §8, §10 | 위 표 |
+| `decision-backlog.md` | P1-6 / P2-3 / P2-4 폐기 마킹, C-33 (pivot) 신규 |
+| `srs/02-functional-requirements.md` | FR-22~25 명세 해석 박스 (식별자 보존) |
+| `srs/03-nonfunctional-requirements.md` | NFR-25 self-summary 정합 박스 |
+| `algorithms/cso-mapping.md` | "검색 query 자체가 topic" 으로 단순화 |
+| `algorithms/clickbait-integration.md` | "사용자 명시 활성화 시만" 정책 명시 |
+| `data/sources-registry.md` | sentinel 1행 + Document.extra publisher 로 재작성 |
+| `data/schema.md` | Document.extra JSONB + Source sentinel 정합 |
+| `sdd/architecture.md` | 다이어그램 갱신 (어댑터 6종 → LLM tool-use) |
+| `api/collection.md` | 비즈니스 룰 갱신 |
+| `prompts/03-A4-collection.md` | 재작성 (pivot 명세) |
+| `AGENTS.md` / `README.md` / `docs/README.md` / `prompts/README.md` | A4 라인 동기화 |

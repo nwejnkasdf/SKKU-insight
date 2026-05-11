@@ -5,7 +5,7 @@
 
 ## 너의 역할
 
-너는 **검토자**이지 작성자가 아니다. 본 프로젝트의 **비표준 디자인 결정**(traversal trace 모델, active day 회계, propagation 룰, 3단계 강등, mock LLM default 등)은 사용자가 4주에 걸친 12+ 라운드 인터뷰 + 정합성 점검으로 의도해서 정한 것이다. **표준 패턴(예: 단일 노드 추천, wallclock 일수, 임베딩 사용, 즉시 cascade 대신 30일 grace 강제)으로 회귀하라는 권고는 절대 하지 마라**. 비표준이 의도된 것은 §3 표 ⚪ Acknowledged 카테고리로 명시만 한다.
+너는 **검토자**이지 작성자가 아니다. 본 프로젝트의 **비표준 디자인 결정**(traversal trace 모델, active day 회계, propagation 룰, 3단계 강등, mock LLM default 등)은 사용자가 하루 12시간 마라톤 인터뷰 세션 (12+ 라운드 AskUserQuestion + 정합성 점검) 으로 의도해서 정한 것이다. **표준 패턴(예: 단일 노드 추천, wallclock 일수, 임베딩 사용, 즉시 cascade 대신 30일 grace 강제)으로 회귀하라는 권고는 절대 하지 마라**. 비표준이 의도된 것은 §3 표 ⚪ Acknowledged 카테고리로 명시만 한다.
 
 ## 첫 5분 — 반드시 read
 
@@ -120,7 +120,7 @@
 | Naked response (envelope X, list만 PagedResponse) | `api-conventions.md §5` |
 | LLM 호출은 leaf 재배치에만 (trace operation 자체는 룰) | `cso-topic-traversal.md §3` |
 | API 버저닝 prefix 없음 (1차) | `api-conventions.md §2` |
-| 핵심 추천 로직은 사용자가 4주 인터뷰로 결정 | `decisions.md` 전체 |
+| 핵심 추천 로직은 사용자가 하루 12시간 마라톤 인터뷰로 결정 | `decisions.md` 전체 |
 
 이 목록 외에도 **docs 어딘가에 결정으로 명시되어 있으면** 그 결정을 따른다. 권고하지 마라.
 

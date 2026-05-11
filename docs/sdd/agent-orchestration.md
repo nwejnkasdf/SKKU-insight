@@ -64,7 +64,7 @@ Phase 4 (2 세션 병렬): A11 test-ci, A12 demo-seed
 |---|---|---|
 | 0a | 30분 | contracts.py·OpenAPI 표면 vs docs |
 | 0b | 30분 | DB 스키마 vs docs/data/schema.md, 인증 흐름 |
-| 1 | 60분 | 외부 사이트 응답 검증 (arXiv 1일치 fetch), DoRA 통합, 베이지안 단순 시뮬레이션 |
+| 1 | 60분 | **(v13 라운드)** LLM tool-use 1일치 검색 응답 검증 (MockProvider fixture + 정식 provider 토글), DoRA 통합 (사용자 News 활성화 케이스만), 베이지안 단순 시뮬레이션 |
 | 2 | 90분 | trace 시드 페르소나 시뮬레이션, cold-start fixture 검증 |
 | 3 | 60분 | Electron 6 화면 동작, 시연 리허설 1회 |
 | 4 | 60분 | AT 자동화 결과, 발표 자료 |
@@ -81,8 +81,8 @@ A2 backend-foundation
   └─ Pydantic schemas: contracts.py 의 Base 모델 상속
 
 A3 cso-topic ── topic_engine, NetworkX cache
-A4 collection ── Source adapters, dedup
-A5 clickbait ── DoRA wrap (사용자 모듈 위치 공유 후)
+A4 collection ── **(v13 라운드)** LLMProvider.search_with_tools + Document/DocumentTopic/CollectionJob + dedup + jitter
+A5 clickbait ── DoRA wrap. **(v13 라운드)** 1차 default 비활성, 사용자 News 활성화 시만 호출
 A6 interest-bayesian ── atomic UPSERT, propagation, active day decay
 
 A7 leaf-lifecycle + traversal ── A6 (state) + A3 (graph) 의존
@@ -139,7 +139,7 @@ CI에서 PR마다 실행:
 |---|---|---|---|
 | `account_deletion_job` | (event-driven, enqueue) | A2 본문 구현 | A2 |
 | `cold_start_job` | (event-driven, enqueue) | A2 stub | **A8** |
-| `naver_cleanup_job` | `NAVER_CLEANUP_CRON` | A2 stub + scheduler 등록 | **A4** |
+| ~~`naver_cleanup_job`~~ | ~~`NAVER_CLEANUP_CRON`~~ | A2 stub + scheduler 등록 | **(v13 라운드 폐기, 2026-05-11)** decision-backlog P1-6 무효 마킹. NaverBS4 어댑터 폐기로 cleanup 대상 0건. A4 는 등록 제거 또는 비활성. |
 | `collection_job` | `COLLECTION_CRON` | A2 stub + scheduler 등록 | **A4** |
 | `interest_decay_job` | `INTEREST_DECAY_CRON` | A2 stub + scheduler 등록 | **A6** |
 | `merge_evaluation_job` | `MERGE_EVALUATION_CRON` | A2 stub + scheduler 등록 | **A7** |

@@ -55,21 +55,21 @@ sequenceDiagram
     autonumber
     participant Cron as Scheduler (RQ)
     participant Coll as collection-orchestrator
-    participant SA as Source Adapters
-    participant CB as Clickbait DoRA
+    participant LLMS as LLM Provider (search_with_tools)
+    participant CB as Clickbait DoRA (옵션 — News 활성화 시만)
     participant Topic as topic-engine
     participant Leaf as leaf-lifecycle (D 하이브리드)
     participant LLM as LLM Adapter
     participant DB as Postgres
 
-    Cron->>Coll: trigger daily_collect_for(user_id) (jitter 0~5분, concurrency.md §8)
+    Cron->>Coll: trigger daily_collect_for(user_id) (deterministic jitter, concurrency.md §8)
     Coll->>DB: SELECT active UserCSOTraversal + 1-hop adjacent topics (cso-topic-traversal.md §6.1)
     Note over Coll: 수집 대상 = current 영역(active trace path 노드) ∪ adjacent 영역(1-hop). proactive는 글로벌 트렌드라 사용자별 fetch 불필요.
-    Coll->>SA: fetch(topic_query, since=max(source.last_success_at, now()-24h)) for each adapter
-    SA-->>Coll: List<RawDocument>
-    Coll->>Coll: dedup(URL/DOI/제목정규화/Levenshtein)
-    Coll->>DB: INSERT Document, CollectionJob(status=running)
-    alt content_type == "tech_news"
+    Coll->>LLMS: search_with_tools(trace_json, leaf_label) for each active leaf (v13 라운드)
+    LLMS-->>Coll: list[SearchResult] (LLM self-summary, NFR-25 정합)
+    Coll->>Coll: dedup(DOI/canonical_url/URL/제목 Levenshtein ≥ 0.90)
+    Coll->>DB: INSERT Document(source_id=llm_search sentinel, raw=publisher meta), CollectionJob(status=running)
+    opt 사용자가 News 소스 명시 활성화 시 (v13 라운드 — default 비활성)
         Coll->>CB: classify(title, body, meta)
         CB-->>Coll: {decision, confidence}
         alt decision == clickbait

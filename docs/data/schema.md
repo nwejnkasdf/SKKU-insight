@@ -308,7 +308,7 @@ class Document(Base):
 
 UNIQUE: `(canonical_url)` (NULL 허용 partial), UNIQUE: `(doi)` (NULL 허용 partial). 중복 제거는 `algorithms/recommendation-ranking.md` + `collection` 모듈에서 (URL/DOI/normalized_title + Levenshtein).
 
-> **v13 라운드 — Document 컬럼 의미 갱신 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 어댑터 6종 폐기 후 컬럼 의미 일부 변경. 컬럼 이름·타입 변경 없음 (alembic 0003 ALTER 불필요). `raw` JSONB 컬럼 (decisions.md 가 "Document.extra" 로 추상 표기) 이 다음을 담는다:
+> **v13 라운드 — Document 컬럼 의미 갱신 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 어댑터 6종 폐기 후 컬럼 의미 일부 변경. 컬럼 이름·타입 변경 없음 (alembic 0003 ALTER 불필요). `raw` JSONB 컬럼 (Document.raw — decisions.md / api/collection.md / module-boundaries.md 등의 SOR 표기) 이 다음을 담는다:
 > - `publisher_domain` (e.g. "arxiv.org", "openai.com") — LLM 검색 응답의 source 도메인
 > - `publisher_label` (e.g. "arXiv", "OpenAI Blog") — 사람이 읽는 표시명
 > - `trust_hint` (high / medium / low) — LLM 또는 도메인 기반 휴리스틱

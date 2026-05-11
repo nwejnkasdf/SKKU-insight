@@ -31,8 +31,8 @@ electron-app (host)
 admin-console ──> api
 worker ──┬──> postgres
          ├──> redis
-         ├──> clickbait-detector
-         └──> external sources (arXiv/OpenAlex/...)
+         ├──> clickbait-detector (옵션 — 사용자 News 활성화 시만, v13 라운드)
+         └──> LLM provider (web search tool, v13 라운드 — OpenAI/Anthropic/Mock)
 ```
 
 ## 개발 모드 vs 시연 모드
@@ -45,7 +45,7 @@ worker ──┬──> postgres
 | LLM_PROVIDER | `mock` (default — CI/단위 테스트/시연 fixture) / `openai` / `anthropic` / `openrouter` / `codex_oauth` (local experimental, 본인 토이 빌드 전용) | `mock` |
 | 수집 cron | 사용자 수동 트리거 `POST /collection/jobs/me/run-now` (1/시간/사용자); 관리자 재실행 `POST /admin/collection/jobs/{id}/reprocess` | demo 모드는 별도 `COLLECTION_CRON_DEMO=0 * * * *` (env-vars.md) |
 | Postgres logs | `log_statement=all` | `log_statement=ddl` |
-| 외부 소스 호출 | recorded fixture (vcrpy) | live network |
+| 외부 소스 호출 | **(v13 라운드)** MockProvider deterministic fixture (`tests/collection/fixtures/llm_search_mock/`) — vcrpy 미사용 | 정식 LLM provider live network (`LLM_PROVIDER=openai` 등) |
 
 ## 볼륨 정의
 

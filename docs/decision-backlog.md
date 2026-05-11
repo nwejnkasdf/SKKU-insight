@@ -148,7 +148,7 @@
 
 ### P2-4. 빅테크 소스 50–80개로 확장 — **무효 (v13 라운드 pivot, 2026-05-11)**
 - **원본**: `data/sources-registry.md:392`, `:482`
-- **무효 사유**: v13 라운드 A4 pivot 으로 source registry 의 빅테크 목록 폐기. publisher 정보는 Document.extra JSONB 로 동적 보관. 확장 개념 자체가 LLM 검색 모델에서 의미 없음. **본 항목은 closed.**
+- **무효 사유**: v13 라운드 A4 pivot 으로 source registry 의 빅테크 목록 폐기. publisher 정보는 `Document.raw` JSONB (schema.md ORM 컬럼명) 로 동적 보관. 확장 개념 자체가 LLM 검색 모델에서 의미 없음. **본 항목은 closed.**
 
 ### P2-5. 관리자가 사용자 비밀번호를 강제 reset 하는 임시 endpoint
 - **원본**: `security/password-policy.md:111`

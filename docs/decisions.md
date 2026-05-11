@@ -66,9 +66,9 @@
 | 카테고리 | 결정 | 한 줄 근거 |
 |---|---|---|
 | **수집 모델** | **LLM tool-use (web search) topic-driven pull**. 사용자 trace 의 active leaf 를 LLM 에 입력 → LLM 이 web 검색 도구로 자료 fetch → Document 저장 | 프로젝트 원안 ("에이전트 기반 추천 시스템 하네스" + "ChatGPT 같은 검색 활용 + 토픽이 먼저고 문서가 나중") 회복 |
-| **Source 테이블** | **sentinel 1행 `llm_search` 통일**. publisher 정보 (arxiv.org, openai.com 등) 는 `Document.extra` JSONB | 어댑터 폐기 후 Source 의미 축소. schema migration 최소 |
+| **Source 테이블** | **sentinel 1행 `llm_search` 통일**. publisher 정보 (arxiv.org, openai.com 등) 는 `Document.raw` JSONB | 어댑터 폐기 후 Source 의미 축소. schema migration 최소 |
 | **소스 어댑터 6종** | **폐기**. `app/source_adapters/` 디렉토리 생성 안 함. arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버BS4 어댑터 모두 미구현 | 본 모델에서 불필요. 향후 supplement 필요 시 별도 결정 |
-| **NFR-25 정합 (외부 원문 무단 복제 금지)** | LLM 검색 prompt 에 "abstract 를 본인 말로 1~2문장 요약" instruction → Document.abstract = self-summary | 추가 LLM 호출 없이 정합 |
+| **NFR-25 정합 (외부 원문 무단 복제 금지)** | LLM 검색 prompt 에 "abstract 를 본인 말로 1~2문장 요약" instruction → `Document.summary` (schema.md ORM 컬럼명) = LLM self-summary | 추가 LLM 호출 없이 정합 |
 | **클릭베이트 필터** | **default 비활성**. 사용자가 News 소스 명시 활성화 시 post-LLM filter 로만 동작 | LLM 이 1차 필터링하므로 기본 불필요. clickbait_module 코드 자체는 보존 |
 | ~~빅테크 공식 채널 YAML registry~~ | ~~(폐기)~~ | v13 라운드 pivot |
 | ~~네이버뉴스 IT/과학 BS4~~ | ~~(폐기)~~ | v13 라운드 pivot |
@@ -132,7 +132,7 @@
 |---|---|---|
 | 수집 모델 | 6 source 어댑터 cron pull | LLM 이 trace topic 받아 web 검색 도구 호출 |
 | Source 어댑터 | arXiv / OpenAlex / Semantic Scholar / DBLP / RSS / 네이버BS4 (6종) | **폐기** |
-| Source 테이블 | 소스별 row (50+) + SourcePolicy trust_level | sentinel 1행 `llm_search` + Document.extra publisher |
+| Source 테이블 | 소스별 row (50+) + SourcePolicy trust_level | sentinel 1행 `llm_search` + Document.raw publisher |
 | Query 구성 | source 별 topic_keyword query | LLM 이 trace JSON 통째 받아 스스로 query 결정 (agent-driven) |
 | LLM 호출 위치 | Document 별 cso_topic 매핑 (medium slot 1회/doc) | trace leaf 별 검색 + 매핑 통합 (medium slot 1회/leaf) |
 | Clickbait 필터 | tech_news 모든 Document 강제 | 사용자가 News 소스 명시 활성화 시만 |
@@ -147,7 +147,7 @@
 |---|---|
 | LLM provider | Provider-agnostic toggle (LLM_PROVIDER env). MockProvider default + OpenAI/Anthropic 정식 토글 |
 | Query 구성 | LLM 이 user trace JSON 통째 받아 스스로 query 결정 (agent-driven) |
-| Source 테이블 | sentinel 1행 `llm_search` + publisher Document.extra JSONB |
+| Source 테이블 | sentinel 1행 `llm_search` + publisher Document.raw JSONB |
 | Clickbait | 폐기 X. 1차 시연 default 비활성. 사용자가 News 소스 활성화 시 post-LLM filter |
 | CollectionJob 단위 | (user × source). source 가 단일 sentinel 이라 실효 user 별 1건 |
 | Trigger | daily cron + manual `POST /collection/jobs/me/run-now` (1/h). Onboarding/login 자동 trigger 미사용 |
@@ -180,8 +180,8 @@
 | `srs/03-nonfunctional-requirements.md` | NFR-25 self-summary 정합 박스 |
 | `algorithms/cso-mapping.md` | "검색 query 자체가 topic" 으로 단순화 |
 | `algorithms/clickbait-integration.md` | "사용자 명시 활성화 시만" 정책 명시 |
-| `data/sources-registry.md` | sentinel 1행 + Document.extra publisher 로 재작성 |
-| `data/schema.md` | Document.extra JSONB + Source sentinel 정합 |
+| `data/sources-registry.md` | sentinel 1행 + Document.raw publisher 로 재작성 |
+| `data/schema.md` | Document.raw JSONB + Source sentinel 정합 |
 | `sdd/architecture.md` | 다이어그램 갱신 (어댑터 6종 → LLM tool-use) |
 | `api/collection.md` | 비즈니스 룰 갱신 |
 | `prompts/03-A4-collection.md` | 재작성 (pivot 명세) |

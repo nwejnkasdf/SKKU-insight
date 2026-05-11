@@ -11,9 +11,9 @@
 | `app/user/` | 사용자 프로필·삭제 요청 | user_id, profile patch | User row + cascade 삭제 잡 (1차 시연: 즉시 cascade. NFR-21의 30일 grace는 미해소 항목 — `decision-backlog.md` C-2) | `app/db`, `app/auth` |
 | `app/topic/` | CSOTopic + DynamicLeafTopic 조회/탐색 | topic_id, document_id | adjacent / parent / descendants / equivalent CSO 토픽 리스트 | `networkx` 캐시, `app/db` |
 | `app/traversal/` | UserCSOTraversal trace 운영 (extend/retract/split/archive) + leaf 재배치 LLM 호출 | UserEvent, current trace | trace 갱신, leaf 재매핑 | `app/topic`, `app/leaf_lifecycle`, `app/llm_provider`, `app/db` |
-| `app/collection/` | 사용자별 일일 수집 잡 디스패치 + 결과 저장. 수집 대상 토픽 = active trace path 노드 ∪ 1-hop adjacent (`app/traversal` 의존, [`../algorithms/cso-topic-traversal.md §6`](../algorithms/cso-topic-traversal.md)) | user_id, since timestamp | Document, DocumentTopic, CollectionJob | `app/source_adapters`, `app/clickbait_client`, `app/topic`, `app/traversal` |
-| `app/source_adapters/` | 6 어댑터 (arXiv, OpenAlex, Semantic Scholar, DBLP, RSS, 네이버 BS4) | topic_query, since | List[RawDocument] | httpx, beautifulsoup4 |
-| `app/clickbait_client/` | clickbait-detector 컨테이너 호출 wrapper | title, body, meta | {decision, confidence} | httpx |
+| `app/collection/` | **(v13 라운드)** 사용자별 일일 수집 잡 디스패치 + 결과 저장. 수집 대상 토픽 = active trace path 노드 ∪ 1-hop adjacent (`app/traversal` 의존, [`../algorithms/cso-topic-traversal.md §6`](../algorithms/cso-topic-traversal.md)). LLM tool-use 검색 단일 경로. | user_id, since timestamp | Document, DocumentTopic, CollectionJob | `app/llm_provider` (search_with_tools), `app/clickbait_client` (옵션), `app/topic`, `app/traversal` |
+| ~~`app/source_adapters/`~~ | **(v13 라운드 폐기, 2026-05-11)** 6 어댑터 (arXiv, OpenAlex, Semantic Scholar, DBLP, RSS, 네이버 BS4) → `LLMProvider.search_with_tools()` 단일 경로로 통합. `app/source_adapters/` 디렉토리 미생성. | ~~topic_query, since~~ | ~~List[RawDocument]~~ | ~~httpx, beautifulsoup4~~ |
+| `app/clickbait_client/` | clickbait-detector 컨테이너 호출 wrapper. **(v13 라운드)** 1차 시연 default 비활성, 사용자 News 소스 명시 활성화 시만 호출 | title, body, meta | {decision, confidence} | httpx |
 | `app/leaf_lifecycle/` | LifecycleEvaluator 추상 + D 하이브리드 구현 | user_id, new_documents | new DynamicLeafTopic + 상태 전이 | `app/llm_provider`, `app/db` |
 | `app/interest/` | Beta-Bernoulli 사후 업데이트 | UserEvent | UserInterestState 갱신 | `app/db`, `app/topic` |
 | `app/recommendation/` | core/adjacent/discovery 후보 + 랭킹 + Cold-start | user_id | List[Recommendation] (10개) + RecommendationSlot | `app/topic`, `app/interest`, `app/llm_provider` |
@@ -139,22 +139,47 @@ class LLMResponse(BaseModel):
     finish_reason: Literal["stop", "length", "tool_use"]
 ```
 
-### SourceAdapter
+### ~~SourceAdapter~~ (v13 라운드 폐기, 2026-05-11)
+
+본 인터페이스는 A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 폐기. 6 source 어댑터(arXiv, OpenAlex, Semantic Scholar, DBLP, RSS, 네이버 BS4) 모두 미구현. 수집은 `LLMProvider.search_with_tools()` 단일 경로로 통일.
 
 ```python
-# app/source_adapters/protocol.py
-class SourceAdapter(Protocol):
-    name: str  # "arxiv", "openalex", ...
-    source_type: SourceType   # contracts.py SOR enum (sdd/contracts.md §2)
+# 폐기된 시그니처 (역사적 참고용 — 구현 안 함)
+# class SourceAdapter(Protocol):
+#     name: str
+#     source_type: SourceType
+#     async def fetch(self, topic_query, since, max_items=100) -> list[RawDocument]: ...
+```
 
-    async def fetch(
+### LLMProvider.search_with_tools (v13 라운드 신규)
+
+```python
+# app/llm_provider/protocol.py — A4 가 추가
+class LLMProvider(Protocol):
+    # 기존 complete(...) 시그니처 보존
+    ...
+
+    async def search_with_tools(
         self,
-        topic_query: TopicQuery,  # CSO 라벨 + 키워드 + 동적 리프 라벨
-        since: datetime,
-        max_items: int = 100,
-    ) -> list[RawDocument]:
-        """네트워크 호출. 실패 시 SourceFetchError를 raise하여 collection 모듈이 CollectionJob.failure_reason에 기록."""
+        trace_json: dict[str, Any],   # 사용자 active trace 전체 (cluster→subtopic→leaf path)
+        leaf_label: str,               # 검색 query 의 leaf 라벨
+        *,
+        top_n: int = 10,
+        user_id: str | None = None,
+    ) -> list[SearchResult]:
+        """LLM 자율 query 결정 + web 검색 도구 호출 + top_n 결과. abstract 는 LLM
+        self-summary (NFR-25 정합). 실패 시 LLMBudgetExceeded 또는 ProviderError raise → 
+        collection orchestrator 가 CollectionJob.failure_reason 기록."""
         ...
+
+@dataclass(slots=True)
+class SearchResult:
+    title: str
+    url: str
+    publisher_domain: str | None
+    publisher_label: str | None
+    published_at: datetime | None
+    abstract_summary: str   # LLM self-summary, ≤200자
 ```
 
 ### TopicMapper (EV-03 도메인 확장 대비)
@@ -198,6 +223,6 @@ class ClickbaitClassifier(Protocol):
 | `TraversalEngine` | `DefaultTraversalEngine` (trace operation 룰 + leaf 재배치 LLM) | (현재 없음) |
 | `LifecycleEvaluator` | `HybridDLifecycleEvaluator` (LLM 식별/병합 + 룰 전이) | `BatchLLMLifecycleEvaluator` |
 | `LLMProvider` | **`MockProvider`** (default, deterministic JSON/text fixture per prompt hash) | `OpenAIAPIProvider`, `AnthropicAPIProvider`, `OpenRouterProvider`, `CodexOAuthProvider` (local experimental) |
-| `SourceAdapter` | 6 종 (arxiv, openalex, semantic_scholar, dblp, rss_generic, naver_bs4) | 사용자 추가 어댑터 |
+| ~~`SourceAdapter`~~ | ~~6 종 (arxiv, openalex, semantic_scholar, dblp, rss_generic, naver_bs4)~~ **(v13 라운드 폐기)** → `LLMProvider.search_with_tools` 단일 경로 | 향후 도메인 어댑터 도입 시 별도 결정 |
 | `TopicMapper` | `CSOTopicMapper` | (EV-03 시 도메인별) |
 | `ClickbaitClassifier` | `AxDoraClassifierClient` (사용자 보유 모듈) | 추후 ONNX export 또는 cloud serve |

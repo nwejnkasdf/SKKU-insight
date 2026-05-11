@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     LIFECYCLE_EVALUATOR: Literal["hybrid_d", "batch_llm", "rule_only"] = "hybrid_d"
     MERGE_EVALUATION_CRON: str = "0 3 * * 1"
     INTEREST_DECAY_CRON: str = "0 0 * * *"
-    NAVER_CLEANUP_CRON: str = "0 17 * * *"  # decision-backlog P1-6, NFR-25
+    NAVER_CLEANUP_CRON: str = "0 17 * * *"  # (v13 라운드 폐기, 2026-05-11) decision-backlog P1-6 무효 — NaverBS4 어댑터 폐기. env 보존만, scheduler 등록 제거.
 
     # === Concurrency guards (sdd/concurrency.md) ===
     EVENT_BATCH_SIZE: int = 20
@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     CONSENT_CACHE_TTL_SECONDS: int = 60
 
     # === External sources ===
+    # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.
+    # 향후 어댑터 재도입 가능성 위해 보존만.
     OPENALEX_POLITE_EMAIL: str = "dev@insight.test"
     SEMANTIC_SCHOLAR_API_KEY: str = ""
     # CSO 3.4 다운로드 URL (decision-backlog P1-5). A3 가 `backend/scripts/import_cso.py` 에서 사용.

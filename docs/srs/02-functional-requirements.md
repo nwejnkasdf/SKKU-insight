@@ -182,7 +182,7 @@
 | FR-29 | 시스템은 사용자별 소스 수집 실패를 기록하고 관리자 웹 콘솔에 표시해야 한다. |
 
 > **v13 라운드 해석 박스 (2026-05-11)** — FR-22~25 의 식별자는 SRS 원본대로 보존하되, A4 Topic-driven Pivot ([`decisions.md §10`](../decisions.md))에 따라 구현 의미를 다음과 같이 갱신:
-> - **FR-22 (기본 수집 소스)**: "학술지/논문, 빅테크 공식 채널, 테크 뉴스" 는 *수집 목표 도메인* 으로 해석. 구현은 **LLM tool-use (web search)** 가 사용자 trace topic 을 입력으로 위 도메인의 자료를 검색·반환 (어댑터 6종 미구현). publisher 정보 (arxiv.org, openai.com 등) 는 `Document.extra` JSONB.
+> - **FR-22 (기본 수집 소스)**: "학술지/논문, 빅테크 공식 채널, 테크 뉴스" 는 *수집 목표 도메인* 으로 해석. 구현은 **LLM tool-use (web search)** 가 사용자 trace topic 을 입력으로 위 도메인의 자료를 검색·반환 (어댑터 6종 미구현). publisher 정보 (arxiv.org, openai.com 등) 는 `Document.raw` JSONB (schema.md ORM 컬럼명).
 > - **FR-23 (학술 소스 범주)**: 범주 정의는 보존. LLM 검색 응답에서 publisher_domain 으로 식별.
 > - **FR-24 (빅테크 공식 채널)**: 공식 블로그·릴리즈 노트 등의 포함 *기대* 는 보존. LLM 검색 prompt 에 instruction 으로 전달.
 > - **FR-25 (테크 뉴스 동등성 + 낚시성 필터)**: 동등 추천 후보 취급 보존. 낚시성 필터 (`A.X-4.0-Light` DoRA) 는 사용자가 News 소스 명시 활성화 시만 적용 (1차 시연 default 비활성).

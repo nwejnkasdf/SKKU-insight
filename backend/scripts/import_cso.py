@@ -109,18 +109,21 @@ async def _main(args: argparse.Namespace) -> int:
         logger.info("--dry-run: INSERT skip")
         return 0
 
-    # 5. DB INSERT
+    # 5. DB INSERT — 단일 transaction 으로 reset + insert + seed 묶음 (Codex 감사 Critical fix).
+    # 이전 코드: reset 후 즉시 commit + insert/seed 별도 commit → seed_broad_interests 가
+    # B-8 RuntimeError 던지면 reset 만 완료, insert/seed 는 rollback → DB empty 상태 잔존.
+    # 수정 후: 전체를 session.begin() 으로 묶어 RuntimeError 시 reset 까지 rollback.
     engine = get_engine()
     try:
         async with AsyncSessionLocal() as session:
-            if args.reset:
-                await reset_cso_tables(session)
-                await session.commit()
-            uri_to_id = await insert_cso(session, topics, cluster_assignments)
-            inserted = await seed_broad_interests(
-                session, BROAD_INTERESTS_TOML, uri_to_id, topics
-            )
-            await session.commit()
+            async with session.begin():
+                if args.reset:
+                    await reset_cso_tables(session)
+                uri_to_id = await insert_cso(session, topics, cluster_assignments)
+                inserted = await seed_broad_interests(
+                    session, BROAD_INTERESTS_TOML, uri_to_id, topics
+                )
+            # session.begin() context manager 종료 시 자동 commit (예외 시 rollback)
             logger.info(
                 "INSERT 완료: cso_topic=%d / broad_interest=%d",
                 len(uri_to_id),

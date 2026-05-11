@@ -197,6 +197,18 @@
 - **default action**: BaseSettings 필드 `CSO_DOWNLOAD_TIMEOUT_SECONDS=60` 노출 (`.env.example` + `env-vars.md` 동시). 또는 hardcoded 유지.
 - **시점**: 운영 회선 측정 후.
 
+### P2-16. `--reset` 후 DynamicLeafTopic.cso_topic_ids 빈 배열 (Codex 감사 B-5)
+- **원본**: `backend/app/topic/cso_importer.py:306 reset_cso_tables` 부작용 (A-2 fix 의 trade-off)
+- **현황**: Codex Critical A-2 fix 가 RESTRICT FK 위반을 막기 위해 `dynamic_leaf_topic_cso_topic` 먼저 DELETE → 기존 DynamicLeafTopic row 의 `cso_topic_ids` 가 leaf endpoint 응답에서 빈 배열로 반환. leaf 자체는 archive 안 됨.
+- **default action**: `--reset` 진행 전 명시 경고 + 영향받는 leaf 수 카운트. 또는 `--reset` 가 모든 DynamicLeafTopic.status='archived' bulk update. 또는 `--reset --leaves` 명시 플래그로 leaf 까지 wipe.
+- **시점**: A7 머지 후 leaf 데이터 채워질 때. 운영자가 `--reset` 호출 전.
+
+### P2-17. inspect.getsource 정적 검증 → DB fixture 통합 테스트 (Codex 감사 E)
+- **원본**: `backend/tests/topic/test_audit_regressions.py` A-1·A-2·B-6·Codex Critical 회귀 테스트
+- **현황**: 정적 source inspection 패턴 (`inspect.getsource + 키워드 검색`) 이 변수명 변경·주석 삽입·문자열 보간 등으로 우회 가능. 동적 mock 기반 (A-3·A-4·B-2·B-3·B-4) 보다 회귀 신뢰성 낮음.
+- **default action**: A7 (leaf 데이터) 머지 후 실제 DB fixture 로 active/stale/merged leaf 4개 삽입 → list_traces.leaf_count == len(get_trace_detail.leaves) 통합 검증. cso_topic_parent 다중 부모 시드 → CSOTopicDetail.parents 다중 검증. docker compose 환경 (A11).
+- **시점**: A11 (test-ci) 또는 A7 머지 직후.
+
 ### P2-15. UUID v7 (time-ordered) cursor pagination (자체감사 C-3)
 - **원본**: `backend/app/topic/leaf_service.py / trace_service.py` cursor
 - **현황**: leaf_id / trace_id 가 UUID v4 — cursor tie-break 시 lexicographic 순서 (안전하지만 의미 없음). v7 (time-ordered) 사용 시 더 자연 정렬.
@@ -217,7 +229,7 @@
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 10 (해결 1, 활성 9 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
-| P2 | 15 (해결 2, 활성 13 — A3 자체감사 8건 추가) | (없음) | 후속 폴리시 단계 |
+| P2 | 17 (해결 2, 활성 15 — A3 자체감사 8 + Codex 감사 2) | (없음) | 후속 폴리시 단계 |
 | C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B) | 32 (해결 32 — C-2 부분 해소, C-6~32 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex v1 + multi-worker + 옵션 B + codex v2 + codex v3 로 27건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**

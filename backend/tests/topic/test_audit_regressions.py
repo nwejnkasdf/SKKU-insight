@@ -294,3 +294,133 @@ display_order = 0
     assert inserted == 1
     # session.execute 가 1번 호출됨 (1 entry)
     assert session_mock.execute.call_count == 1
+
+
+# ============================================================
+# Codex Critical: --reset split-transaction → 단일 transaction
+# ============================================================
+
+
+def test_audit_codex_critical_single_transaction_wraps_reset_and_seed() -> None:
+    """import_cso.py 의 `_main` 이 reset + insert + seed 를 `session.begin()` 단일 transaction 으로 래핑.
+
+    fix 전: reset 후 즉시 commit + insert/seed 별도 commit → seed 가 RuntimeError
+    던지면 reset 만 완료, DB empty 잔존.
+
+    fix 후: session.begin() context manager 가 RuntimeError 시 reset 까지 rollback.
+    소스 패턴 검증 — 모듈 직접 import 대신 파일 read (backend/ 패키지 경로 회피).
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    import_cso_path = repo_root / "scripts" / "import_cso.py"
+    src = import_cso_path.read_text(encoding="utf-8")
+    # session.begin() context manager 가 reset/insert/seed 를 모두 감싸야 함
+    assert "session.begin()" in src, (
+        "import_cso._main 가 session.begin() 으로 reset+insert+seed 단일 transaction "
+        "래핑 누락 (Codex Critical 회귀). reset 후 RuntimeError 시 빈 DB 잔존 위험."
+    )
+    # 별도 `await session.commit()` 호출 안 함 (begin() 가 자동 commit)
+    explicit_commit_count = src.count("await session.commit()")
+    assert explicit_commit_count == 0, (
+        f"import_cso._main 에 명시 commit {explicit_commit_count}회 — session.begin() "
+        "패턴과 충돌. split-transaction 위험 (Codex Critical 회귀)."
+    )
+
+
+# ============================================================
+# Codex B-1: download atomic rename + 최소 size 검증
+# ============================================================
+
+
+def test_audit_codex_b1_download_uses_atomic_tmp_rename() -> None:
+    """download_cso 가 `.tmp` 로 받은 후 atomic rename 패턴 사용.
+
+    fix 전: target 에 직접 write — partial 다운로드가 다음 실행에 cache hit.
+    fix 후: tmp.replace(target) atomic + size 검증 + partial 정리.
+    """
+    src = inspect.getsource(cso_importer.download_cso)
+    assert ".tmp" in src and "replace(target)" in src, (
+        "download_cso 가 atomic .tmp rename 패턴 누락 (Codex B-1 회귀). "
+        "partial download cache hit 위험."
+    )
+    # 최소 size 검증 (10 KB)
+    assert "10_000" in src or "10000" in src, (
+        "download_cso 가 최소 size 검증 누락 (Codex B-1 회귀)."
+    )
+
+
+# ============================================================
+# Codex B-2: cursor decoder TypeError 처리
+# ============================================================
+
+
+def test_audit_codex_b2_leaf_cursor_decoder_handles_typeerror() -> None:
+    """leaf_service._decode_cursor 가 list/잘못된 type payload → 400.
+
+    fix 전: dict 가정 → list 인 payload 면 KeyError 아닌 TypeError 발생 → except 불일치 → 500.
+    fix 후: isinstance(data, dict) check + TypeError except → 400.
+    """
+    import base64
+    import json as json_mod
+
+    from app.topic import leaf_service
+
+    # cursor 가 list (dict 아님) — 잘못된 payload
+    bad_payload = base64.urlsafe_b64encode(json_mod.dumps([1, 2]).encode()).decode().rstrip("=")
+    with pytest.raises(HTTPException) as exc:
+        leaf_service._decode_cursor(bad_payload)
+    assert exc.value.status_code == 400
+
+
+def test_audit_codex_b2_trace_cursor_decoder_handles_typeerror() -> None:
+    """trace_service._decode_cursor 도 동일 패턴."""
+    import base64
+    import json as json_mod
+
+    from app.topic import trace_service as ts
+
+    bad_payload = base64.urlsafe_b64encode(json_mod.dumps([1, 2]).encode()).decode().rstrip("=")
+    with pytest.raises(HTTPException) as exc:
+        ts._decode_cursor(bad_payload)
+    assert exc.value.status_code == 400
+
+
+# ============================================================
+# Codex B-3: cluster cache schema mismatch fallback
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_audit_codex_b3_cluster_cache_validation_error_invalidates() -> None:
+    """get_clusters 가 cache 의 schema mismatch (ValidationError) 시 DEL + DB fallback.
+
+    fix 전: cache 에 stale schema 저장 시 model_validate ValidationError → 500.
+    fix 후: ValidationError catch → invalidate_cluster_cache 호출 → DB 조회 fallback.
+    """
+    src = inspect.getsource(cso_service.get_clusters)
+    assert "ValidationError" in src, (
+        "get_clusters 가 cache ValidationError catch 누락 (Codex B-3 회귀). 500 위험."
+    )
+    assert "invalidate_cluster_cache" in src, (
+        "get_clusters 가 ValidationError 후 cache invalidate 누락 (Codex B-3 회귀)."
+    )
+
+
+# ============================================================
+# Codex B-4: clusters response 12개 보장 fail-fast
+# ============================================================
+
+
+def test_audit_codex_b4_clusters_response_enforces_12() -> None:
+    """get_clusters 가 len(clusters) != 12 시 503 fail-fast.
+
+    fix 전: 0 또는 부분 행 (1-11) 도 200 + 빈 list 반환. 운영자 인지 불가.
+    fix 후: 12 아니면 503 topic.linkage_error.
+    """
+    src = inspect.getsource(cso_service.get_clusters)
+    # 503 fail-fast 패턴 검증
+    assert "503" in src or "HTTP_503" in src, (
+        "get_clusters 가 12 cluster 보장 503 fail-fast 누락 (Codex B-4 회귀)."
+    )
+    assert "12" in src, "get_clusters 가 12 cluster 보장 검증 누락 (Codex B-4 회귀)."

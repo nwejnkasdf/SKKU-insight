@@ -16,6 +16,7 @@ from uuid import UUID
 
 import networkx as nx
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,12 +53,21 @@ def _not_found() -> HTTPException:
 async def get_clusters(
     db: AsyncSession, redis: Redis
 ) -> ClustersResponse:
-    """12 CSO 클러스터 응답. Redis 24h 캐시 hit-first."""
+    """12 CSO 클러스터 응답. Redis 24h 캐시 hit-first.
+
+    Codex 감사 B-3 fix: cache hit 시 Pydantic ValidationError 발생 시 DEL + DB fallback.
+    """
     cached = await cache.get_cluster_cache(redis)
     if cached is not None:
-        return ClustersResponse(
-            clusters=[CSOCluster.model_validate(c) for c in cached]
-        )
+        try:
+            return ClustersResponse(
+                clusters=[CSOCluster.model_validate(c) for c in cached]
+            )
+        except ValidationError as e:
+            logger.warning(
+                "cso clusters cache schema mismatch — invalidate + DB fallback: %s", e
+            )
+            await cache.invalidate_cluster_cache(redis)
 
     # 캐시 miss — DB 조회 (BroadInterest 12 행 JOIN cso_topic + 토픽별 문서 카운트)
     # 1차 시연: A4 Document 모델 부재 → document_count 0 으로 응답
@@ -94,8 +104,20 @@ async def get_clusters(
             }
         )
 
-    if clusters:
-        await cache.set_cluster_cache(redis, cache_payload)
+    # Codex 감사 B-4 fix: 12 cluster 고정 보장 — len != 12 시 503 fail-fast.
+    # CSO 미임포트 (0 행) · 시드 부분 누락 (1-11 행) 모두 비정상. 운영자에게 명확 신호.
+    if len(clusters) != 12:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "topic.linkage_error",
+                "message": (
+                    f"BroadInterest 시드 비정상 ({len(clusters)}/12). "
+                    "`make import-cso` 또는 운영자에게 문의."
+                ),
+            },
+        )
+    await cache.set_cluster_cache(redis, cache_payload)
     return ClustersResponse(clusters=clusters)
 
 

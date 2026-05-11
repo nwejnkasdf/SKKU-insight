@@ -58,6 +58,10 @@ def _unescape_literal(value: str) -> str:
 def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
     """CSO CSV 다운로드 → `.cache/cso/CSO.X.Y.csv` 캐시.
 
+    Codex 감사 B-1 fix: `.tmp` 로 받은 후 atomic rename. 다운로드 중 네트워크 실패
+    시 partial CSV 가 다음 실행에서 정상 cache 로 취급되는 문제 차단. 최소 row 수
+    검증 (10 KB 미만은 비정상).
+
     Args:
         url: CSO_DOWNLOAD_URL env (예: https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv)
         cache_dir: 보통 워크트리 루트의 `.cache/cso/`
@@ -69,11 +73,26 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
         logger.info("CSO cache hit: %s", target)
         return target
     logger.info("CSO download: %s → %s", url, target)
-    with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as r:
-        r.raise_for_status()
-        with target.open("wb") as f:
-            for chunk in r.iter_bytes():
-                f.write(chunk)
+    # atomic write: .tmp 로 받은 후 rename. partial write 시 .tmp 만 잔존 (다음 실행에 재시도).
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as r:
+            r.raise_for_status()
+            with tmp.open("wb") as f:
+                for chunk in r.iter_bytes():
+                    f.write(chunk)
+        # CSO 3.4 CSV 는 보통 수십 MB. 10 KB 미만은 비정상 응답.
+        size = tmp.stat().st_size
+        if size < 10_000:
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"CSO 다운로드 결과 비정상 (size={size} bytes < 10KB). URL 확인."
+            )
+        tmp.replace(target)
+    except BaseException:
+        # download 중 실패·취소 시 partial .tmp 정리
+        tmp.unlink(missing_ok=True)
+        raise
     return target
 
 

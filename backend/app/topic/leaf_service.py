@@ -39,13 +39,23 @@ def _encode_cursor(created_at: datetime, leaf_id: UUID) -> str:
 
 
 def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
-    """opaque cursor → (created_at, leaf_id). 잘못된 cursor 는 400 raise."""
+    """opaque cursor → (created_at, leaf_id). 잘못된 cursor 는 400 raise.
+
+    Codex 감사 B-2 fix: TypeError (data 가 list 등 dict 아닌 경우) + 잘못된 type
+    필드도 400 wrap. 기존 KeyError/ValueError 외에 TypeError 추가.
+    """
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         raw = base64.urlsafe_b64decode(padded)
         data = json.loads(raw)
-        return datetime.fromisoformat(data["ts"]), UUID(data["id"])
-    except (binascii.Error, ValueError, KeyError, json.JSONDecodeError) as e:
+        if not isinstance(data, dict):
+            raise TypeError(f"cursor payload must be dict, got {type(data).__name__}")
+        ts_val = data["ts"]
+        id_val = data["id"]
+        if not isinstance(ts_val, str) or not isinstance(id_val, str):
+            raise TypeError("cursor fields ts/id must be str")
+        return datetime.fromisoformat(ts_val), UUID(id_val)
+    except (binascii.Error, TypeError, ValueError, KeyError, json.JSONDecodeError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={

@@ -86,13 +86,13 @@
 |---|---|---|
 | `COLLECTION_CRON` | `0 3 * * *` | UTC 기준 매일 3시 (KST 12:00) |
 | `COLLECTION_CRON_DEMO` | `0 * * * *` | demo 모드: 매시 |
-| `COLLECTION_PER_USER_PARALLEL` | `4` | 사용자별 어댑터 병렬 수 |
+| `COLLECTION_PER_USER_PARALLEL` | `4` | **(v13 라운드 의미 변경)** 사용자 trace 당 동시 LLM 검색 호출 수 (이전: 어댑터 병렬) |
 | `COLLECTION_GLOBAL_CONCURRENCY` | `8` | 전체 동시 잡 cap |
-| `COLLECTION_USER_JITTER_SECONDS` | `300` | 사용자별 잡 시작 시각 분산 윈도우 — 외부 RL 보호 ([`../sdd/concurrency.md §8`](../sdd/concurrency.md)) |
+| `COLLECTION_USER_JITTER_SECONDS` | `300` | 사용자별 잡 시작 시각 분산 윈도우 — LLM provider RL 보호 ([`../sdd/concurrency.md §8`](../sdd/concurrency.md)) |
 | `LIFECYCLE_EVALUATOR` | `hybrid_d` | hybrid_d | batch_llm | rule_only |
 | `MERGE_EVALUATION_CRON` | `0 3 * * 1` | 매주 월 03:00 UTC |
 | `INTEREST_DECAY_CRON` | `0 0 * * *` | 매일 자정 UTC (단 active day 차이 없으면 no-op) |
-| `NAVER_CLEANUP_CRON` | `0 17 * * *` | UTC 기준 매일 17시 (KST 02:00). 토픽 매핑 없는 `content_type=tech_news` Document 30일 경과 시 삭제 (NFR-25 정합, `decision-backlog.md` P1-6). A2가 scheduler stub 등록, A4가 본문 |
+| ~~`NAVER_CLEANUP_CRON`~~ | ~~`0 17 * * *`~~ | **(v13 라운드 폐기, 2026-05-11)** decision-backlog P1-6 무효. NaverBS4 어댑터 폐기로 tech_news Document 진입 X → cleanup 불필요. .env 에 남아있어도 무시 (A4 scheduler 등록 제거). |
 
 ## 동시성 가드
 
@@ -107,10 +107,12 @@
 
 ## 외부 소스 키 (있을 때만 채움)
 
+> **v13 라운드 박스 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 6 source 어댑터 폐기. `OPENALEX_POLITE_EMAIL` / `SEMANTIC_SCHOLAR_API_KEY` 는 본 라운드 시점 **dead code** (어댑터 없음). config 에서 즉시 제거하지는 않고 — 향후 어댑터 도입 시 재사용 가능성 위해 보존. **활성 외부 키**: LLM provider 별 API key (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` — §LLM 섹션 참조) + `CSO_DOWNLOAD_URL`.
+
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `OPENALEX_POLITE_EMAIL` | `dev@insight.test` | OpenAlex politeness |
-| `SEMANTIC_SCHOLAR_API_KEY` | (선택) | 없으면 anonymous |
+| ~~`OPENALEX_POLITE_EMAIL`~~ | ~~`dev@insight.test`~~ | **(v13 라운드 dead)** OpenAlex 어댑터 미구현. 본 env 미사용. |
+| ~~`SEMANTIC_SCHOLAR_API_KEY`~~ | ~~(선택)~~ | **(v13 라운드 dead)** Semantic Scholar 어댑터 미구현. 본 env 미사용. |
 | `CSO_DOWNLOAD_URL` | `https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv` | A3 (cso-topic engine). `scripts/import_cso.py` 다운로드 URL. decision-backlog P1-5 — 버전 갱신(3.5+) 시 본 env 만 교체 + `make import-cso --reset --refresh`. |
 
 ## CORS / 호스트

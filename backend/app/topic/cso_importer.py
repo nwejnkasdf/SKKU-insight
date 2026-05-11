@@ -83,7 +83,8 @@ def parse_cso_csv(path: Path) -> dict[str, dict[str, Any]]:
     superTopicOf 의 subject 는 부모, object 는 자식 — child[parent_uris].append(subject).
     """
     topics: dict[str, dict[str, Any]] = {}
-    with path.open(encoding="utf-8") as f:
+    # utf-8-sig: CSO CSV 가 BOM 으로 시작할 경우 첫 URI 매칭 실패 방지 (자체감사 B-4).
+    with path.open(encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         for row in reader:
             if len(row) < 3:
@@ -240,19 +241,21 @@ async def seed_broad_interests(
         if isinstance(label, str) and label:
             label_to_uri.setdefault(_norm_label(label), uri)
 
+    # 자체감사 B-8 fix: silent skip 대신 매칭 실패 entry 를 모두 수집 → 마지막에 RuntimeError.
+    # missing_seeds 사전 가드 (import_cso.py) 가 정상 흐름 차단하지만 mapping.SEEDS 와
+    # toml entry 가 어긋날 경우 본 단계가 마지막 방어선. 12 행 시드 무결성 보장.
+    skipped: list[str] = []
     inserted = 0
     for entry in entries:
         seed_label = entry["seed_topic_label"]
         norm = _norm_label(seed_label)
         seed_uri = label_to_uri.get(norm)
         if seed_uri is None:
-            logger.warning(
-                "BroadInterest seed_topic_label 매칭 실패: %s — skip", seed_label
-            )
+            skipped.append(f"label_not_in_cso:{seed_label}")
             continue
         seed_id = uri_to_id.get(seed_uri)
         if seed_id is None:
-            logger.warning("seed URI 가 INSERT 단계에 없음: %s — skip", seed_uri)
+            skipped.append(f"uri_not_inserted:{seed_uri}")
             continue
         stmt = (
             pg_insert(BroadInterest)
@@ -277,17 +280,30 @@ async def seed_broad_interests(
         inserted += 1
     await session.flush()
     logger.info("BroadInterest seed: %d/%d", inserted, len(entries))
+    if skipped:
+        raise RuntimeError(
+            f"BroadInterest 시드 누락 {len(skipped)}/{len(entries)}: {skipped}. "
+            "mapping.SEEDS 와 broad_interests.toml 의 seed_topic_label 정합 확인."
+        )
     return inserted
 
 
 async def reset_cso_tables(session: AsyncSession) -> None:
-    """--reset 플래그용. broad_interest → cso_topic_parent → cso_topic 순 TRUNCATE.
+    """--reset 플래그용. cso_topic 참조 FK 를 모두 비운 후 cso_topic 자체 DELETE.
 
-    FK RESTRICT (broad_interest.cso_seed_topic_id) 때문에 순서 중요. CASCADE 한 번에:
-    `TRUNCATE cso_topic CASCADE` 가 broad_interest·cso_topic_parent·dynamic_leaf_topic_cso_topic
-    까지 비움 — 그러나 RESTRICT 는 CASCADE 도 거부함. 명시 순서로 DELETE.
+    FK RESTRICT (broad_interest.cso_seed_topic_id, dynamic_leaf_topic_cso_topic.cso_topic_id)
+    때문에 cso_topic 먼저 DELETE 불가. 순서:
+    1. dynamic_leaf_topic_cso_topic (자체감사 A-2 fix — RESTRICT FK 누락 보강)
+    2. broad_interest (RESTRICT FK)
+    3. cso_topic_parent (CASCADE 자식이긴 하나 명시 DELETE 로 명료성)
+    4. cso_topic
+    user_cso_traversal.path 는 FK 없어 stale UUID 잔존 가능 (자체감사 B-5).
     """
-    logger.info("--reset: DELETE broad_interest → cso_topic_parent → cso_topic")
+    logger.info(
+        "--reset: DELETE dynamic_leaf_topic_cso_topic → broad_interest → "
+        "cso_topic_parent → cso_topic"
+    )
+    await session.execute(text("DELETE FROM dynamic_leaf_topic_cso_topic"))
     await session.execute(text("DELETE FROM broad_interest"))
     await session.execute(text("DELETE FROM cso_topic_parent"))
     await session.execute(text("DELETE FROM cso_topic"))

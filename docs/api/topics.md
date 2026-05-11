@@ -39,8 +39,8 @@ class CSOTopicDetail(BaseModel):
     cso_topic_id: UUID
     label: str
     uri: str              # CSO 원본 URI
-    parent_topic_id: UUID | None
-    parents: list[CSOTopicSummary]
+    # A3 결정 18 + 자체감사 A-4: deprecated `parent_topic_id` 미노출. cso_topic_parent M:N SOR 만.
+    parents: list[CSOTopicSummary]   # 다중 부모 자연 표현 (CSO 는 DAG)
     children_count: int
 
 class CSOTopicSummary(BaseModel):

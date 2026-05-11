@@ -200,7 +200,9 @@ async def get_trace_detail(
         for pid in row.path
     ]
 
-    # path 위 노드에 매핑된 사용자 소유 active leaf
+    # path 위 노드에 매핑된 사용자 소유 active leaf — list_traces.leaf_count 와 동일 룰
+    # (status=ACTIVE 만, 자체감사 A-1 fix). 두 endpoint 가 동일 trace_id 에 대해
+    # leaf_count vs len(leaves) 일관 보장.
     leaves: list[DynamicLeafTopicSchema] = []
     if row.path:
         leaf_stmt = (
@@ -212,6 +214,7 @@ async def get_trace_detail(
             )
             .where(
                 DynamicLeafTopicORM.user_id == user_id,
+                DynamicLeafTopicORM.status == LeafTopicStatus.ACTIVE.value,
                 DynamicLeafTopicCSOTopic.cso_topic_id.in_(row.path),
             )
             .distinct()

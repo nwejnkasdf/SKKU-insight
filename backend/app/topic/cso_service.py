@@ -17,7 +17,7 @@ from uuid import UUID
 import networkx as nx
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import CSOTopicSummary, ErrorCode
@@ -102,12 +102,14 @@ async def get_clusters(
 async def get_topic_detail(
     db: AsyncSession, g: nx.DiGraph, cso_topic_id: UUID
 ) -> CSOTopicDetail:
-    """CSO 토픽 상세. parents 는 NetworkX 다중 부모 (cso_topic_parent SOR)."""
+    """CSO 토픽 상세. parents 는 NetworkX 다중 부모 (cso_topic_parent SOR).
+
+    자체감사 A-4 fix: deprecated `parent_topic_id` 응답 미노출. `parents` list 만.
+    """
     stmt = select(
         CSOTopic.cso_topic_id,
         CSOTopic.label,
         CSOTopic.uri,
-        CSOTopic.parent_topic_id,
     ).where(CSOTopic.cso_topic_id == cso_topic_id)
     row = (await db.execute(stmt)).first()
     if row is None:
@@ -135,7 +137,6 @@ async def get_topic_detail(
         cso_topic_id=row.cso_topic_id,
         label=row.label,
         uri=row.uri,
-        parent_topic_id=row.parent_topic_id,
         parents=parents,
         children_count=len(children),
     )
@@ -144,16 +145,14 @@ async def get_topic_detail(
 async def get_adjacent(
     db: AsyncSession, g: nx.DiGraph, cso_topic_id: UUID, hops: int
 ) -> AdjacentResponse:
-    """N-hop 인접 토픽. NetworkX find_adjacent. seed 가 그래프에 없으면 404."""
+    """N-hop 인접 토픽. NetworkX find_adjacent.
+
+    자체감사 A-3 fix: graph 부재 시 무조건 404 (DB 존재 여부 무관). graph 가 SOR
+    이므로 DB-only 토픽은 stale → 사용자에게 정확한 신호 (404) 가 빈 응답 (200) 보다
+    낫다. graph rebuild (CSO 재임포트 + 재시작) 후 정상 응답.
+    """
     if cso_topic_id not in g:
-        # DB 에는 존재할 수도 있으나 그래프 빌드 후 추가된 노드 — 일관성 위해 404
-        exists = await db.execute(
-            select(func.count())
-            .select_from(CSOTopic)
-            .where(CSOTopic.cso_topic_id == cso_topic_id)
-        )
-        if exists.scalar_one() == 0:
-            raise _not_found()
+        raise _not_found()
     adjacent_ids = graph_mod.find_adjacent(g, cso_topic_id, hops=hops)[
         :MAX_TOPICS_IN_RESPONSE
     ]
@@ -164,15 +163,12 @@ async def get_adjacent(
 async def get_descendants(
     db: AsyncSession, g: nx.DiGraph, cso_topic_id: UUID
 ) -> DescendantsResponse:
-    """모든 후손 (자식 방향). 응답 cap 적용 (MAX_TOPICS_IN_RESPONSE)."""
+    """모든 후손 (자식 방향). 응답 cap 적용 (MAX_TOPICS_IN_RESPONSE).
+
+    자체감사 A-3 fix: graph 부재 시 무조건 404 — get_adjacent 와 동일 일관성.
+    """
     if cso_topic_id not in g:
-        exists = await db.execute(
-            select(func.count())
-            .select_from(CSOTopic)
-            .where(CSOTopic.cso_topic_id == cso_topic_id)
-        )
-        if exists.scalar_one() == 0:
-            raise _not_found()
+        raise _not_found()
     desc_ids = graph_mod.find_descendants(g, cso_topic_id)[:MAX_TOPICS_IN_RESPONSE]
     topics = await _summarize_topics(db, desc_ids)
     return DescendantsResponse(seed_id=cso_topic_id, topics=topics)

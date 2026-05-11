@@ -34,11 +34,6 @@ from app.topic.schemas import (
 router = APIRouter(prefix="/topics", tags=["topics"])
 
 
-def _get_graph(request: Request) -> object:
-    """app.state.cso_graph FastAPI dependency. topic_startup 가 register."""
-    return request.app.state.cso_graph
-
-
 @router.get(
     "/cso/clusters",
     response_model=ClustersResponse,

@@ -32,12 +32,15 @@ class ClustersResponse(BaseModel):
 
 
 class CSOTopicDetail(BaseModel):
-    """CSO 토픽 상세 + 부모 정보."""
+    """CSO 토픽 상세 + 부모 정보.
+
+    A3 결정 18 + 자체감사 A-4: `parent_topic_id` (deprecated 단일 FK) 노출 X.
+    `parents` list (cso_topic_parent M:N SOR) 만 응답. 다중 부모 자연 표현.
+    """
 
     cso_topic_id: UUID
     label: str
     uri: str
-    parent_topic_id: UUID | None = None
     parents: list[CSOTopicSummary]
     children_count: int
 

@@ -104,6 +104,18 @@
 - **default**: **PNG 추출 안 함**. `ux/wireframes.md` 의 화면별 상태 머신 Mermaid + 정상/빈/오류 매트릭스를 단일 권위 소스로 사용. A9는 본 Mermaid·매트릭스만 보고 6개 화면을 구현한다.
 - **stub**: 추후 발표용 슬라이드에 와이어프레임 이미지가 필요하면 `unzip SKKU_InSight_SRS.docx -d /tmp/srs-docx && cp /tmp/srs-docx/word/media/* assets/` 로 추출 (본 저장소 외부 한정).
 
+### P1-9. NetworkX `find_adjacent` 그래프 단계 cap 부재 (자체감사 B-2)
+- **원본**: A3 자체감사 (opus 4.7) — `backend/app/topic/graph.py:103-126`
+- **현황**: `cso_service` 단계에서 `[:MAX_TOPICS_IN_RESPONSE=500]` 슬라이스 — 응답 cap 적용. 그러나 `find_adjacent` 그래프 BFS 자체는 cap 없음. hops=3 + AI cluster 루트 같은 densely-connected seed 시 visited set 수천 노드 팽창 가능. Latency · 메모리 사용 예측 불가.
+- **default action**: 1차 시연 (10-20 사용자) 영향 작음. 운영 단계에서 `find_adjacent(g, seed, hops, max_visited=2*MAX_TOPICS_IN_RESPONSE)` 도입 후 early break.
+- **시점**: 운영 진입 직전. backlog.
+
+### P1-10. CSO 재임포트 후 Redis cache invalidate 실패 정책 (자체감사 C-1)
+- **원본**: A3 자체감사 — `backend/scripts/import_cso.py:144-145`
+- **현황**: `import_cso.py` finally 에서 `RedisKey.cso_clusters_cache()` DEL. 실패 시 warn + 무시 — 24h TTL 후 자연 만료. `cache.py:33` prefix `v1` versioning 으로 부분 완화.
+- **default action**: invalidate 실패 시 3회 backoff retry. 모두 실패 시 RuntimeError (운영자가 인지하고 수동 invalidate). 또는 `RedisKey.cso_clusters_cache()` versioning 을 `v2` 로 bump.
+- **시점**: 운영 단계 결정.
+
 ### P1-8. vLLM의 DoRA 어댑터 호환성 + A.X-4.0-Light 로드 검증 — **해결됨 (2026-05-11)**
 - **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
 - **결정**: stub 옵션 (a) 채택. **DoRA scaling을 사전에 base에 merge → vLLM이 일반 base로 로드** (multi-LoRA serving 미사용). vLLM의 DoRA 직접 지원 여부와 무관하게 동작. base 모델은 [skt/A.X-4.0-Light](https://huggingface.co/skt/A.X-4.0-Light) 공식 모델 카드의 vLLM 서빙 예시로 호환성 가정.
@@ -143,6 +155,54 @@
 - **원본**: `algorithms/clickbait-integration.md:107` 영역 (해소되어 마커 정리됨)
 - **결정**: P0-1 해결과 함께 자연 해소. 모듈 위치 = `clickbait_module/`. 서빙 엔진 = vLLM. 호스팅·transport는 운영 결정. 자세히는 P0-1 + P1-8 + P2-7.
 
+### P2-8. `list_traces.leaf_count` N+1 쿼리 (자체감사 B-1)
+- **원본**: `backend/app/topic/trace_service.py:124-144`
+- **현황**: `for r in page:` 루프 안 trace 마다 count_stmt 별도 실행. limit=20 시 20 round-trip.
+- **default action**: `select(UserCSOTraversal.trace_id, func.count(...)).group_by(trace_id)` 한 번 batch. 또는 `array_overlap` GIN 인덱스 활용.
+- **시점**: A7 데이터 채워진 후 응답 latency 측정 결과 따라 결정.
+
+### P2-9. `_summarize_topics` 정렬 비결정성 (자체감사 B-3)
+- **원본**: `backend/app/topic/cso_service.py:181-191`
+- **현황**: `select(...).where(in_(topic_ids))` DB 반환 순서 미지정. adjacent / descendants 응답 topics list 호출마다 다른 순서 가능 — UI 깜빡임.
+- **default action**: `order_by(CSOTopic.label)` 또는 입력 순서 유지 `case(...)` 추가.
+- **시점**: A9 (electron-client) UI 정렬 룰 확정 후.
+
+### P2-10. `--reset` 후 stale `user_cso_traversal.path` UUID (자체감사 B-5)
+- **원본**: `backend/app/topic/cso_importer.py:283-294 reset_cso_tables`
+- **현황**: `user_cso_traversal.path` 는 ARRAY[UUID] (FK 없음). `--reset` 후 cso_topic row 삭제 → path UUID 가 stale reference. `_lookup_labels` fallback `str(pid)` UI 노출.
+- **default action**: `--reset` 진행 전 prompt 확인 + 동시에 `UPDATE user_cso_traversal SET status='archived'`. 또는 `--reset --traversal` 명시 플래그.
+- **시점**: 운영 단계 (시연은 traversal 비어 있어 영향 없음).
+
+### P2-11. `find_equivalents` 단방향 매칭 (자체감사 B-7)
+- **원본**: `backend/app/topic/graph.py:143-147`
+- **현황**: `g[seed_id].items()` 가 outgoing edge 만. equiv 가 `a→b` 단방향 저장 시 `find_equivalents(b)` 빈 응답. 1차 PRED_REL 미사용 (cso_importer.py:108 무시) — latent bug.
+- **default action**: `out_edges` + `in_edges` 양쪽 검사 (또는 import 시 equiv 양방향 엣지 추가).
+- **시점**: relatedEquivalent 활성화 시 (P3).
+
+### P2-12. CSO importer 단일 transaction WAL 부담 (자체감사 B-9)
+- **원본**: `backend/app/topic/cso_importer.py:113-152`
+- **현황**: Pass 1 (14k INSERT) + Pass 2 (14k UPDATE + 14k+ M:N INSERT) 모두 같은 transaction. `await session.commit()` 마지막 한 번. WAL · undo log 압박.
+- **default action**: Pass 1 commit → Pass 2 별도 transaction. 또는 chunk 단위 (1000 row) commit.
+- **시점**: 임포트 시간 측정 후 5분 SLA 위배 시 또는 운영 환경.
+
+### P2-13. CSO graph cycle 영향 노드 관찰성 (자체감사 B-10)
+- **원본**: `backend/app/topic/graph.py:80-94 verify_cso_import`
+- **현황**: cycle 발견 시 첫 cycle 의 5 노드 미리보기만 WARN log. cycle 멤버 전체 list / prometheus metric 미노출 → 운영자가 영향 노드 파악 어려움.
+- **default action**: cycle 발견 시 영향받는 노드 list 를 structlog binding + cycle metric 노출. 또는 cycle 멤버 cluster_labels 일시 제외.
+- **시점**: 운영 단계 monitoring 도입과 함께.
+
+### P2-14. `CSO_DOWNLOAD_TIMEOUT_SECONDS` env 노출 (자체감사 C-2)
+- **원본**: `backend/app/topic/cso_importer.py:72`
+- **현황**: httpx.stream timeout=60.0 hardcoded. 캠퍼스 회선 5s 이내지만 슬로우 회선 + ssl handshake 시 부족 가능.
+- **default action**: BaseSettings 필드 `CSO_DOWNLOAD_TIMEOUT_SECONDS=60` 노출 (`.env.example` + `env-vars.md` 동시). 또는 hardcoded 유지.
+- **시점**: 운영 회선 측정 후.
+
+### P2-15. UUID v7 (time-ordered) cursor pagination (자체감사 C-3)
+- **원본**: `backend/app/topic/leaf_service.py / trace_service.py` cursor
+- **현황**: leaf_id / trace_id 가 UUID v4 — cursor tie-break 시 lexicographic 순서 (안전하지만 의미 없음). v7 (time-ordered) 사용 시 더 자연 정렬.
+- **default action**: 1차 시연 UUID v4 유지. M4 발표 후 v7 도입 검토 — 모든 모델 PK default 일괄 변경.
+- **시점**: M4 후속.
+
 ### P2-7. vLLM 기반 추론에서 next-token "0"/"1" logprob 추출 방식 — **해결됨 (2026-05-11)**
 - **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
 - **결정**: `SamplingParams(max_tokens=1, logprobs=K, temperature=0.0)` greedy 추론 후 첫 번째 생성 토큰의 logprob 분포에서 id0=56, id1=57 추출 → 2-class softmax. K=20 default(env `LOGPROBS_TOPK`).
@@ -156,8 +216,8 @@
 | 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
-| P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
-| P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
+| P1 | 10 (해결 1, 활성 9 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
+| P2 | 15 (해결 2, 활성 13 — A3 자체감사 8건 추가) | (없음) | 후속 폴리시 단계 |
 | C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B) | 32 (해결 32 — C-2 부분 해소, C-6~32 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex v1 + multi-worker + 옵션 B + codex v2 + codex v3 로 27건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**

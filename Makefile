@@ -1,7 +1,7 @@
 # SKKU InSight — A2 Phase 0b Makefile.
 # 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
 
-.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all ci-regression-net stop down clean
+.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all stop down clean
 
 help:
 	@echo "주요 타깃:"
@@ -14,7 +14,6 @@ help:
 	@echo "  make test           - pytest backend/tests (docker compose 실서비스 사용)"
 	@echo "  make lint           - ruff + mypy --strict"
 	@echo "  make check-all      - 6 cross-check scripts + ruff + mypy"
-	@echo "  make ci-regression-net - PASS-TO-PASS 회귀 그물 (pytest + ruff + mypy + 6 check + alembic upgrade)"
 	@echo "  make stop           - docker compose stop (데이터 유지)"
 	@echo "  make down           - docker compose down (네트워크 제거)"
 	@echo "  make clean          - docker compose down -v (볼륨 삭제 — destructive)"
@@ -58,24 +57,6 @@ check-all:
 	python -m scripts.check_redis_keys
 	python -m scripts.check_contracts
 	@echo "[OK] 6 cross-check 통과"
-
-# A4 prep — PASS-TO-PASS 회귀 그물.
-# A4 본문 PR 직전 1회 통과 보장. 미포함:
-#   - alembic downgrade -1 (사용자 결정으로 제외 — 1차 시연 forward-only)
-#   - docker compose 부트 5분 idle sanity (사용자 결정으로 제외)
-#   - make import-cso (5분 소요 — A4 PR baseline 직전 1회 manual 실행)
-ci-regression-net:
-	docker compose exec -e TESTING=1 api pytest tests -v --tb=short
-	docker compose exec api ruff check app/ scripts/
-	docker compose exec api mypy --strict app/
-	python -m scripts.check_api_docs
-	python -m scripts.check_schema
-	python -m scripts.check_env
-	python -m scripts.check_error_codes
-	python -m scripts.check_redis_keys
-	python -m scripts.check_contracts
-	docker compose exec api alembic upgrade head
-	@echo "[OK] PASS-TO-PASS 회귀 그물 green"
 
 stop:
 	docker compose stop

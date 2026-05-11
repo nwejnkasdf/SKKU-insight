@@ -98,6 +98,7 @@ class BroadInterest(Base):
 
 12 행 시드. cso_cluster_label은 `algorithms/cso-mapping.md`의 12 클러스터 라벨 (AI, Systems, ...).
 `cso_seed_topic_id` 는 cso-mapping.md SEEDS dict 의 cluster→full label 매핑을 시드 시점에 cso_topic FK 로 resolve.
+**`description` 한국어 본문 + `name` 12행 시드 데이터의 SOR 은 [`backend/app/config/broad_interests.toml`](../../backend/app/config/broad_interests.toml)** (A3 도입). `scripts/import_cso.py` 가 CSO 임포트 직후 본 toml 을 읽어 12 행을 `ON CONFLICT (name) DO UPDATE` 로 시드.
 
 ### CSOTopic
 
@@ -107,11 +108,31 @@ class CSOTopic(Base):
     cso_topic_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     label: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     uri: Mapped[str] = mapped_column(String(500), unique=True, nullable=False)
+    # parent_topic_id — **deprecate 예정** (A3 도입, 후속 0003 alembic 에서 drop).
+    # CSO 는 본래 DAG (다중 부모 허용) 인데 단일 FK 라 부분 정보만 보존 (BFS 첫 부모).
+    # 신규 코드는 cso_topic_parent M:N 테이블을 SOR 로 사용. 본 컬럼은 backward-compat·debug 용도.
     parent_topic_id: Mapped[UUID | None] = mapped_column(ForeignKey("cso_topic.cso_topic_id", ondelete="SET NULL"))
     cluster_labels: Mapped[list[str]] = mapped_column(ARRAY(String(40)), default=list)
 ```
 
 인덱스: `(parent_topic_id)`, `GIN(cluster_labels)`. 그래프 사이클 금지 (앱 레벨 검증).
+
+### CSOTopicParent
+
+> CSO 다중 부모 (DAG) 보존용 M:N 연결 테이블. A3 (cso-topic engine) 도입 — alembic 0002 신규.
+
+```python
+class CSOTopicParent(Base):
+    __tablename__ = "cso_topic_parent"
+    cso_topic_id: Mapped[UUID] = mapped_column(
+        ForeignKey("cso_topic.cso_topic_id", ondelete="CASCADE"), primary_key=True,
+    )   # 자식
+    parent_cso_topic_id: Mapped[UUID] = mapped_column(
+        ForeignKey("cso_topic.cso_topic_id", ondelete="CASCADE"), primary_key=True,
+    )   # 부모
+```
+
+PRIMARY KEY (`cso_topic_id`, `parent_cso_topic_id`). 인덱스: `(parent_cso_topic_id)` (부모 → 자식 lookup 가속). 사이클 금지 (앱 레벨 검증 — `build_cso_graph` startup 시 `nx.is_directed_acyclic_graph` 보장). 본 테이블이 **NetworkX 그래프 빌드의 SOR**이며, `CSOTopic.parent_topic_id` 는 무시한다 (A3 결정 18). idempotent INSERT: `ON CONFLICT DO NOTHING`.
 
 ### DynamicLeafTopic
 

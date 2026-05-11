@@ -62,7 +62,7 @@ plugins = ["pydantic.mypy"]
 disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
-module = ["jose.*", "bcrypt.*", "slowapi.*", "rq.*", "rq_scheduler.*"]
+module = ["jose.*", "bcrypt.*", "slowapi.*", "rq.*", "rq_scheduler.*", "networkx", "networkx.*"]
 ignore_missing_imports = true
 
 # redis.asyncio 가 sync/async dual signature 라 mypy 가 `Awaitable[T] | T` 로

@@ -63,6 +63,8 @@ release/
 
 # --- LLM·모델 weights ---
 models/
+!backend/app/db/models/
+!backend/app/db/models/**
 *.bin
 *.safetensors
 *.pt

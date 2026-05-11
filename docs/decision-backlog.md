@@ -104,6 +104,24 @@
 - **default**: **PNG 추출 안 함**. `ux/wireframes.md` 의 화면별 상태 머신 Mermaid + 정상/빈/오류 매트릭스를 단일 권위 소스로 사용. A9는 본 Mermaid·매트릭스만 보고 6개 화면을 구현한다.
 - **stub**: 추후 발표용 슬라이드에 와이어프레임 이미지가 필요하면 `unzip SKKU_InSight_SRS.docx -d /tmp/srs-docx && cp /tmp/srs-docx/word/media/* assets/` 로 추출 (본 저장소 외부 한정).
 
+### P1-9. NetworkX `find_adjacent` 그래프 단계 cap 부재 (자체감사 B-2)
+- **원본**: A3 자체감사 (opus 4.7) — `backend/app/topic/graph.py:103-126`
+- **현황**: `cso_service` 단계에서 `[:MAX_TOPICS_IN_RESPONSE=500]` 슬라이스 — 응답 cap 적용. 그러나 `find_adjacent` 그래프 BFS 자체는 cap 없음. hops=3 + AI cluster 루트 같은 densely-connected seed 시 visited set 수천 노드 팽창 가능. Latency · 메모리 사용 예측 불가.
+- **default action**: 1차 시연 (10-20 사용자) 영향 작음. 운영 단계에서 `find_adjacent(g, seed, hops, max_visited=2*MAX_TOPICS_IN_RESPONSE)` 도입 후 early break.
+- **시점**: 운영 진입 직전. backlog.
+
+### P1-11. `/topics/cso/clusters` cache miss single-flight (Codex 2nd 감사 B-2)
+- **원본**: `backend/app/topic/cso_service.py:get_clusters`
+- **현황**: Redis cache invalidate 직후 동시 호출 시 모두 cache miss → 동시 DB JOIN + SETEX → thundering herd. 12 행 JOIN 이라 시연 Critical 아님.
+- **default action**: `RedisKey.cluster_cache_lock()` `SET lock NX EX 5` 도입. lock 보유자만 DB → SETEX. 미보유자는 await cache + 재확인 후 응답. 운영 환경 진입 시 도입.
+- **시점**: 운영 단계 (10-20 명 시연 영향 없음).
+
+### P1-10. CSO 재임포트 후 Redis cache invalidate 실패 정책 (자체감사 C-1)
+- **원본**: A3 자체감사 — `backend/scripts/import_cso.py:144-145`
+- **현황**: `import_cso.py` finally 에서 `RedisKey.cso_clusters_cache()` DEL. 실패 시 warn + 무시 — 24h TTL 후 자연 만료. `cache.py:33` prefix `v1` versioning 으로 부분 완화.
+- **default action**: invalidate 실패 시 3회 backoff retry. 모두 실패 시 RuntimeError (운영자가 인지하고 수동 invalidate). 또는 `RedisKey.cso_clusters_cache()` versioning 을 `v2` 로 bump.
+- **시점**: 운영 단계 결정.
+
 ### P1-8. vLLM의 DoRA 어댑터 호환성 + A.X-4.0-Light 로드 검증 — **해결됨 (2026-05-11)**
 - **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
 - **결정**: stub 옵션 (a) 채택. **DoRA scaling을 사전에 base에 merge → vLLM이 일반 base로 로드** (multi-LoRA serving 미사용). vLLM의 DoRA 직접 지원 여부와 무관하게 동작. base 모델은 [skt/A.X-4.0-Light](https://huggingface.co/skt/A.X-4.0-Light) 공식 모델 카드의 vLLM 서빙 예시로 호환성 가정.
@@ -143,6 +161,84 @@
 - **원본**: `algorithms/clickbait-integration.md:107` 영역 (해소되어 마커 정리됨)
 - **결정**: P0-1 해결과 함께 자연 해소. 모듈 위치 = `clickbait_module/`. 서빙 엔진 = vLLM. 호스팅·transport는 운영 결정. 자세히는 P0-1 + P1-8 + P2-7.
 
+### P2-8. `list_traces.leaf_count` N+1 쿼리 (자체감사 B-1)
+- **원본**: `backend/app/topic/trace_service.py:124-144`
+- **현황**: `for r in page:` 루프 안 trace 마다 count_stmt 별도 실행. limit=20 시 20 round-trip.
+- **default action**: `select(UserCSOTraversal.trace_id, func.count(...)).group_by(trace_id)` 한 번 batch. 또는 `array_overlap` GIN 인덱스 활용.
+- **시점**: A7 데이터 채워진 후 응답 latency 측정 결과 따라 결정.
+
+### P2-9. `_summarize_topics` 정렬 비결정성 (자체감사 B-3)
+- **원본**: `backend/app/topic/cso_service.py:181-191`
+- **현황**: `select(...).where(in_(topic_ids))` DB 반환 순서 미지정. adjacent / descendants 응답 topics list 호출마다 다른 순서 가능 — UI 깜빡임.
+- **default action**: `order_by(CSOTopic.label)` 또는 입력 순서 유지 `case(...)` 추가.
+- **시점**: A9 (electron-client) UI 정렬 룰 확정 후.
+
+### P2-10. `--reset` 후 stale `user_cso_traversal.path` UUID (자체감사 B-5)
+- **원본**: `backend/app/topic/cso_importer.py:283-294 reset_cso_tables`
+- **현황**: `user_cso_traversal.path` 는 ARRAY[UUID] (FK 없음). `--reset` 후 cso_topic row 삭제 → path UUID 가 stale reference. `_lookup_labels` fallback `str(pid)` UI 노출.
+- **default action**: `--reset` 진행 전 prompt 확인 + 동시에 `UPDATE user_cso_traversal SET status='archived'`. 또는 `--reset --traversal` 명시 플래그.
+- **시점**: 운영 단계 (시연은 traversal 비어 있어 영향 없음).
+
+### P2-11. `find_equivalents` 단방향 매칭 (자체감사 B-7)
+- **원본**: `backend/app/topic/graph.py:143-147`
+- **현황**: `g[seed_id].items()` 가 outgoing edge 만. equiv 가 `a→b` 단방향 저장 시 `find_equivalents(b)` 빈 응답. 1차 PRED_REL 미사용 (cso_importer.py:108 무시) — latent bug.
+- **default action**: `out_edges` + `in_edges` 양쪽 검사 (또는 import 시 equiv 양방향 엣지 추가).
+- **시점**: relatedEquivalent 활성화 시 (P3).
+
+### P2-12. CSO importer 단일 transaction WAL 부담 (자체감사 B-9)
+- **원본**: `backend/app/topic/cso_importer.py:113-152`
+- **현황**: Pass 1 (14k INSERT) + Pass 2 (14k UPDATE + 14k+ M:N INSERT) 모두 같은 transaction. `await session.commit()` 마지막 한 번. WAL · undo log 압박.
+- **default action**: Pass 1 commit → Pass 2 별도 transaction. 또는 chunk 단위 (1000 row) commit.
+- **시점**: 임포트 시간 측정 후 5분 SLA 위배 시 또는 운영 환경.
+
+### P2-13. CSO graph cycle 영향 노드 관찰성 (자체감사 B-10)
+- **원본**: `backend/app/topic/graph.py:80-94 verify_cso_import`
+- **현황**: cycle 발견 시 첫 cycle 의 5 노드 미리보기만 WARN log. cycle 멤버 전체 list / prometheus metric 미노출 → 운영자가 영향 노드 파악 어려움.
+- **default action**: cycle 발견 시 영향받는 노드 list 를 structlog binding + cycle metric 노출. 또는 cycle 멤버 cluster_labels 일시 제외.
+- **시점**: 운영 단계 monitoring 도입과 함께.
+
+### P2-14. `CSO_DOWNLOAD_TIMEOUT_SECONDS` env 노출 (자체감사 C-2)
+- **원본**: `backend/app/topic/cso_importer.py:72`
+- **현황**: httpx.stream timeout=60.0 hardcoded. 캠퍼스 회선 5s 이내지만 슬로우 회선 + ssl handshake 시 부족 가능.
+- **default action**: BaseSettings 필드 `CSO_DOWNLOAD_TIMEOUT_SECONDS=60` 노출 (`.env.example` + `env-vars.md` 동시). 또는 hardcoded 유지.
+- **시점**: 운영 회선 측정 후.
+
+### P2-16. `--reset` 후 DynamicLeafTopic.cso_topic_ids 빈 배열 (Codex 감사 B-5)
+- **원본**: `backend/app/topic/cso_importer.py:306 reset_cso_tables` 부작용 (A-2 fix 의 trade-off)
+- **현황**: Codex Critical A-2 fix 가 RESTRICT FK 위반을 막기 위해 `dynamic_leaf_topic_cso_topic` 먼저 DELETE → 기존 DynamicLeafTopic row 의 `cso_topic_ids` 가 leaf endpoint 응답에서 빈 배열로 반환. leaf 자체는 archive 안 됨.
+- **default action**: `--reset` 진행 전 명시 경고 + 영향받는 leaf 수 카운트. 또는 `--reset` 가 모든 DynamicLeafTopic.status='archived' bulk update. 또는 `--reset --leaves` 명시 플래그로 leaf 까지 wipe.
+- **시점**: A7 머지 후 leaf 데이터 채워질 때. 운영자가 `--reset` 호출 전.
+
+### P2-17. inspect.getsource 정적 검증 → DB fixture 통합 테스트 (Codex 감사 E)
+- **원본**: `backend/tests/topic/test_audit_regressions.py` A-1·A-2·B-6·Codex Critical 회귀 테스트
+- **현황**: 정적 source inspection 패턴 (`inspect.getsource + 키워드 검색`) 이 변수명 변경·주석 삽입·문자열 보간 등으로 우회 가능. 동적 mock 기반 (A-3·A-4·B-2·B-3·B-4) 보다 회귀 신뢰성 낮음.
+- **default action**: A7 (leaf 데이터) 머지 후 실제 DB fixture 로 active/stale/merged leaf 4개 삽입 → list_traces.leaf_count == len(get_trace_detail.leaves) 통합 검증. cso_topic_parent 다중 부모 시드 → CSOTopicDetail.parents 다중 검증. docker compose 환경 (A11).
+- **시점**: A11 (test-ci) 또는 A7 머지 직후.
+
+### P2-18. CSO importer `parent_topic_id` row-by-row UPDATE → bulk (Codex 2nd 감사 B-4)
+- **원본**: `backend/app/topic/cso_importer.py:182-205`
+- **현황**: 14k row 의 `parent_topic_id` 가 개별 `await session.execute(update(...))` 로 처리 — 단일 transaction 내에서 14k round-trip.
+- **default action**: `UPDATE cso_topic AS c SET parent_topic_id = v.parent FROM (VALUES (...)) AS v(id, parent) WHERE c.cso_topic_id = v.id` bulk UPDATE. 또는 CASE 표현식 1회 호출.
+- **시점**: import 시간 측정 후 5분 SLA 위배 시 (P2-12 단일 transaction WAL 부담 과 함께 운영 진입 전).
+
+### P2-19. docker-compose `cso_cache` volume 미선언 (Codex 2nd 감사 B-5)
+- **원본**: `docker-compose.yml:123-125` (현재 `pg_data`, `redis_data` 만 선언)
+- **현황**: 컨테이너 재시작 시 `/app/.cache/cso/CSO.3.4.csv` 손실 → `make import-cso` 재실행 시 ~50MB CSO 재다운로드. 시연 환경엔 영향 없으나 운영자 불필요한 트래픽.
+- **default action**: docker-compose.yml `volumes:` 섹션 + api service `volumes:` 에 `cso_cache:/app/.cache/cso` 추가. 또는 docs 를 "재시작 시 재다운로드" 로 명시.
+- **시점**: 운영 단계 또는 docs drift fix.
+
+### P2-20. inspect.getsource 정적 audit test → DYNAMIC 전환 (Codex 2nd 감사 E)
+- **원본**: `backend/tests/topic/test_audit_regressions.py` 의 정적 검증 6 테스트
+- **현황**: file read · inspect.getsource 패턴 (Codex Critical, B-1, B-3, B-4, A-1, A-2) 가 코드 refactor 시 false positive/negative 위험. 본 라운드에 cache hit 11 cluster bypass (Codex 2nd Critical) 는 정적 테스트가 통과시켰음 (실제 새 dynamic 테스트가 발견). 동적 (HTTPException 검증, Pydantic introspection, AsyncMock) 보다 신뢰성 낮음.
+- **default action**: A11 (test-ci) 단계에서 DB fixture 통합 테스트로 모두 교체. e.g. active/stale leaf 4개 삽입 → `len(get_trace_detail.leaves) == list_traces.leaf_count` 통합 검증. 본 라운드는 cache hit 부분만 DYNAMIC 으로 전환 완료.
+- **시점**: A11 머지.
+
+### P2-15. UUID v7 (time-ordered) cursor pagination (자체감사 C-3)
+- **원본**: `backend/app/topic/leaf_service.py / trace_service.py` cursor
+- **현황**: leaf_id / trace_id 가 UUID v4 — cursor tie-break 시 lexicographic 순서 (안전하지만 의미 없음). v7 (time-ordered) 사용 시 더 자연 정렬.
+- **default action**: 1차 시연 UUID v4 유지. M4 발표 후 v7 도입 검토 — 모든 모델 PK default 일괄 변경.
+- **시점**: M4 후속.
+
 ### P2-7. vLLM 기반 추론에서 next-token "0"/"1" logprob 추출 방식 — **해결됨 (2026-05-11)**
 - **원본**: `algorithms/clickbait-integration.md` §서빙 엔진(vLLM)
 - **결정**: `SamplingParams(max_tokens=1, logprobs=K, temperature=0.0)` greedy 추론 후 첫 번째 생성 토큰의 logprob 분포에서 id0=56, id1=57 추출 → 2-class softmax. K=20 default(env `LOGPROBS_TOPK`).
@@ -156,8 +252,8 @@
 | 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
-| P1 | 8 (해결 1, 활성 7 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
-| P2 | 7 (해결 2, 활성 5) | (없음) | 후속 폴리시 단계 |
+| P1 | 11 (해결 1, 활성 10 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
+| P2 | 20 (해결 2, 활성 18 — A3 자체감사 8 + Codex 1st 2 + Codex 2nd 3) | (없음) | 후속 폴리시 단계 |
 | C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B) | 32 (해결 32 — C-2 부분 해소, C-6~32 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex v1 + multi-worker + 옵션 B + codex v2 + codex v3 로 27건 해결 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**

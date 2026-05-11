@@ -1,7 +1,7 @@
 # SKKU InSight — A2 Phase 0b Makefile.
 # 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
 
-.PHONY: help dev demo migrate create-admin reset-password test lint check-all stop down clean
+.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all stop down clean
 
 help:
 	@echo "주요 타깃:"
@@ -9,6 +9,7 @@ help:
 	@echo "  make demo           - dev + 데모용 cron 더 자주 (COLLECTION_CRON=COLLECTION_CRON_DEMO)"
 	@echo "  make migrate        - alembic upgrade head (api 컨테이너 안에서)"
 	@echo "  make create-admin   - AdminUser 부트스트랩 INSERT"
+	@echo "  make import-cso     - CSO 3.4 임포트 (cso_topic ~14k + broad_interest 12) — A3"
 	@echo "  make reset-password EMAIL=user@x NEW=newpw - 사용자 비번 강제 변경 (P2-5)"
 	@echo "  make test           - pytest backend/tests (docker compose 실서비스 사용)"
 	@echo "  make lint           - ruff + mypy --strict"
@@ -29,6 +30,11 @@ migrate:
 
 create-admin:
 	docker compose exec api python -m scripts.create_admin
+
+import-cso:
+	# A3 CSO 3.4 임포트 — ~14k 노드 + broad_interest 12 행 시드 (decision-backlog P1-5).
+	# --refresh 플래그를 추가하려면: make import-cso ARGS=--refresh
+	docker compose exec api python -m scripts.import_cso $(ARGS)
 
 reset-password:
 	@if [ -z "$(EMAIL)" ] || [ -z "$(NEW)" ]; then echo "EMAIL=... NEW=... 필요"; exit 1; fi

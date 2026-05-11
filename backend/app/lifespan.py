@@ -24,6 +24,7 @@ from app.config import get_settings
 from app.db.engine import dispose_engines, get_engine
 from app.middleware.structlog_mask import mask_secrets
 from app.redis import close_redis, get_redis
+from app.topic.lifespan import topic_shutdown, topic_startup
 
 
 @asynccontextmanager
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 f"Redis 연결 실패 db={db_name}: {exc}"
             ) from exc
     logger = structlog.get_logger("lifespan")
+    # A3: NetworkX CSO 그래프 빌드 + app.state.cso_graph 등록 (결정 6).
+    # cso_topic 비어 있으면 빈 그래프 등록 + WARN (test 환경 호환). verify 는 skip.
+    await topic_startup(app)
     logger.info(
         "lifespan startup ok",
         provider=settings.LLM_PROVIDER.value,
@@ -54,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await topic_shutdown(app)
         await dispose_engines()
         await close_redis()
         logger.info("lifespan shutdown ok")

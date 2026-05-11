@@ -28,38 +28,40 @@
 ├── CLAUDE.md                          # AGENTS.md로 redirect 한 장
 ├── SKKU_InSight_SRS.{md,docx,pdf}     # 원본 SRS v0.3 (보존)
 ├── docker-compose.yml                # ✅ A2: 5 서비스 (postgres/redis/api/worker/admin-console)
-├── Makefile                          # ✅ A2: dev/migrate/create-admin/test/lint/check-all/clean
-├── .env.example                      # ✅ A2: env-vars.md 골격 + NAVER_CLEANUP_CRON + UVICORN_WORKERS
+├── Makefile                          # ✅ A2 + A3 (import-cso): dev/migrate/create-admin/import-cso/test/lint/check-all/clean
+├── .env.example                      # ✅ A2 + A3 (CSO_DOWNLOAD_URL): env-vars.md 골격 + NAVER_CLEANUP_CRON + UVICORN_WORKERS + CSO_DOWNLOAD_URL
 ├── docs/                              # 산출 문서 54+ 파일
 │   ├── README.md                      # docs 인덱스
 │   ├── decisions.md                   # 결정 매트릭스 (SOR)
-│   ├── decision-backlog.md            # P0/P1/P2 + C-급 (A2 후 32건 해소)
+│   ├── decision-backlog.md            # P0/P1/P2 + C-급 (A2 후 32 해소 / A3 자체+Codex 감사 11 신규 backlog)
 │   ├── srs/                           # SRS 분할본 10개
 │   ├── sdd/                           # 9: 아키텍처·데이터 흐름·배포·모듈 경계·기술 스택·동시성·API 규약·계약·에이전트 오케스트레이션
 │   ├── api/        (8)                # auth/consent/onboarding/topics/interest/collection/recommendation/admin
 │   ├── algorithms/ (7)                # interest-bayesian/cso-topic-traversal/leaf-topic-lifecycle/recommendation-ranking/cold-start/clickbait-integration/cso-mapping
-│   ├── data/       (5)                # schema/erd/sources-registry/cso-import/seed-personas
-│   ├── ops/        (5)                # docker-compose/env-vars/ci-cd/admin-bootstrap/runbooks
+│   ├── data/       (5)                # schema/erd/sources-registry/cso-import/seed-personas — A3: cso-import idempotency · schema CSOTopicParent §
+│   ├── ops/        (5)                # docker-compose/env-vars/ci-cd/admin-bootstrap/runbooks — A3: env-vars CSO_DOWNLOAD_URL
 │   ├── security/   (5)                # auth-flow/token-handling/rate-limiting/password-policy/threat-model
 │   └── ux/         (4)                # wireframes/ui-states/i18n/client-behaviors
-├── backend/                          # ✅ A2 본문 완료 (PR #7)
+├── backend/                          # ✅ A2 본문 + A3 cso-topic 완료
 │   ├── Dockerfile                    # python:3.12-slim
-│   ├── pyproject.toml                # FastAPI + Pydantic + SQLAlchemy async + bcrypt + rq + rq-scheduler + slowapi + structlog + httpx + networkx
+│   ├── pyproject.toml                # FastAPI + Pydantic + SQLAlchemy async + bcrypt + rq + rq-scheduler + slowapi + structlog + httpx + networkx (A3 mypy override 추가)
 │   ├── .env.example                  # backend 단독 부트용 (compose 미사용 시)
-│   ├── alembic.ini + alembic/env.py + versions/0001_initial_a2_tables.py
+│   ├── alembic.ini + alembic/env.py + versions/{0001_initial_a2_tables.py, 0002_a3_cso_traversal_leaf_tables.py}
 │   ├── app/
-│   │   ├── main.py + lifespan.py + redis.py + config.py + contracts.py
-│   │   ├── db/{base, engine, session, models/*}        # 8 모델 (User/AdminUser/UserConsent/UserCSOTraversal/BroadInterest/CSOTopic/Source/SourcePolicy)
+│   │   ├── main.py + lifespan.py + redis.py + contracts.py
+│   │   ├── config/                                       # ✅ A3 패키지화: __init__.py (BaseSettings + CSO_DOWNLOAD_URL) + broad_interests.toml (12 entry 시드 SOR)
+│   │   ├── db/{base, engine, session, models/*}          # ✅ 11 모델 — A2 8 (User/AdminUser/UserConsent/UserCSOTraversal/BroadInterest/CSOTopic/Source/SourcePolicy) + A3 3 (CSOTopicParent/DynamicLeafTopic/DynamicLeafTopicCSOTopic)
 │   │   ├── security/{password, jwt, rate_limit, consent_cache, idempotency, deps}  # + common_passwords.txt
-│   │   ├── auth/, consent/, onboarding/, admin/        # 17 endpoint 본문 (service + router)
-│   │   ├── topic/, interest/, collection/, recommendation/  # stub 유지 (A3/A6/A4/A8)
+│   │   ├── auth/, consent/, onboarding/, admin/          # 17 endpoint 본문 (service + router)
+│   │   ├── topic/                                        # ✅ A3 본문 완료 — graph/mapping/cso_importer/cache/lifespan/cso_service/leaf_service/trace_service/router/schemas (9 파일) — 7 endpoint 본문 + /documents NotImplementedError (A4·A8 의존)
+│   │   ├── interest/, collection/, recommendation/       # stub 유지 (A6/A4/A8)
 │   │   ├── middleware/{request_id, jwt_auth, consent_gate, exception_handler, structlog_mask}
 │   │   ├── llm_provider/{protocol, mock, openai, anthropic, openrouter, codex_oauth, _concurrency}  # Redis 분산 semaphore
 │   │   ├── worker.py + scheduler.py + worker/jobs/{account_deletion(완료), cold_start/naver_cleanup/collection/interest_decay/merge_evaluation(stub)}
-│   ├── scripts/{create_admin, reset_password, export_openapi}
-│   └── tests/{conftest + security/admin/llm_provider unit + auth/consent integration + fixtures/mock_llm/}
+│   ├── scripts/{create_admin, reset_password, export_openapi, import_cso}   # ✅ A3: import_cso CLI (--reset/--refresh/--dry-run, 단일 transaction)
+│   └── tests/{conftest + security/admin/llm_provider unit + auth/consent integration + topic/{test_mapping, test_graph, test_importer, test_audit_regressions, fixtures/small_cso.csv} + fixtures/mock_llm/}    # ✅ A3: 65 tests (45 + 12 자체감사 + 6 Codex 1st + 2 Codex 2nd)
 ├── scripts/                          # ✅ A2: 6 cross-check (api_docs / schema / env / error_codes / redis_keys / contracts) + _common.py
-├── prompts/                          # 에이전트별 kickoff prompts (A1 ✅ / A2-stub ✅ / A2 ✅ / 나머지 ⬜)
+├── prompts/                          # 에이전트별 kickoff prompts (A1 ✅ / A2-stub ✅ / A2 ✅ / A3 ✅ / 나머지 ⬜)
 ├── clickbait_module/                 # ✅ vLLM + DoRA 분류기 자체 서비스 (P0-1 해결)
 └── (이하 후속 에이전트가 만듦)
     client/  admin-console/  .github/
@@ -130,7 +132,7 @@
 | 0a (게이트) | **A1 docs-bootstrap** | 본 `docs/` 54+ 파일 | ✅ 완료 |
 | 0a (게이트) | **A2-stub** | `backend/app/contracts.py`, 53 endpoint signature stub, Pydantic schemas, `scripts/export_openapi.py` | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
 | 0b | **A2 backend-foundation** | A2-stub 본문 17 endpoint + Alembic 1번 migration (8 테이블) + 보안·동시성·LLM·worker·scheduler·middleware·tests·docker-compose·Makefile·6 cross-check | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 35건 결함 해소, `ruff`·`mypy --strict`·`pytest`·6 check 통과) |
-| 0b | **A3 cso-topic** | CSO 3.4 임포트, NetworkX 캐시, BroadInterest 12행 시드, 그래프 탐색 API | 🟡 다음 작업 |
+| 0b | **A3 cso-topic** | CSO 3.4 임포트 (`scripts/import_cso.py`) + NetworkX 메모리 캐시 + BroadInterest 12행 시드 (`config/broad_interests.toml`) + 7 endpoint 본문 (`/documents` 1개만 A4·A8 의존 NotImplementedError) + alembic 0002 (cso_topic_parent · dynamic_leaf_topic · dynamic_leaf_topic_cso_topic) + ORM 11 모델 | ✅ 완료 (5 PR-stack: docs-drift 70f077d + A2 ORM hotfix d1663d7 + A3 본문 645d450 + 자체감사 fix 57ef185 + Codex 감사 fix ba10e10 + Codex 재감사 fix 8bb7062 — `ruff`·`mypy --strict 100 files`·`pytest 65/65`·6 check 통과. 3 라운드 독립 감사 Critical 6 fix + Suggested 9 fix + 11 신규 backlog) |
 | 1 | **A4 collection** | 소스 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버 BS4), CollectionJob, jitter, dedup | ⬜ |
 | 1 | **A5 clickbait** | 사용자 제공 DoRA 모듈 wrap | ✅ 외부 서비스 ([PR #2](https://github.com/nwejnkasdf/SKKU-insight/pull/2)) / 🟡 backend 통합 대기 |
 | 1 | **A6 interest-bayesian** | 행동 로그 API, atomic UPSERT, active day 기반 시간 감쇠, 1-hop propagation | ⬜ |
@@ -199,4 +201,4 @@ cd client && npm start
 4. 영향 큰 변경은 [`docs/decision-backlog.md`](docs/decision-backlog.md)에 기록.
 5. `docs/sdd/contracts.md` 변경 시 `backend/app/contracts.py` PR로 사용자 승인 받음.
 
-마지막 갱신: 2026-05-11 (Phase 0b A2 본문 완료 — PR #7. 17 endpoint 본문 + 인프라 + 35건 C-급 결함 해소. `ruff` · `mypy --strict` · `pytest` · 6 cross-check 통과).
+마지막 갱신: 2026-05-11 (Phase 0b A3 cso-topic 완료 — 5 PR-stack. CSO 3.4 임포트 + NetworkX 그래프 + 7 endpoint 본문 + 11 ORM 모델 + alembic 0002. 3 라운드 독립 감사 (Opus 4.7 자체 + Codex GPT-5.5 1st·2nd) — Critical 6 fix + Suggested 9 fix + 11 신규 backlog. `ruff` · `mypy --strict 100 files` · `pytest 65/65` · 6 cross-check 통과. **다음 작업**: A4 collection 또는 A6 interest-bayesian.

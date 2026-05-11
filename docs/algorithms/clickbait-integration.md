@@ -2,11 +2,13 @@
 
 본 파일은 사용자 보유 DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 탐지 모듈을 시스템에 통합하는 인터페이스 계약을 정의한다. 관련 FR: FR-30~34. 관련 NFR: NFR-07, NFR-09. 관리자 통계 API는 [`../api/admin.md`](../api/admin.md).
 
+> **v13 라운드 — 발동 조건 변경 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 default 발동 비활성화. **1차 시연 default = 비활성**. 사용자가 onboarding 또는 설정에서 "News 소스 활성화" 를 명시 선택한 경우에만 LLM 검색 응답에 post-filter 로 동작. clickbait_module 코드·외부 서비스·인터페이스 계약은 모두 보존 (옵션 활성화 경로 그대로). FR-30~34 식별자는 SRS 보존 — 본 박스가 v13 발동 조건 갱신.
+
 ## 결정
 
 - 모듈은 자체 FastAPI 서비스로 운영. **서빙 엔진 = vLLM** (DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching으로 동시 요청 처리).
 - **호스팅 위치와 transport는 운영 결정**. 백엔드는 `CLICKBAIT_SERVICE_URL` env로 호출하므로 transport(docker internal / VPN / 공개 터널 등)와 호스팅(자체 도커 / 외부 GPU 등)에 무관.
-- **2차 문헌(테크 뉴스)** 수집 단계의 1차 정제에만 사용. 학술 소스, 빅테크 공식 채널은 통과시키지 않는다 (FR-25 본 SRS 근거: "뉴스/기사성 2차 문서").
+- **(v13 라운드 변경)** 발동 조건: 사용자가 News 소스 명시 활성화 시만. 학술/공식 검색 결과는 LLM 검색이 이미 1차 정제 → clickbait 호출 불필요.
 - 모듈 위치 = `clickbait_module/`. 가중치 호스팅 = HuggingFace Hub private repo. (P0-1 해결됨, [`../decision-backlog.md`](../decision-backlog.md))
 
 ## 인터페이스 계약

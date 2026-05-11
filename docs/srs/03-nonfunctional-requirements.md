@@ -61,3 +61,10 @@
 |---|---|
 | NFR-25 | 시스템은 외부 소스의 원문 전체를 무단 복제하지 않고 제목, 링크, 요약, 메타데이터 중심으로 저장해야 한다. |
 | NFR-26 | 시스템은 사용자 데이터 수집 목적, 저장 항목, 삭제 방법을 온보딩 및 설정 화면에서 안내해야 한다. |
+
+> **v13 라운드 NFR-25 정합 박스 (2026-05-11)** — A4 Topic-driven Pivot ([`decisions.md §10`](../decisions.md))으로 LLM tool-use 검색 모델 채택. LLM 검색 응답에 외부 원문 abstract 가 포함될 가능성을 다음 정책으로 차단:
+> - LLM 검색 prompt 에 instruction 포함: "각 결과의 abstract 는 원본 그대로 복사하지 말고, 본인 말로 1~2문장 요약하라 (≤200자)".
+> - `Document.abstract` 컬럼에 저장되는 값은 **LLM self-summary** 이며 외부 원문 직접 복제가 아님.
+> - publisher 정보 (domain·label) 는 `Document.extra` JSONB 에 metadata 로만 저장.
+> - URL 은 그대로 저장 (외부 원본 접근 경로 — 사용자가 클릭 시 fresh fetch).
+> - 본 정책으로 NFR-25 정합 유지. 추가 LLM 호출 (rewording) 불필요.

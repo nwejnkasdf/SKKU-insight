@@ -144,4 +144,15 @@ CSO 임포트 후 다음 체크 통과해야 함 (워크플로는 [`../data/cso-
 
 - 12 cluster seed가 모두 존재 (라벨 매칭)
 - 그래프에 사이클 없음 (`nx.is_directed_acyclic_graph(g)` for parent edges only)
-- DBLP/arXiv 카테고리 일부 샘플이 12 클러스터 중 하나에 매핑 가능
+- 다양한 CS 도메인 키워드 샘플(예: "deep learning", "distributed systems") 이 12 클러스터 중 하나에 매핑 가능
+
+## v13 라운드 — Document ↔ cso_topic 매핑 단순화 (2026-05-11)
+
+A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 **Document.title+abstract → cso_topic_id 매핑 알고리즘이 불필요**해짐. 사유:
+
+- 기존 v1~v12 디자인: A4 가 어댑터로 수집한 Document 의 title+abstract 를 LLM 또는 키워드 매칭으로 cso_topic_id 에 매핑 (분류 문제).
+- v13 디자인: A4 가 사용자 trace 의 active leaf 라벨을 LLM 검색 query 로 사용. **반환된 Document 는 이미 그 leaf 토픽에 부합** (검색 의도가 query). 따라서:
+  - `DocumentTopic.cso_topic_id` = leaf 의 부모 cso_topic (검색 시점에 결정)
+  - `DocumentTopic.confidence` = LLM 응답의 self-rated score (default 0.8) 또는 1.0 (검색 의도 일치)
+- 매핑 알고리즘 별도 구현 X. `app/collection/orchestrator.py` 가 검색 결과를 DocumentTopic 행으로 직접 변환.
+- 12 클러스터 매핑 (§클러스터 매핑) 은 그대로 — Document 가 속한 cso_topic 으로부터 cluster_labels 도출은 동일.

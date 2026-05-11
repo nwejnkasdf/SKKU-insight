@@ -18,8 +18,8 @@
 | 0a | A2-stub | [`00-A2-stub.md`](00-A2-stub.md) | 🟢 | `73f57e8` (PR #4 머지 2026-05-11) — backend/ 33 파일 + contracts.py SOR (13 enum + 39 ErrorCode + 14 RedisKey) + 53 endpoint stubs + docs drift 24건 fix |
 | 0b | A2 backend-foundation | [`01-A2-backend.md`](01-A2-backend.md) | 🟢 | [PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) (10 commit, 98 파일, +6,624 / -180). 17 endpoint 본문 + Alembic 1번 migration (8 테이블) + 보안·동시성·LLM·worker·scheduler·scripts/check_*.py 6종 + docker-compose 5 서비스 + 23 unit test. **35건 결함 해소** (decision-backlog C-2·C-6~C-32): codex review v1 7 + v2 8 + v3 3 + multi-worker 2 + 옵션 B 1 + mypy strict 26 + 자체 검수 8 + 초기 11. `ruff` · `mypy --strict` · `pytest 23/23` · 6 cross-check 모두 통과. 시연 부트: `cp .env.example .env → make dev → make migrate → make create-admin → make test` |
 | 0b | A3 cso-topic | [`02-A3-cso-topic.md`](02-A3-cso-topic.md) | 🟢 | **5 PR-stack** (commits 70f077d → 8bb7062): docs-drift + A2 ORM hotfix 8 모델 + A3 본문 + 자체감사 fix + Codex 감사 fix (1st + 2nd). `backend/app/topic/` 9 파일 (graph/mapping/cso_importer/cache/lifespan/cso_service/leaf_service/trace_service/router) + alembic 0002 (cso_topic_parent + dynamic_leaf_topic + dynamic_leaf_topic_cso_topic) + `backend/scripts/import_cso.py` + `backend/app/config/__init__.py` 패키지 + `broad_interests.toml` 12 entry + 7 endpoint 본문 (`/documents` 1개만 A4·A8 의존 NotImplementedError). **3 라운드 독립 감사** (Opus 4.7 자체 + Codex GPT-5.5 1st·2nd): Critical 6 fix + Suggested 9 fix + 11 신규 backlog (P1-9~11 / P2-16~20). tests/topic 65 tests (45 + 12 자체 + 6 Codex 1st + 2 Codex 2nd DYNAMIC). `ruff` · `mypy --strict 100 files` · `pytest 65/65` · 6 cross-check 통과. |
-| 1 | A4 collection | [`03-A4-collection.md`](03-A4-collection.md) | ⬜ | |
-| 1 | A5 clickbait | [`04-A5-clickbait.md`](04-A5-clickbait.md) | 🟢 외부 서비스 완료 / 🟡 backend 통합 대기 | clickbait_module/ + vLLM AsyncLLMEngine 작성 완료 (commit 4066b20). backend `app/clickbait_client/`는 A2+A4 완료 후 |
+| 1 | A4 collection | [`03-A4-collection.md`](03-A4-collection.md) | 🟡 docs pivot 정합 완료 / 본문 구현 대기 | **v13 라운드 pivot (2026-05-11)** — 6 source 어댑터 폐기 후 LLM tool-use 검색 단일 경로. prompt 재작성 완료. docs 정합 commit 대기. 본문 구현은 별도 세션. 자세히는 [`docs/decisions.md §10`](../docs/decisions.md) |
+| 1 | A5 clickbait | [`04-A5-clickbait.md`](04-A5-clickbait.md) | 🟢 외부 서비스 완료 / 🟡 backend 통합 default 비활성 | clickbait_module/ + vLLM AsyncLLMEngine 작성 완료 (commit 4066b20). **v13 라운드**: backend 통합은 1차 시연 default 비활성 — 사용자 News 소스 명시 활성화 시만 호출 |
 | 1 | A6 interest-bayesian | [`05-A6-interest-bayesian.md`](05-A6-interest-bayesian.md) | ⬜ | |
 | 2 | A7 leaf-lifecycle + traversal | [`06-A7-leaf-traversal.md`](06-A7-leaf-traversal.md) | ⬜ | |
 | 2 | A8 recommendation | [`07-A8-recommendation.md`](07-A8-recommendation.md) | ⬜ | |
@@ -67,7 +67,7 @@ all ──> A11, A12
 |---|---|
 | 0a (A2-stub) | OpenAPI YAML과 docs/api/*.md 일치 + client·admin codegen 1회 (30분) |
 | 0b (A2 + A3) | DB 스키마 ↔ alembic migration ↔ docs/data/schema.md 일치 + 인증 흐름 직접 호출 (30분) |
-| 1 (A4 + A5 + A6) | arXiv 1일치 fetch 결과 + 베이지안 단순 시뮬레이션 + DoRA 통합 (60분) |
+| 1 (A4 + A5 + A6) | **(v13 라운드)** LLM tool-use 1일치 검색 결과 + 베이지안 단순 시뮬레이션 + DoRA 통합 (Clickbait 는 News 소스 명시 활성화 케이스만, 60분) |
 | 2 (A7 + A8) | 시드 페르소나로 cold-start → 첫 대시보드 + trace 생성 검증 (90분) |
 | 3 (A9 + A10) | Electron 6 화면 + 시연 리허설 1회 (60분) |
 | 4 (A11 + A12) | AT 자동화 결과 + 발표 자료 (60분) |

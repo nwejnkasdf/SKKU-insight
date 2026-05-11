@@ -60,6 +60,7 @@
 | C-30. ConsentGate 가 JwtAuth 보다 먼저 실행 — privacy bypass | codex v2 #4 fix 에서 middleware add 순서를 `RequestId → JwtAuth → ConsentGate → CORS` 로 했으나 Starlette 은 마지막 add 가 가장 바깥 → 요청 흐름 `CORS → ConsentGate → JwtAuth → RequestId → endpoint`. ConsentGate 가 JwtAuth 보다 *먼저* 실행 → `request.state.user_id`/`aud` 미셋팅 → "user audience 만 검사" 가드가 false → 모든 protected endpoint 가 consent 검사 없이 통과. 올바른 add 순서: **ConsentGate(첫) → JwtAuth → RequestId → CORS(마지막)** → 요청 흐름 `CORS → RequestId → JwtAuth → ConsentGate → endpoint`. codex v3 review P1. | `app/main.py:create_app` |
 | C-31. ruff `F401` (미사용 import) + `RUF002` (× MULTIPLICATION SIGN) + `E402` | `make lint` (`ruff check app/ scripts/`) 가 미사용 import (admin/auth_service.UUID, lifespan.RedisDB, consent_gate.AsyncSession, onboarding/service.json, scripts/check_api_docs.Path, scripts/check_contracts.Path) 와 한글 docstring 의 `×` 곱셈 기호, `setup()` 후 import (E402) 로 실패. `--fix` 자동 제거 + `×→x` + `# noqa: E402` 추가. codex v3 review P2. | `app/`, `scripts/` 전반 |
 | C-32. mypy `--strict` 26건 위반 — `make lint` 깨짐 | codex v3 P2 #3 의 `dict|None` 외에도 다양한 strict 위반: ① Mapped[dict] bare generic (source.py, source_policy.py — `dict[str, Any]` 로 명시) ② `await redis.X()` 의 redis.asyncio dual sync/async sig (jwt.py 3건, onboarding/service.py 3건, lifespan.py 1건 — `# type: ignore[misc]`) ③ `getattr(settings, reg["cron_attr"])` reg dict 타입 추론 실패 (scheduler.py — `TypedDict _JobRegistration`) ④ `tuple_()` 인자 SQLAlchemy 표현식 강제 (users_service.py — `or_()`/`and_()` 명시 분기) ⑤ `base64.binascii` AttributeError (users_service.py — `import binascii` 직접) ⑥ Redundant cast (deps.py — 제거) ⑦ Unused `# type: ignore` (protocol.py, lifespan.py, onboarding/service.py — 제거) ⑧ AsyncSession annotation 변수 표기 (consent_gate.py — 제거) ⑨ `from rq import Connection` rq 2.x 제거됨 (worker/__main__.py — Queue/Worker 가 connection 인자 직접 받음) ⑩ structlog processor return type (structlog_mask.py — `Mapping[str, Any]`) ⑪ `sys.exit(main() or 0)` 패턴 (scheduler.py, worker/__main__.py — `main()` returns `int`) ⑫ `Returning Any from function declared to return bool` (jwt.py is_jti_denylisted, consent_cache.py — 명시 bool cast). 추가로 `pyproject.toml mypy override` 에 `redis.*` `disable_error_code=["misc"]` 추가. codex v3 P2 발견 후 자체 mypy 실행으로 26건 확장. | `backend/pyproject.toml` mypy override, 12 app/* 파일 |
+| C-33. v13 라운드 A4 Topic-driven Pivot (2026-05-11) | 프로젝트 원안("에이전트 기반 추천 시스템 하네스 + ChatGPT 같은 검색 활용 + 토픽이 먼저고 문서가 나중") 회복. 6 source 어댑터(arxiv/openalex/s2/dblp/RSS/네이버BS4) push-from-sources 모델 → LLM tool-use(web search) topic-driven pull 모델. Source 테이블 = sentinel 1행 `llm_search` + publisher Document.extra JSONB. Clickbait_module = default 비활성 (사용자 News 소스 명시 활성화 시만). NFR-25 정합 = LLM self-summary instruction. P1-6/P2-3/P2-4 무효 마킹. SRS FR-22~25 식별자 보존 + 명세 v13 라운드 해석. 사용자 결정 12건 (LLM provider toggle / query 구성 LLM 자율 / CollectionJob 단위 / Trigger / Jitter / Dedup / Document.PK / 실패 정책 / history pagination / topic/documents 본문 cross-cutting / Source 테이블 sentinel / clickbait 비활성). | `decisions.md §5·§8·§10`, `decision-backlog.md` (본 항목), `srs/02·03`, `algorithms/cso-mapping·clickbait-integration`, `data/sources-registry·schema`, `sdd/architecture`, `api/collection`, `prompts/03-A4-collection`, `AGENTS.md`, `README.md`, `docs/README.md`, `prompts/README.md` |
 
 ---
 
@@ -93,11 +94,10 @@
 - **stub**: `scripts/import_cso.py` 가 다운받은 N3/CSV의 hash를 `cso_metadata` 테이블에 기록 → 향후 버전 갱신 시 변경 감지.
 - **튜닝 트리거**: 신버전(3.5+) 출시 시 `CSO_DOWNLOAD_URL`만 교체 후 `make import-cso --refresh`.
 
-### P1-6. 네이버뉴스 Document 야간 정리 잡 정책
+### P1-6. 네이버뉴스 Document 야간 정리 잡 정책 — **무효 (v13 라운드 pivot, 2026-05-11)**
 - **원본**: `data/schema.md:352`
-- **default**: 매일 02:00 KST cron. 모든 토픽 매핑이 사라지고 `created_at` 으로부터 30일 경과한 `content_type=tech_news` Document는 삭제. SRS의 NFR-25 (외부 원문 무단 복제 금지) 정합.
-- **stub**: `workers/cleanup/naver_news_cleanup.py` 에 위 룰 구현. `COLLECTION_CRON` 과 별도 `NAVER_CLEANUP_CRON=0 17 * * *` (UTC) 환경변수.
-- **A2 (2026-05-11) 부분 완료**: `backend/app/scheduler.py`에 rq-scheduler cron job stub `naver_cleanup_job`을 `NAVER_CLEANUP_CRON` env로 등록. 함수 본문은 `raise NotImplementedError("A4에서 구현")`. `NAVER_CLEANUP_CRON`은 `docs/ops/env-vars.md` 표 + `.env.example`에도 정식 카탈로그. **잔여**: A4가 본문 구현.
+- **무효 사유**: v13 라운드 A4 pivot 으로 NaverBS4 어댑터 폐기. 네이버뉴스 Document 자체가 시스템에 진입하지 않으므로 정리 잡 불필요.
+- **잔여 처리**: `backend/app/scheduler.py` 의 `naver_cleanup_job` 등록 제거 또는 비활성. `NAVER_CLEANUP_CRON` env 는 `.env.example` / `env-vars.md` 에서 폐기 마킹. **본 항목은 closed.**
 
 ### P1-7. SRS docx 와이어프레임 PNG 추출 경로
 - **원본**: 본 정리 작업에서 신규 식별. SRS 분할 파일과 `ux/wireframes.md` 의 PNG 링크 부재 안내(이미 본 정리 작업으로 박스 추가됨).
@@ -142,15 +142,13 @@
 - **default action**: A12가 시드 스크립트 1회 실행 후 생성된 Document ID를 `scripts/fixtures/seed_documents.json` 에 캡처해 시연 재현성 확보.
 - **시점**: A12 작업 + A11 (test-ci) 가 동일 fixture 사용.
 
-### P2-3. 빅테크 RSS URL 검증
+### P2-3. 빅테크 RSS URL 검증 — **무효 (v13 라운드 pivot, 2026-05-11)**
 - **원본**: `data/sources-registry.md` 의 `# TODO: verify URL` 약 22개
-- **default action**: A4가 부트 시 `python -m app.source_adapters.verify_urls` 를 실행해 각 RSS의 200 응답 + `<rss>` 또는 `<feed>` root tag 존재를 검증. 실패 시 `enabled=false` 자동 마킹 + 관리자 콘솔 알림. 마커는 검증 통과한 항목부터 제거.
-- **시점**: A4 작업 초반.
+- **무효 사유**: v13 라운드 A4 pivot 으로 RSS 어댑터 폐기. sources-registry 의 빅테크 RSS 목록 자체가 의미를 잃음 (sentinel 1행 `llm_search` 통일). **본 항목은 closed.**
 
-### P2-4. 빅테크 소스 50–80개로 확장
+### P2-4. 빅테크 소스 50–80개로 확장 — **무효 (v13 라운드 pivot, 2026-05-11)**
 - **원본**: `data/sources-registry.md:392`, `:482`
-- **default action**: 1차 시연은 현재 골격(약 30개)으로 충분. 추가 회사는 사용자 시연 후 우선순위 결정. `sources.yaml` 에 새 엔트리만 추가하고 alembic data migration 1개로 반영하는 패턴이 이미 정립됨.
-- **시점**: M4 (발표 준비) 직전 또는 후순위.
+- **무효 사유**: v13 라운드 A4 pivot 으로 source registry 의 빅테크 목록 폐기. publisher 정보는 Document.extra JSONB 로 동적 보관. 확장 개념 자체가 LLM 검색 모델에서 의미 없음. **본 항목은 closed.**
 
 ### P2-5. 관리자가 사용자 비밀번호를 강제 reset 하는 임시 endpoint
 - **원본**: `security/password-policy.md:111`
@@ -252,11 +250,11 @@
 | 우선순위 | 건수 | 차단 에이전트 | 처리 방식 |
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
-| P1 | 11 (해결 1, 활성 10 / P1-6은 A2 부분 완료) | (없음) | reasonable default + stub |
-| P2 | 20 (해결 2, 활성 18 — A3 자체감사 8 + Codex 1st 2 + Codex 2nd 3) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B) | 32 (해결 32 — C-2 부분 해소, C-6~32 신규 해결 A2) | (없음) | A2 (2026-05-11) — docs 정합 + 자체 검수 + codex v1 + multi-worker + 옵션 B + codex v2 + codex v3 로 27건 해결 |
+| P1 | 11 (해결 1, 무효 1 — P1-6 v13 pivot, 활성 9) | (없음) | reasonable default + stub |
+| P2 | 20 (해결 2, 무효 2 — P2-3·P2-4 v13 pivot, 활성 16) | (없음) | 후속 폴리시 단계 |
+| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot) | 33 (해결 33 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11) | (없음) | A2 + v13 라운드 |
 
-**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능.**
+**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효.**
 
 ## 본 백로그의 출처
 

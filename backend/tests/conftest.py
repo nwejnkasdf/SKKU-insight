@@ -18,13 +18,11 @@ import pytest_asyncio
 import redis.asyncio as aioredis
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-
 
 # ============================================================
 # 1. TESTING env 셋팅 — backend.app.config 가 로드되기 전에
@@ -167,3 +165,29 @@ async def client(
         transport=transport, base_url="http://test"
     ) as ac:
         yield ac
+
+
+# ============================================================
+# 6. 외부 네트워크 차단 — A4 prep regression guard
+# ============================================================
+
+
+@pytest.fixture
+def block_external_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenAI/Anthropic 등 외부 네트워크 차단 — A4 가 외부 IO 늘릴 때 회귀 가드.
+
+    `httpx.AsyncHTTPTransport.handle_async_request` 만 차단해 ASGITransport
+    (in-process test transport) 는 영향 없음. 본 fixture 를 인자로 받는 테스트는
+    실수로 real 네트워크에 닿으면 즉시 `RuntimeError` 로 빨간불.
+    """
+    import httpx
+
+    async def _blocked(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("external HTTP blocked in tests")
+
+    monkeypatch.setattr(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        _blocked,
+        raising=False,
+    )

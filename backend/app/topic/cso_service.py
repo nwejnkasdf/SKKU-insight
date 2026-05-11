@@ -56,18 +56,26 @@ async def get_clusters(
     """12 CSO 클러스터 응답. Redis 24h 캐시 hit-first.
 
     Codex 감사 B-3 fix: cache hit 시 Pydantic ValidationError 발생 시 DEL + DB fallback.
+    Codex 2nd Critical A-1 fix: cache hit 후에도 len(parsed) == 12 검증 — Redis 에
+    11/13/0 등 비정상 payload 저장된 경우 503 bypass 차단. 검증 실패 시 invalidate
+    + DB fallback (DB 단계 503 guard 가 마지막 권위).
     """
     cached = await cache.get_cluster_cache(redis)
     if cached is not None:
         try:
-            return ClustersResponse(
-                clusters=[CSOCluster.model_validate(c) for c in cached]
+            parsed = [CSOCluster.model_validate(c) for c in cached]
+            if len(parsed) == 12:
+                return ClustersResponse(clusters=parsed)
+            logger.warning(
+                "cso clusters cache len mismatch (%d/12) — invalidate + DB fallback",
+                len(parsed),
             )
         except ValidationError as e:
             logger.warning(
                 "cso clusters cache schema mismatch — invalidate + DB fallback: %s", e
             )
-            await cache.invalidate_cluster_cache(redis)
+        # cache hit 이지만 schema 또는 len 검증 실패 — invalidate 후 DB fallback
+        await cache.invalidate_cluster_cache(redis)
 
     # 캐시 miss — DB 조회 (BroadInterest 12 행 JOIN cso_topic + 토픽별 문서 카운트)
     # 1차 시연: A4 Document 모델 부재 → document_count 0 으로 응답

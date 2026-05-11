@@ -82,7 +82,7 @@ class TraversalTraceDetail(BaseModel):
     leaves: list[DynamicLeafTopic]   # path 위 노드에 매핑된 active leaf
     started_active_day: int
     last_activity_active_day: int
-    score_tail: float                # 점수 (NFR-04 따라 디버그 모드만, 일반 사용자는 마스킹)
+    score_tail: float | None = None  # 일반 사용자 응답에서 null (NFR-04 마스킹, A3 결정 7). 관리자 endpoint 만 실제 값.
 
 # DocumentSummary 는 contracts.py 의 SOR base 모델 사용 — 본 파일에서 재정의 금지.
 # from app.contracts import DocumentSummary, SourceType  (sdd/contracts.md §5)
@@ -102,4 +102,4 @@ class TraversalTraceDetail(BaseModel):
 |---|---|---|
 | `topic.not_found` | 404 | UUID 없음 |
 | `topic.unauthorized_leaf` | 403 | 다른 사용자 리프 토픽 접근 |
-| `topic.linkage_error` | 422 | 토픽 연결 오류 (FR-64, NFR-08) — 관리자 콘솔에 표시 |
+| `topic.linkage_error` | 503 | 토픽 연결 오류 (FR-64, NFR-08) — `/topics/cso/clusters` 가 12 cluster 보장 실패 시 (CSO 미임포트·시드 부분 누락). 관리자 콘솔에 표시. |

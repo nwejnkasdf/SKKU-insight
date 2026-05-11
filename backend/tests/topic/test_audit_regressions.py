@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import networkx as nx
@@ -424,3 +424,98 @@ def test_audit_codex_b4_clusters_response_enforces_12() -> None:
         "get_clusters 가 12 cluster 보장 503 fail-fast 누락 (Codex B-4 회귀)."
     )
     assert "12" in src, "get_clusters 가 12 cluster 보장 검증 누락 (Codex B-4 회귀)."
+
+
+# ============================================================
+# Codex 2nd Critical A-1: cache hit 경로 12 검증 bypass 차단 (DYNAMIC)
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_audit_codex_2nd_critical_cache_hit_11_clusters_invalidated() -> None:
+    """Redis 에 11개 cluster cache 가 있어도 200 반환 안 함 — invalidate + DB fallback.
+
+    fix 전: cache hit 시 ClustersResponse(...) 즉시 반환 → 503 우회.
+    fix 후: cache hit 후 len(parsed) != 12 → invalidate + DB fallback (DB 단계 503 guard 가 최종 권위).
+
+    검증 방식: get_cluster_cache 가 11 entry 반환하도록 mock + DB 도 11 행 반환 →
+    invalidate_cluster_cache 호출 + 503 응답.
+    """
+    from unittest.mock import patch
+    from uuid import uuid4
+
+    # mock cached payload (11개 — 12 미달)
+    cached_11 = [
+        {
+            "cso_topic_id": str(uuid4()),
+            "label": f"cluster_{i}",
+            "description_ko": "test",
+            "document_count": 0,
+        }
+        for i in range(11)
+    ]
+    redis_mock = AsyncMock()
+    # invalidate_cluster_cache 가 호출되었는지 검증
+    invalidate_called = AsyncMock()
+
+    # DB mock — 11 행 반환 (DB 단계도 비정상 → 503 raise)
+    db_mock = AsyncMock()
+    db_rows: list[MagicMock] = []
+    for i in range(11):
+        row = MagicMock()
+        row.cso_seed_topic_id = uuid4()
+        row.name = f"cluster_{i}"
+        row.description = "test"
+        db_rows.append(row)
+    db_result = MagicMock()
+    db_result.__iter__ = MagicMock(return_value=iter(db_rows))
+    db_mock.execute = AsyncMock(return_value=db_result)
+
+    with patch(
+        "app.topic.cache.get_cluster_cache",
+        new=AsyncMock(return_value=cached_11),
+    ), patch(
+        "app.topic.cache.invalidate_cluster_cache",
+        new=invalidate_called,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await cso_service.get_clusters(db_mock, redis_mock)
+
+    assert exc.value.status_code == 503, (
+        "cache hit 의 11/12 payload 가 12 검증 bypass — Codex 2nd Critical 회귀. "
+        "503 fail-fast 가 cache hit 경로에도 적용되어야 함."
+    )
+    # cache invalidate 호출되었는지 확인
+    invalidate_called.assert_called_once_with(redis_mock)
+
+
+@pytest.mark.asyncio
+async def test_audit_codex_2nd_critical_cache_hit_valid_12_returns_200() -> None:
+    """Redis 에 정확 12개 cluster cache 가 있으면 정상 ClustersResponse 200 반환.
+
+    A-1 fix 가 정상 흐름 (12개 cache) 까지 막지 않음을 보장.
+    """
+    from unittest.mock import patch
+    from uuid import uuid4
+
+    cached_12 = [
+        {
+            "cso_topic_id": str(uuid4()),
+            "label": f"cluster_{i}",
+            "description_ko": "test",
+            "document_count": 0,
+        }
+        for i in range(12)
+    ]
+    redis_mock = AsyncMock()
+    db_mock = AsyncMock()
+
+    with patch(
+        "app.topic.cache.get_cluster_cache",
+        new=AsyncMock(return_value=cached_12),
+    ):
+        result = await cso_service.get_clusters(db_mock, redis_mock)
+
+    assert len(result.clusters) == 12
+    # DB 조회 일어나지 않음
+    db_mock.execute.assert_not_called()

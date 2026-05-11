@@ -47,8 +47,8 @@
 | 동시성 가드 + 멀티 에이전트 운영 헌법 | ✅ 완료 |
 | **Phase 0a — A1 docs + A2-stub** | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
 | **Phase 0b — A2 backend-foundation** | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 17 endpoint 본문 + 35건 결함 해소) |
-| Phase 0b — A3 cso-topic (CSO 임포트 + BroadInterest 시드) | 🟡 다음 |
-| Phase 1 — A4 collection / A5 clickbait (외부 모듈 ✅) / A6 interest-bayesian | ⬜ |
+| **Phase 0b — A3 cso-topic** | ✅ 완료 (5 PR-stack — CSO 3.4 임포트 + NetworkX + 7 endpoint + 11 ORM + 3 라운드 감사 fix 15건) |
+| Phase 1 — A4 collection / A5 clickbait (외부 모듈 ✅) / A6 interest-bayesian | 🟡 다음 |
 | Phase 2 — A7 leaf-traversal / A8 recommendation | ⬜ |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
@@ -76,7 +76,7 @@
 4. **관리자 콘솔에서 수집 실패 재실행** → 성공
 5. **동의 철회** → 추천 중단 + 재동의/계정삭제 분기
 
-## 빠른 시연 (PR #7 머지 후 가능 — A2 완료)
+## 빠른 시연 (A2 + A3 머지 후 가능)
 
 ```bash
 # 1. .env 준비
@@ -88,12 +88,13 @@ cp .env.example .env
 docker compose down -v
 docker compose up -d postgres redis
 
-# 3. DB·관리자 시드 (A2 산출)
-make migrate          # alembic upgrade head — 8 테이블 + sentinel + SourcePolicy 3행
+# 3. DB 마이그레이션 (A2 + A3)
+make migrate          # alembic upgrade head — A2 8 테이블 + A3 3 테이블 (cso_topic_parent · dynamic_leaf_topic · dynamic_leaf_topic_cso_topic)
 make create-admin     # AdminUser 1행 (must_change_password=true)
 
-# 4. (A3 머지 후) CSO 14k 노드 임포트 + BroadInterest 12행 시드
-make import-cso       # A3 산출
+# 4. CSO 3.4 임포트 + BroadInterest 12행 시드 (A3)
+make import-cso       # ~14k 노드 + 12 cluster + 12 BroadInterest. 첫 호출 시 ~5분.
+                      # 옵션: ARGS="--reset --refresh" 로 재구성
 
 # 5. (A12 머지 후) 5+ 페르소나 + 14일 인터랙션 시드
 make seed --full      # A12 산출
@@ -104,6 +105,19 @@ docker compose up -d  # postgres + redis + api + worker + admin-console
 
 # 7. (A9 머지 후) Electron 클라이언트
 cd client && npm install && npm start
+```
+
+### A3 endpoint 검증 (CSO 임포트 후)
+
+```bash
+# 12 CSO 클러스터 (BroadInterest 시드 응답)
+curl -s http://localhost:8000/topics/cso/clusters | jq '.clusters | length'   # 12
+docker compose exec redis redis-cli GET 'cso:clusters:v1'                       # 24h Redis 캐시 JSON
+
+# CSO 토픽 상세 + 다중 부모 (cso_topic_parent SOR)
+ID=$(curl -s http://localhost:8000/topics/cso/clusters | jq -r '.clusters[0].cso_topic_id')
+curl -s "http://localhost:8000/topics/cso/$ID/adjacent?hops=1" | jq '.topics | length'   # >0
+curl -s "http://localhost:8000/topics/cso/$ID/descendants" | jq '.topics | length'       # 큰 수
 ```
 
 검증 보조 (A2 완료 시점부터 사용 가능):
@@ -156,4 +170,4 @@ docs/
 
 ---
 
-**다음 액션**: A2 PR #7 머지 → A3 cso-topic ([`prompts/02-A3-cso-topic.md`](prompts/02-A3-cso-topic.md)) — CSO 3.4 임포트 + BroadInterest 12행 시드 + NetworkX 캐시 + `/topics/*` endpoint. A3 완료 후 onboarding cluster_ids 검증이 실제 통과 → end-to-end 시연 시나리오 가능.
+**다음 액션**: A3 5 PR-stack 머지 → A4 collection ([`prompts/03-A4-collection.md`](prompts/03-A4-collection.md)) — 소스 어댑터 (arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버 BS4) + CollectionJob + jitter + dedup. A4 완료 후 `/topics/{id}/documents` endpoint 본문 채워지고 추천 후보 풀 확보 → A8 추천 파이프라인 가능.

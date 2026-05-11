@@ -8,7 +8,7 @@
 
 | 경로 | 목적 | 주된 독자 |
 |---|---|---|
-| `docs/decisions.md` | 8라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원 | 모든 에이전트 |
+| `docs/decisions.md` | 12+ 라운드 결정 매트릭스 압축본. 모든 코드 결정의 단일 진실 공급원 | 모든 에이전트 |
 | `docs/decision-backlog.md` | 모든 `<!-- TODO: -->` 마커를 P0/P1/P2로 분류하고 default/stub 전략 명시 | 모든 에이전트 |
 | `docs/srs/` | SRS v0.3 분할본. 원본 텍스트와 표 보존 | 요구사항 추적용 |
 | `docs/sdd/` | 소프트웨어 설계 문서: 아키텍처, 데이터 흐름, 배포, 모듈 경계, 기술 스택, **동시성 가드**, **API 통신 규약** | A2~A10 |
@@ -23,10 +23,11 @@
 
 상세는 [`decisions.md`](decisions.md) §에이전트 분할과 구현 계획 v1.0의 §4 참조.
 
-### Phase 0 — Foundation (병렬 가능)
-- **A1. docs-bootstrap** — 본 디렉토리 작성 (현재 단계)
-- **A2. backend-foundation** — FastAPI 부트, docker-compose(pg+redis+api+worker), Alembic, 인증·동의·사용자 모듈 (FR-01~06, FR-11), 보안(NFR-15~22)
-- **A3. cso-topic** — CSO 임포트, NetworkX 캐시, Topic·CSOTopic 테이블, 그래프 탐색 API
+### Phase 0 — Foundation (병렬 가능) — ✅ 모두 완료
+
+- **A1. docs-bootstrap** ✅ — 본 디렉토리 작성 완료
+- **A2. backend-foundation** ✅ — FastAPI 부트, docker-compose(pg+redis+api+worker), Alembic, 인증·동의·사용자 모듈 (FR-01~06, FR-11), 보안(NFR-15~22) — PR #4 + #7 머지
+- **A3. cso-topic** ✅ — CSO 3.4 임포트, NetworkX 캐시, Topic·CSOTopic 테이블, 그래프 탐색 7 endpoint — 5 PR-stack (docs-drift + a2-orm-hotfix + a3-engine + 2 라운드 audit fix)
 
 ### Phase 1 — Data·정제 (Phase 0 후 병렬)
 - **A4. collection** — 소스 레지스트리, 어댑터(arXiv/OpenAlex/Semantic Scholar/DBLP/RSS/네이버 BS4), CollectionJob (FR-21~29)

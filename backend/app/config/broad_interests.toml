@@ -1,0 +1,96 @@
+# BroadInterest 12 entry 시드 SOR (A3 도입).
+#
+# A3 의 `scripts/import_cso.py` 가 CSO 임포트 직후 본 파일을 읽어 BroadInterest 테이블에
+# `ON CONFLICT (name) DO UPDATE` 로 시드. `seed_topic_label` 은 CSO 3.4 원본 라벨 — lowercase
+# 정규화 후 cso_topic 테이블에서 cso_topic_id 로 resolve.
+#
+# 12 unique cluster (cso-mapping.md §12 클러스터). cluster_label "Graphics·Multimedia" 는
+# CSO 의 "Computer Graphics" + "Multimedia" 2 seed 가 동일 cluster — BroadInterest 시드는
+# 더 광범위한 "Computer Graphics" 1 entry 만 사용 (Multimedia 산하 노드는 BFS 라벨링으로
+# 동일 cluster_label 부여).
+#
+# description_ko 는 한 문장. UI 의 BroadInterest 카드에 노출 (FR-08·13).
+
+[[broad_interest]]
+name = "AI"
+description_ko = "기계가 인간의 지능적 행동을 모방하도록 만드는 분야. 머신러닝·딥러닝·자연어처리·컴퓨터 비전 등을 포괄."
+cso_cluster_label = "AI"
+seed_topic_label = "Artificial Intelligence"
+display_order = 0
+
+[[broad_interest]]
+name = "Systems"
+description_ko = "운영체제·분산 시스템·가상화·동시성 등 컴퓨터 시스템 레이어의 자원 관리와 구조를 다루는 분야."
+cso_cluster_label = "Systems"
+seed_topic_label = "Computer Systems Organization"
+display_order = 1
+
+[[broad_interest]]
+name = "Hardware"
+description_ko = "프로세서·메모리·회로 설계·임베디드 등 컴퓨터 하드웨어 구조와 구현을 다루는 분야."
+cso_cluster_label = "Hardware"
+seed_topic_label = "Hardware"
+display_order = 2
+
+[[broad_interest]]
+name = "Theory"
+description_ko = "알고리즘·계산복잡도·논리·암호이론 등 컴퓨터 과학의 수학적 기반을 다루는 분야."
+cso_cluster_label = "Theory"
+seed_topic_label = "Theory of Computation"
+display_order = 3
+
+[[broad_interest]]
+name = "SE"
+description_ko = "소프트웨어 개발 방법론·요구공학·테스트·유지보수 등 개발 프로세스와 품질을 다루는 분야."
+cso_cluster_label = "SE"
+seed_topic_label = "Software Engineering"
+display_order = 4
+
+[[broad_interest]]
+name = "Networks"
+description_ko = "프로토콜·라우팅·무선 통신·인터넷 구조 등 컴퓨터 네트워크 설계와 운영을 다루는 분야."
+cso_cluster_label = "Networks"
+seed_topic_label = "Computer Networks"
+display_order = 5
+
+[[broad_interest]]
+name = "IS·DB"
+description_ko = "정보 시스템·관계형/NoSQL 데이터베이스·데이터 모델링·트랜잭션 처리 등을 다루는 분야."
+cso_cluster_label = "IS·DB"
+seed_topic_label = "Information Systems"
+display_order = 6
+
+[[broad_interest]]
+name = "IR"
+description_ko = "검색 엔진·랭킹·추천·텍스트 마이닝 등 대량 정보에서 관련 항목을 찾아내는 분야."
+cso_cluster_label = "IR"
+seed_topic_label = "Information Retrieval"
+display_order = 7
+
+[[broad_interest]]
+name = "Security"
+description_ko = "암호·인증·취약점 분석·프라이버시 보호 등 시스템과 데이터의 안전성을 다루는 분야."
+cso_cluster_label = "Security"
+seed_topic_label = "Security and Privacy"
+display_order = 8
+
+[[broad_interest]]
+name = "HCI"
+description_ko = "사용자 인터페이스·사용성·접근성·인간 요인 등 사람과 컴퓨터의 상호작용을 다루는 분야."
+cso_cluster_label = "HCI"
+seed_topic_label = "Human-Computer Interaction"
+display_order = 9
+
+[[broad_interest]]
+name = "Graphics·Multimedia"
+description_ko = "3D 렌더링·이미지 처리·비디오·음향·VR/AR 등 시각·청각 정보의 생성과 처리를 다루는 분야."
+cso_cluster_label = "Graphics·Multimedia"
+seed_topic_label = "Computer Graphics"
+display_order = 10
+
+[[broad_interest]]
+name = "Computational Science"
+description_ko = "수치 시뮬레이션·과학 계산·계산물리·계산생물학 등 도메인 과학을 위한 컴퓨팅 분야."
+cso_cluster_label = "Computational Science"
+seed_topic_label = "Computational Science"
+display_order = 11

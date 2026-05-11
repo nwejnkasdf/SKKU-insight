@@ -1,0 +1,47 @@
+<http://cso.kmi.open.ac.uk/topics/artificial_intelligence>,<http://www.w3.org/2000/01/rdf-schema#label>,"Artificial Intelligence"
+<http://cso.kmi.open.ac.uk/topics/computer_systems_organization>,<http://www.w3.org/2000/01/rdf-schema#label>,"Computer Systems Organization"
+<http://cso.kmi.open.ac.uk/topics/hardware>,<http://www.w3.org/2000/01/rdf-schema#label>,"Hardware"
+<http://cso.kmi.open.ac.uk/topics/theory_of_computation>,<http://www.w3.org/2000/01/rdf-schema#label>,"Theory of Computation"
+<http://cso.kmi.open.ac.uk/topics/software_engineering>,<http://www.w3.org/2000/01/rdf-schema#label>,"Software Engineering"
+<http://cso.kmi.open.ac.uk/topics/computer_networks>,<http://www.w3.org/2000/01/rdf-schema#label>,"Computer Networks"
+<http://cso.kmi.open.ac.uk/topics/information_systems>,<http://www.w3.org/2000/01/rdf-schema#label>,"Information Systems"
+<http://cso.kmi.open.ac.uk/topics/information_retrieval>,<http://www.w3.org/2000/01/rdf-schema#label>,"Information Retrieval"
+<http://cso.kmi.open.ac.uk/topics/security_and_privacy>,<http://www.w3.org/2000/01/rdf-schema#label>,"Security and Privacy"
+<http://cso.kmi.open.ac.uk/topics/human-computer_interaction>,<http://www.w3.org/2000/01/rdf-schema#label>,"Human-Computer Interaction"
+<http://cso.kmi.open.ac.uk/topics/computer_graphics>,<http://www.w3.org/2000/01/rdf-schema#label>,"Computer Graphics"
+<http://cso.kmi.open.ac.uk/topics/multimedia>,<http://www.w3.org/2000/01/rdf-schema#label>,"Multimedia"
+<http://cso.kmi.open.ac.uk/topics/computational_science>,<http://www.w3.org/2000/01/rdf-schema#label>,"Computational Science"
+<http://cso.kmi.open.ac.uk/topics/machine_learning>,<http://www.w3.org/2000/01/rdf-schema#label>,"Machine Learning"
+<http://cso.kmi.open.ac.uk/topics/artificial_intelligence>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/machine_learning>
+<http://cso.kmi.open.ac.uk/topics/natural_language_processing>,<http://www.w3.org/2000/01/rdf-schema#label>,"Natural Language Processing"
+<http://cso.kmi.open.ac.uk/topics/artificial_intelligence>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/natural_language_processing>
+<http://cso.kmi.open.ac.uk/topics/machine_learning>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/natural_language_processing>
+<http://cso.kmi.open.ac.uk/topics/deep_learning>,<http://www.w3.org/2000/01/rdf-schema#label>,"Deep Learning"
+<http://cso.kmi.open.ac.uk/topics/machine_learning>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/deep_learning>
+<http://cso.kmi.open.ac.uk/topics/cpu_design>,<http://www.w3.org/2000/01/rdf-schema#label>,"CPU Design"
+<http://cso.kmi.open.ac.uk/topics/hardware>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/cpu_design>
+<http://cso.kmi.open.ac.uk/topics/operating_systems>,<http://www.w3.org/2000/01/rdf-schema#label>,"Operating Systems"
+<http://cso.kmi.open.ac.uk/topics/computer_systems_organization>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/operating_systems>
+<http://cso.kmi.open.ac.uk/topics/algorithms>,<http://www.w3.org/2000/01/rdf-schema#label>,"Algorithms"
+<http://cso.kmi.open.ac.uk/topics/theory_of_computation>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/algorithms>
+<http://cso.kmi.open.ac.uk/topics/testing>,<http://www.w3.org/2000/01/rdf-schema#label>,"Testing"
+<http://cso.kmi.open.ac.uk/topics/software_engineering>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/testing>
+<http://cso.kmi.open.ac.uk/topics/tcp_ip>,<http://www.w3.org/2000/01/rdf-schema#label>,"TCP/IP"
+<http://cso.kmi.open.ac.uk/topics/computer_networks>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/tcp_ip>
+<http://cso.kmi.open.ac.uk/topics/relational_databases>,<http://www.w3.org/2000/01/rdf-schema#label>,"Relational Databases"
+<http://cso.kmi.open.ac.uk/topics/information_systems>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/relational_databases>
+<http://cso.kmi.open.ac.uk/topics/search_engines>,<http://www.w3.org/2000/01/rdf-schema#label>,"Search Engines"
+<http://cso.kmi.open.ac.uk/topics/information_retrieval>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/search_engines>
+<http://cso.kmi.open.ac.uk/topics/cryptography>,<http://www.w3.org/2000/01/rdf-schema#label>,"Cryptography"
+<http://cso.kmi.open.ac.uk/topics/security_and_privacy>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/cryptography>
+<http://cso.kmi.open.ac.uk/topics/usability>,<http://www.w3.org/2000/01/rdf-schema#label>,"Usability"
+<http://cso.kmi.open.ac.uk/topics/human-computer_interaction>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/usability>
+<http://cso.kmi.open.ac.uk/topics/ray_tracing>,<http://www.w3.org/2000/01/rdf-schema#label>,"Ray Tracing"
+<http://cso.kmi.open.ac.uk/topics/computer_graphics>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/ray_tracing>
+<http://cso.kmi.open.ac.uk/topics/audio_processing>,<http://www.w3.org/2000/01/rdf-schema#label>,"Audio Processing"
+<http://cso.kmi.open.ac.uk/topics/multimedia>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/audio_processing>
+<http://cso.kmi.open.ac.uk/topics/numerical_methods>,<http://www.w3.org/2000/01/rdf-schema#label>,"Numerical Methods"
+<http://cso.kmi.open.ac.uk/topics/computational_science>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/numerical_methods>
+<http://cso.kmi.open.ac.uk/topics/neural_ir>,<http://www.w3.org/2000/01/rdf-schema#label>,"Neural IR"
+<http://cso.kmi.open.ac.uk/topics/machine_learning>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/neural_ir>
+<http://cso.kmi.open.ac.uk/topics/information_retrieval>,<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>,<http://cso.kmi.open.ac.uk/topics/neural_ir>

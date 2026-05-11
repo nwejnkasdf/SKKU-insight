@@ -14,6 +14,9 @@ from __future__ import annotations
 from app.db.models.admin_user import AdminUser
 from app.db.models.broad_interest import BroadInterest
 from app.db.models.cso_topic import CSOTopic
+from app.db.models.cso_topic_parent import CSOTopicParent
+from app.db.models.dynamic_leaf_topic import DynamicLeafTopic
+from app.db.models.dynamic_leaf_topic_cso_topic import DynamicLeafTopicCSOTopic
 from app.db.models.source import Source
 from app.db.models.source_policy import SourcePolicy
 from app.db.models.user import User
@@ -24,6 +27,9 @@ __all__ = [
     "AdminUser",
     "BroadInterest",
     "CSOTopic",
+    "CSOTopicParent",
+    "DynamicLeafTopic",
+    "DynamicLeafTopicCSOTopic",
     "Source",
     "SourcePolicy",
     "User",

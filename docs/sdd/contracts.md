@@ -257,6 +257,12 @@ class RedisKey:
     @staticmethod
     def event_buffer(user_id: UUID) -> str:
         return f"events:buffer:{user_id}"
+
+    @staticmethod
+    def cso_clusters_cache() -> str:
+        """12 CSO 클러스터 응답 캐시 — 24h TTL. A3 도입. prefix `cso:clusters:v1`.
+        CSO 재임포트 종료 시 명시 DEL 로 invalidate (versioning 으로 stale 자연 만료 도 가능)."""
+        return "cso:clusters:v1"
 ```
 
 > 키 prefix는 모두 영역별 단어. 직접 f-string 금지 — 검색·일괄 변경·CI 검증을 가능하게 함.

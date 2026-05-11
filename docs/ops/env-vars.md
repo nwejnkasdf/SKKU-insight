@@ -111,6 +111,7 @@
 |---|---|---|
 | `OPENALEX_POLITE_EMAIL` | `dev@insight.test` | OpenAlex politeness |
 | `SEMANTIC_SCHOLAR_API_KEY` | (선택) | 없으면 anonymous |
+| `CSO_DOWNLOAD_URL` | `https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv` | A3 (cso-topic engine). `scripts/import_cso.py` 다운로드 URL. decision-backlog P1-5 — 버전 갱신(3.5+) 시 본 env 만 교체 + `make import-cso --reset --refresh`. |
 
 ## CORS / 호스트
 
@@ -230,6 +231,8 @@ CONSENT_CACHE_TTL_SECONDS=60
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test
 SEMANTIC_SCHOLAR_API_KEY=
+# CSO 3.4 다운로드 URL (A3, decision-backlog P1-5)
+CSO_DOWNLOAD_URL=https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv
 
 # === CORS / hosts ===
 CORS_ALLOWED_ORIGINS=http://localhost:3001,app://insight

@@ -126,40 +126,57 @@ def assign_cluster_labels(topics):
     return cluster_assignments
 ```
 
-## 4. INSERT
+## 4. INSERT (idempotent — A3 결정 4)
 
-Alembic data migration을 별도 작성하거나 (반복 가능), CLI 스크립트로 실행.
+`scripts/import_cso.py` CLI 스크립트로 실행. **alembic data migration 대신 CLI 스크립트** (재실행·`--reset` 옵션 + httpx 다운로드 필요로 alembic 부적합). **idempotency**: `ON CONFLICT (uri) DO NOTHING` (cso_topic) + `ON CONFLICT DO NOTHING` (cso_topic_parent composite PK). `--reset` 플래그로 명시 TRUNCATE 후 재구성.
 
 ```python
-from sqlalchemy import select
-from app.db import async_session
-from app.topic.models import CSOTopic
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.db import AsyncSessionLocal
+from app.db.models import CSOTopic, CSOTopicParent
 
 async def insert_cso(topics, cluster_assignments):
-    async with async_session() as session:
-        # 첫 패스: 라벨 + URI만 INSERT (parent FK는 두 번째 패스에서)
-        uri_to_id = {}
+    async with AsyncSessionLocal() as session:
+        # 첫 패스: 라벨 + URI + cluster_labels — ON CONFLICT (uri) DO NOTHING
+        uri_to_id: dict[str, UUID] = {}
         for uri, t in topics.items():
-            row = CSOTopic(
+            stmt = pg_insert(CSOTopic).values(
                 label=t["label"] or uri.split("/")[-1],
                 uri=uri,
                 parent_topic_id=None,
                 cluster_labels=list(cluster_assignments.get(uri, [])),
-            )
-            session.add(row)
-            await session.flush()
-            uri_to_id[uri] = row.cso_topic_id
+            ).on_conflict_do_nothing(index_elements=["uri"]).returning(CSOTopic.cso_topic_id)
+            result = await session.execute(stmt)
+            row = result.fetchone()
+            if row is None:
+                # 이미 존재 — 기존 id 조회
+                existing = await session.execute(select(CSOTopic.cso_topic_id).where(CSOTopic.uri == uri))
+                uri_to_id[uri] = existing.scalar_one()
+            else:
+                uri_to_id[uri] = row.cso_topic_id
 
-        # 두 번째 패스: parent FK 채우기
+        # 두 번째 패스 (a): cso_topic.parent_topic_id 채움 — BFS 첫 부모 (deprecate 예정, backward-compat 만)
+        # 두 번째 패스 (b): cso_topic_parent M:N — 모든 부모 INSERT (다중 부모 보존, NetworkX SOR)
         for uri, t in topics.items():
-            if t["parent_uris"]:
-                # 여러 부모가 있을 수 있으나 우리는 1개만 보존 (BFS 순서로 첫 번째)
-                first_parent = t["parent_uris"][0]
-                if first_parent in uri_to_id:
-                    await session.execute(
-                        update(CSOTopic).where(CSOTopic.cso_topic_id == uri_to_id[uri])
-                        .values(parent_topic_id=uri_to_id[first_parent])
-                    )
+            if not t["parent_uris"]:
+                continue
+            # parent URI sort (결정성 보장)
+            parent_uris = sorted(t["parent_uris"])
+            primary = parent_uris[0]
+            if primary in uri_to_id:
+                await session.execute(
+                    update(CSOTopic).where(CSOTopic.cso_topic_id == uri_to_id[uri])
+                    .values(parent_topic_id=uri_to_id[primary])
+                )
+            # M:N: 모든 부모 ON CONFLICT DO NOTHING
+            for p in parent_uris:
+                if p not in uri_to_id:
+                    continue
+                stmt = pg_insert(CSOTopicParent).values(
+                    cso_topic_id=uri_to_id[uri],
+                    parent_cso_topic_id=uri_to_id[p],
+                ).on_conflict_do_nothing()
+                await session.execute(stmt)
         await session.commit()
 ```
 
@@ -172,6 +189,9 @@ import networkx as nx
 from sqlalchemy import select
 
 async def build_cso_graph(engine) -> nx.DiGraph:
+    """NetworkX 그래프 빌드 — `cso_topic_parent` M:N SOR. `CSOTopic.parent_topic_id` 무시 (deprecate, A3 결정 18).
+    `cso_topic_parent` 가 다중 부모를 자연 표현하므로 모든 부모 엣지가 보존된다.
+    """
     g = nx.DiGraph()
     async with engine.connect() as conn:
         rows = await conn.execute(select(CSOTopic))
@@ -182,14 +202,14 @@ async def build_cso_graph(engine) -> nx.DiGraph:
                 uri=r.uri,
                 cluster_labels=set(r.cluster_labels or []),
             )
-        # parent edges
-        rows2 = await conn.execute(select(CSOTopic).where(CSOTopic.parent_topic_id.is_not(None)))
+        # parent edges — cso_topic_parent SOR (다중 부모 보존)
+        rows2 = await conn.execute(select(CSOTopicParent))
         for r in rows2:
             # child --parent_of--> parent
-            g.add_edge(r.cso_topic_id, r.parent_topic_id, type="parent")
+            g.add_edge(r.cso_topic_id, r.parent_cso_topic_id, type="parent")
     return g
 
-# main.py
+# topic 모듈 startup hook (backend/app/topic/lifespan.py)
 app.state.cso_graph = await build_cso_graph(engine)
 ```
 

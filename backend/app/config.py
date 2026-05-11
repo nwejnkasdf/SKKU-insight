@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # === External sources ===
     OPENALEX_POLITE_EMAIL: str = "dev@insight.test"
     SEMANTIC_SCHOLAR_API_KEY: str = ""
+    # CSO 3.4 다운로드 URL (decision-backlog P1-5). A3 가 `scripts/import_cso.py` 에서 사용.
+    # 신버전(3.5+) 출시 시 본 env 만 교체 후 `make import-cso --reset --refresh`.
+    CSO_DOWNLOAD_URL: str = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv"
 
     # === CORS / hosts / logging ===
     CORS_ALLOWED_ORIGINS: str = "http://localhost:3001,app://insight"

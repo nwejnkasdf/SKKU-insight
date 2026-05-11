@@ -322,6 +322,17 @@ class RedisKey:
         """5초 batch flush 버퍼. concurrency.md §6."""
         return f"events:buffer:{user_id}"
 
+    @staticmethod
+    def cso_clusters_cache() -> str:
+        """12 CSO 클러스터 응답 캐시. TTL 24h. A3 (cso-topic engine) 도입.
+
+        `GET /topics/cso/clusters` 가 매 호출마다 BroadInterest 12행 + cso_topic
+        JOIN 을 피하기 위해 본 키에 JSON 응답을 SETEX 한다. CSO 재임포트 (`make
+        import-cso`) 종료 시 명시 DEL 로 invalidate. 버전 접미사 `v1` 은 CSO
+        스키마 변경 시 v2 로 올려 stale 캐시 자연 만료.
+        """
+        return "cso:clusters:v1"
+
 
 # ============================================================
 # 4. Pydantic Base 모델 — docs/sdd/contracts.md §5

@@ -6,13 +6,17 @@ startup:
 3) async DB engine init (api pool)
 4) 4 Redis client ping (default/rate_limit/queue/cache)
 5) structlog 바인딩 (LOG_LEVEL + STRUCTLOG_RENDER)
+6) A6 system_config 로더 — interest_params + event_weights 캐시 SETEX
+7) A6 EventBuffer 인스턴스 + flush_periodic background task 등록
 
 shutdown:
-1) engine.dispose()
-2) redis.aclose() x4
+1) EventBuffer.stop() final flush
+2) engine.dispose()
+3) redis.aclose() x4
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,6 +27,12 @@ from fastapi import FastAPI
 from app.config import get_settings
 from app.contracts import LLMProviderType
 from app.db.engine import dispose_engines, get_engine
+from app.db.session import AsyncSessionLocal
+from app.events.buffer import EventBuffer
+from app.interest.config_loader import (
+    SystemConfigMissingError,
+    load_system_config,
+)
 from app.middleware.structlog_mask import mask_secrets
 from app.redis import close_redis, get_redis
 from app.topic.lifespan import topic_shutdown, topic_startup
@@ -52,14 +62,66 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # A3: NetworkX CSO 그래프 빌드 + app.state.cso_graph 등록 (결정 6).
     # cso_topic 비어 있으면 빈 그래프 등록 + WARN (test 환경 호환). verify 는 skip.
     await topic_startup(app)
+
+    # A6: system_config 로더 — interest_params + event_weights 캐시 SETEX.
+    # 빈 테이블 (테스트 환경 보호) 이면 SystemConfigMissingError WARN 후 startup 계속.
+    redis_default = get_redis("default")
+    async with AsyncSessionLocal() as session:
+        try:
+            await load_system_config(session, redis_default)
+            app.state.system_config_loaded = True
+        except SystemConfigMissingError as exc:
+            app.state.system_config_loaded = False
+            logger.warning(
+                "lifespan: system_config seed 누락 — endpoint 호출 시 fallback DB 로드",
+                error=str(exc),
+                key=exc.key,
+            )
+
+    # A6: EventBuffer 인스턴스 + flush_periodic background task 등록.
+    # 1차 시연은 router 가 즉시 ingest — buffer 는 활성화 toggle 대비 등록만.
+    from app.interest.service import flush_buffered_events
+
+    async def _flush_cb(user_id, entries):  # type: ignore[no-untyped-def]
+        cso_graph = getattr(app.state, "cso_graph", None)
+        await flush_buffered_events(
+            user_id,
+            list(entries),
+            session_factory=AsyncSessionLocal,
+            cso_graph=cso_graph,
+            redis=redis_default,
+        )
+
+    event_buffer = EventBuffer(
+        flush_callback=_flush_cb,
+        batch_size=settings.EVENT_BATCH_SIZE,
+        flush_seconds=float(settings.EVENT_BATCH_FLUSH_SECONDS),
+    )
+    app.state.event_buffer = event_buffer
+    app.state.event_buffer_task = asyncio.create_task(
+        event_buffer.flush_periodic()
+    )
+
     logger.info(
         "lifespan startup ok",
         provider=settings.LLM_PROVIDER.value,
         log_level=settings.LOG_LEVEL,
+        system_config_loaded=app.state.system_config_loaded,
     )
     try:
         yield
     finally:
+        # A6: EventBuffer 종료 — task cancel + final flush.
+        task = getattr(app.state, "event_buffer_task", None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        buffer = getattr(app.state, "event_buffer", None)
+        if buffer is not None:
+            await buffer.stop()
         await topic_shutdown(app)
         await dispose_engines()
         await close_redis()

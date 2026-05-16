@@ -154,6 +154,32 @@ async def post_interests(
     await db.execute(
         update(User).where(User.user_id == user.user_id).values(onboarding_complete=True)
     )
+    # A6 협업: 12 cluster + 1-hop child UserInterestState row prefilled (alpha_prior+boost,
+    # boost_applied_at_active_day = user.active_day_counter). 14-day decay cron 이 자연 만료.
+    # cso_graph 는 lifespan startup 에서 app.state.cso_graph 에 binding 됨.
+    cso_graph = getattr(request.app.state, "cso_graph", None)
+    if cso_graph is not None:
+        from app.interest.service import bootstrap_interest_state
+
+        try:
+            await bootstrap_interest_state(
+                db,
+                cso_graph,
+                user=user,
+                cluster_ids=payload.cso_cluster_ids,
+                active_day=user.active_day_counter,
+                redis=redis,
+            )
+        except Exception as exc:
+            # boost 시드 실패는 onboarding 자체를 막지 않음 — A6 decay cron 또는
+            # 첫 이벤트 시 lazy 시드로 회복. WARN 만.
+            import structlog as _structlog
+
+            _structlog.get_logger("onboarding").warning(
+                "bootstrap_interest_state failed",
+                user_id=str(user.user_id),
+                error=str(exc),
+            )
     await db.commit()
     _enqueue_cold_start_job(
         request_id=request_id,

@@ -1,13 +1,18 @@
 """interest Pydantic schemas — docs/api/interest.md.
 
 본 파일은 /interest, /events, /feedback 세 영역의 schema 를 모두 담당.
+
+A6 (2026-05-17) 추가:
+- BatchResponse: /events/batch 207 Multi-Status 응답 envelope.
+- NotInterestedRequest.model_validator: cso/leaf/document_id 중 1+ 필수.
 """
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.contracts import EventType, InterestBucket
 
@@ -38,6 +43,19 @@ class EventResponse(BaseModel):
     event_id: UUID
     accepted: bool
     server_received_at: datetime
+    # 207 Multi-Status batch 응답에서 실패 entry 의 사유.
+    error_code: str | None = None
+
+
+class BatchResponse(BaseModel):
+    """POST /events/batch 207 Multi-Status 응답.
+
+    items: list[EventResponse] — 성공/실패 entry 모두 포함, accepted 필드로 구분.
+    total_accepted: int — 성공한 entry 수.
+    """
+
+    items: list[EventResponse]
+    total_accepted: int
 
 
 # ============================================================
@@ -57,7 +75,7 @@ class InterestTopicView(BaseModel):
 class InterestStateResponse(BaseModel):
     user_id: UUID
     topics: list[InterestTopicView]
-    updated_at: datetime
+    updated_at: datetime | None = None
 
 
 # ============================================================
@@ -67,19 +85,48 @@ class InterestStateResponse(BaseModel):
 
 class SaveFeedbackRequest(BaseModel):
     document_id: UUID
+    client_request_id: str
 
 
 class HideFeedbackRequest(BaseModel):
     document_id: UUID
+    client_request_id: str
 
 
 class NotInterestedRequest(BaseModel):
     """토픽 또는 문서 단위 명시 거부.
 
-    cso_topic_id / leaf_topic_id / document_id 중 1개 이상 필수
-    (Phase 0b 가 model_validator 추가).
+    cso_topic_id / leaf_topic_id / document_id 중 1개 이상 필수. 셋 다 None 이면 422.
+    document_id 단독 시 service 가 DocumentTopic 최고 confidence 토픽을 NotInterestedTopic 에
+    INSERT (하이브리드, 정렬 2).
     """
 
     cso_topic_id: UUID | None = None
     leaf_topic_id: UUID | None = None
     document_id: UUID | None = None
+    client_request_id: str
+
+    @model_validator(mode="after")
+    def validate_at_least_one(self) -> Self:
+        if (
+            self.cso_topic_id is None
+            and self.leaf_topic_id is None
+            and self.document_id is None
+        ):
+            raise ValueError(
+                "cso_topic_id / leaf_topic_id / document_id 중 최소 1개는 필수."
+            )
+        return self
+
+
+__all__ = [
+    "BatchResponse",
+    "EventBatchRequest",
+    "EventRequest",
+    "EventResponse",
+    "HideFeedbackRequest",
+    "InterestStateResponse",
+    "InterestTopicView",
+    "NotInterestedRequest",
+    "SaveFeedbackRequest",
+]

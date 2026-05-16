@@ -226,8 +226,9 @@ async def _resolve_fallback_leaves(
             CSOTopic.cso_topic_id.in_(chosen_ids)
         )
         label_map: dict[UUID, str] = {}
-        for row in await db.execute(label_stmt):
-            label_map[row.cso_topic_id] = row.label
+        label_rows = (await db.execute(label_stmt)).all()
+        for label_row in label_rows:
+            label_map[label_row.cso_topic_id] = label_row.label
         for cid in chosen_ids:
             targets.append(
                 LeafTarget(
@@ -453,7 +454,7 @@ async def run_collection_for_user(
                 msg = f"leaf={leaf.leaf_label}: {type(exc).__name__}: {exc}"
                 job_result.failures.append(msg)
                 logger.warning("collection leaf failed: %s", msg)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 await db.rollback()
                 msg = f"leaf={leaf.leaf_label}: unexpected {type(exc).__name__}: {exc}"
                 job_result.failures.append(msg)
@@ -701,9 +702,9 @@ async def _finalize_job(
 
 
 __all__ = [
+    "LLM_SEARCH_SENTINEL_NAME",
     "CollectionAlreadyRunning",
     "CollectionJobResult",
-    "LLM_SEARCH_SENTINEL_NAME",
     "LeafTarget",
     "build_trace_json",
     "deterministic_jitter_seconds",

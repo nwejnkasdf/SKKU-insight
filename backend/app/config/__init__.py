@@ -109,7 +109,9 @@ class Settings(BaseSettings):
     COLLECTION_USER_JITTER_SECONDS: int = 300
     LIFECYCLE_EVALUATOR: Literal["hybrid_d", "batch_llm", "rule_only"] = "hybrid_d"
     MERGE_EVALUATION_CRON: str = "0 3 * * 1"
-    INTEREST_DECAY_CRON: str = "0 0 * * *"
+    # A6 daily decay (interest-bayesian.md §2 + decision: lazy 미사용, cron only).
+    # 18:00 UTC = 03:00 KST — 사용자 활동 적은 시간대.
+    INTEREST_DECAY_CRON: str = "0 18 * * *"
     NAVER_CLEANUP_CRON: str = "0 17 * * *"  # (v13 라운드 폐기, 2026-05-11) decision-backlog P1-6 무효 — NaverBS4 어댑터 폐기. env 보존만, scheduler 등록 제거.
 
     # === Concurrency guards (sdd/concurrency.md) ===
@@ -119,6 +121,29 @@ class Settings(BaseSettings):
     RECOMMENDATION_BUILD_LOCK_TTL_SECONDS: int = 30
     TRAVERSAL_USER_LOCK_TTL_SECONDS: int = 10
     CONSENT_CACHE_TTL_SECONDS: int = 60
+
+    # === A6 Interest Bayesian (algorithms/interest-bayesian.md) ===
+    # 1-hop trace path 조상 propagation. A7 (leaf-lifecycle + traversal) 도입 후 true.
+    # false 일 때 ingest_event 는 단일 노드 (부모 cso_topic_id) + 직접 지정 토픽만 갱신.
+    INTEREST_PROPAGATION_ENABLED: bool = False
+    # Onboarding 직후 boost (alpha_prior 추가) 가 만료되는 active_day 한도.
+    # decay daily cron 이 `user.active_day_counter - boost_applied_at_active_day >= N` row
+    # 의 boost 분 (cluster +1.0, 1-hop child +0.5) 을 alpha 에서 차감 + 컬럼 NULL 화.
+    INTEREST_BOOST_EXPIRY_ACTIVE_DAYS: int = 14
+    # EventBuffer flush 시 per-user mutex 의 TTL (초). traversal_lock 과 분리되어
+    # 동시 trace mutation 차단 X. flush 후 즉시 release.
+    INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS: int = 10
+    # dwell_tick 카운터 Redis TTL (초). 문서당 cap 4회 (≥2분) 도달 후 1시간 동안
+    # 추가 dwell 이 와도 베이지안 갱신 skip — 1시간 지나면 자연 재시작.
+    DWELL_TICK_CAP_TTL_SECONDS: int = 3600
+    DWELL_TICK_CAP_PER_DOCUMENT: int = 4
+    # event idempotency payload-hash 캐시 TTL (초). client retry window 가정.
+    # DB UNIQUE(user_id, client_request_id) 가 1차 SOR.
+    EVENT_DUPLICATE_CACHE_TTL_SECONDS: int = 86400
+    # Codex S-05 fix: system_config seed (interest_params, event_weights) 누락 시 lifespan
+    # 동작 모드. true (default 운영) → SystemConfigMissingError 로 startup 차단 (fail-fast).
+    # false → WARN + endpoint fallback (테스트 환경 / 의도적 비활성).
+    SYSTEM_CONFIG_REQUIRED: bool = True
 
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.

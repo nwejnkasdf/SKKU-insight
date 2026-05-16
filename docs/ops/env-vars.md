@@ -92,7 +92,7 @@
 | `COLLECTION_USER_JITTER_SECONDS` | `300` | 사용자별 잡 시작 시각 분산 윈도우 — LLM provider RL 보호 ([`../sdd/concurrency.md §8`](../sdd/concurrency.md)) |
 | `LIFECYCLE_EVALUATOR` | `hybrid_d` | hybrid_d | batch_llm | rule_only |
 | `MERGE_EVALUATION_CRON` | `0 3 * * 1` | 매주 월 03:00 UTC |
-| `INTEREST_DECAY_CRON` | `0 0 * * *` | 매일 자정 UTC (단 active day 차이 없으면 no-op) |
+| `INTEREST_DECAY_CRON` | `0 18 * * *` | **(A6, 2026-05-17)** 매일 18:00 UTC = 03:00 KST. A6 daily decay cron (lazy 미사용 — 결정 매트릭스). 베이지안 사후 감쇠 + 14-day onboarding boost 만료 일괄 처리. 사용자 active day 차이 없으면 row no-op. |
 | ~~`NAVER_CLEANUP_CRON`~~ | ~~`0 17 * * *`~~ | **(v13 라운드 폐기, 2026-05-11)** decision-backlog P1-6 무효. NaverBS4 어댑터 폐기로 tech_news Document 진입 X → cleanup 불필요. .env 에 남아있어도 무시 (A4 scheduler 등록 제거). |
 
 ## 동시성 가드
@@ -105,6 +105,20 @@
 | `RECOMMENDATION_BUILD_LOCK_TTL_SECONDS` | `30` | single-flight build lock TTL |
 | `TRAVERSAL_USER_LOCK_TTL_SECONDS` | `10` | trace mutation user-level mutex TTL |
 | `CONSENT_CACHE_TTL_SECONDS` | `60` | consent active 상태 Redis 캐시 |
+
+## A6 Interest Bayesian (2026-05-17 추가)
+
+본 7개 env 는 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) 의 동작 파라미터 — TOML config 가 아닌 env 로 노출되는 운영 토글만 본 표. 베이지안 파라미터 자체 (alpha_prior, half_life 등) 는 system_config 테이블 의 `interest_params` JSONB 행에서 관리 (A10 admin-console 가 UI 제공).
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `INTEREST_PROPAGATION_ENABLED` | `false` | A7 (leaf-lifecycle + traversal) 도입 후 `true`. false 일 때 ingest_event 는 직접 토픽 + 부모 cso_topic_id 만 갱신, trace path 조상 propagation skip. |
+| `INTEREST_BOOST_EXPIRY_ACTIVE_DAYS` | `14` | onboarding boost (cluster +1.0 / 1-hop child +0.5) 가 자연 만료되는 active day. decay cron 이 `user.active_day_counter - boost_applied_at_active_day >= N` row 의 alpha 에서 boost 분 차감 + 컬럼 NULL 화. |
+| `INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS` | `10` | EventBuffer flush 시 per-user mutex TTL (초). flush 후 즉시 release. traversal_lock 과 별도. |
+| `DWELL_TICK_CAP_TTL_SECONDS` | `3600` | dwell_tick Redis 카운터 TTL (초). 문서당 cap 4회 도달 후 1시간 자연 소멸. |
+| `DWELL_TICK_CAP_PER_DOCUMENT` | `4` | dwell_tick 문서당 베이지안 갱신 cap (30s×4=2분). cap 초과 시 베이지안 skip, active_day 와 UserEvent INSERT 는 그대로. SRS 체류 ≥2분 기준 정렬. |
+| `EVENT_DUPLICATE_CACHE_TTL_SECONDS` | `86400` | event idempotency payload-hash Redis 캐시 TTL (초). DB UNIQUE(user_id, client_request_id) 가 1차 SOR — 본 캐시는 응답 RTT 단축용. |
+| `SYSTEM_CONFIG_REQUIRED` | `true` | **(Codex S-05 fix)** lifespan startup 시 system_config seed (interest_params, event_weights) 누락 동작. `true` (default 운영) → RuntimeError 로 startup 차단 (fail-fast). `false` (테스트 / 의도적 비활성) → WARN + endpoint fallback. |
 
 ## 외부 소스 키 (있을 때만 채움)
 
@@ -222,7 +236,7 @@ COLLECTION_GLOBAL_CONCURRENCY=8
 COLLECTION_USER_JITTER_SECONDS=300
 LIFECYCLE_EVALUATOR=hybrid_d
 MERGE_EVALUATION_CRON=0 3 * * 1
-INTEREST_DECAY_CRON=0 0 * * *
+INTEREST_DECAY_CRON=0 18 * * *
 NAVER_CLEANUP_CRON=0 17 * * *
 
 # === Concurrency guards ===
@@ -232,6 +246,15 @@ RECOMMENDATION_CACHE_TTL_SECONDS=3600
 RECOMMENDATION_BUILD_LOCK_TTL_SECONDS=30
 TRAVERSAL_USER_LOCK_TTL_SECONDS=10
 CONSENT_CACHE_TTL_SECONDS=60
+
+# === A6 Interest Bayesian (2026-05-17) ===
+INTEREST_PROPAGATION_ENABLED=false
+INTEREST_BOOST_EXPIRY_ACTIVE_DAYS=14
+INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS=10
+DWELL_TICK_CAP_TTL_SECONDS=3600
+DWELL_TICK_CAP_PER_DOCUMENT=4
+EVENT_DUPLICATE_CACHE_TTL_SECONDS=86400
+SYSTEM_CONFIG_REQUIRED=true
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

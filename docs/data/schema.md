@@ -469,6 +469,32 @@ CREATE UNIQUE INDEX ux_not_interested_topic_pair
   WHERE cso_topic_id IS NOT NULL AND leaf_topic_id IS NOT NULL;
 ```
 
+### SystemConfig
+
+> A6 (2026-05-17) 신규. 시스템 운영 파라미터 (interest_params, event_weights) SOR.
+> A6 lifespan startup 시 Redis SETEX 60s 로 캐싱 (read-only hot path). A10
+> admin-console 가 GET /admin/system-config + PUT /admin/system-config/{key} 로
+> 변경. 변경 시 즉시 Redis cache invalidate (PUT endpoint 에서 명시 DEL).
+
+```python
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by_admin_id: Mapped[UUID | None] = mapped_column(ForeignKey("admin_user.admin_id", ondelete="SET NULL"))
+```
+
+**초기 seed** (alembic 0004 op.bulk_insert, 2 row):
+
+| key | value (JSONB 요약) |
+|---|---|
+| `interest_params` | `alpha_prior=1.0, beta_prior=4.0, half_life_short=7, half_life_long=60, onboarding_prior_boost=1.0, onboarding_boost_active_days=14, propagation_hop_decay=0.5, propagation_max_hops=4, propagation_non_trace_ancestors=false, bucket_high_long=0.70, bucket_high_short=0.60, bucket_medium=0.50, bucket_low=0.30` |
+| `event_weights` | `weights: {view=0.0, click=1.0, dwell_tick=0.5, open_external=2.0, save=5.0, hide=-3.0, not_interested=-5.0}, caps: {dwell_tick_max_per_document=4, weight_per_event_max=5.0}` |
+
+전체 JSON 은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) §구성 파일 스키마.
+
 ### ReprocessRequest
 
 ```python

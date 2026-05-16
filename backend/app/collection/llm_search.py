@@ -84,7 +84,7 @@ async def search_for_leaf(
     *,
     trace_json: dict[str, Any],
     leaf_label: str,
-    parent_cso_topic_id: UUID,  # noqa: ARG001 — 호출자가 DocumentTopic 매핑 시 사용
+    parent_cso_topic_id: UUID,
     user_id: UUID,
     top_n: int = 10,
 ) -> list[SearchResult]:

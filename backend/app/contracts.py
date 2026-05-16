@@ -111,16 +111,20 @@ class CollectionJobStatus(str, Enum):
 
 
 class JobType(str, Enum):
-    """CollectionJob.job_type. (Codex round 2 S-06) inline Literal 폐기.
+    """CollectionJob.job_type + scheduler 등록 잡 종류.
 
-    decisions.md §10 v13 round + decision-backlog C-33·C-34.
-    1차 시연은 `DAILY_COLLECT` 만 사용 — 나머지는 후속 phase (A7 leaf-lifecycle / A8 merge).
+    decisions.md §10 v13 round + decision-backlog C-33·C-34·C-38.
+    DAILY_COLLECT/SUMMARY_GENERATION 은 A4 가 사용. INTEREST_DECAY 는 A6 daily cron
+    (`app/worker/jobs/interest_decay.py`) 이 사용 — 베이지안 사후 시간 감쇠 +
+    14-day onboarding boost 만료 일괄 차감. LEAF_LIFECYCLE / MERGE_EVALUATION 은
+    후속 phase (A7).
     """
 
     DAILY_COLLECT = "daily_collect"
     LEAF_LIFECYCLE = "leaf_lifecycle"
     MERGE_EVALUATION = "merge_evaluation"
     SUMMARY_GENERATION = "summary_generation"
+    INTEREST_DECAY = "interest_decay"
 
 
 class AdminRole(str, Enum):
@@ -196,7 +200,11 @@ class ErrorCode(str, Enum):
     EVENT_CONSENT_REQUIRED = "event.consent_required"
     EVENT_DUPLICATE = "event.duplicate"
     EVENT_INVALID_TARGET = "event.invalid_target"
+    EVENT_BUFFER_FULL = "event.buffer_full"
     FEEDBACK_ALREADY_SAVED = "feedback.already_saved"
+
+    # --- interest (A6) ---
+    INTEREST_SYSTEM_CONFIG_MISSING = "interest.system_config_missing"
 
     # --- onboarding ---
     ONBOARDING_CONSENT_REQUIRED = "onboarding.consent_required"
@@ -327,13 +335,48 @@ class RedisKey:
 
     @staticmethod
     def dwell_tick_count(user_id: UUID, document_id: UUID) -> str:
-        """dwell_tick 카운터 (atomic SQL UPSERT 사용 시 보통 불필요)."""
-        return f"dwell:{user_id}:{document_id}"
+        """dwell_tick 카운터 — A6 가 atomic INCR + TTL 으로 cap 4회 (≥2분) 관리.
+
+        algorithms/interest-bayesian.md §의사 코드 + sdd/concurrency.md §6.
+        TTL 은 `DWELL_TICK_CAP_TTL_SECONDS` (default 3600s) 로 자연 소멸.
+        값이 `DWELL_TICK_CAP_PER_DOCUMENT` (default 4) 초과 시 베이지안 갱신 skip
+        (단 active_day 와 UserEvent INSERT 는 그대로 진행 — audit log).
+        """
+        return f"dwell:tick:{user_id}:{document_id}"
 
     @staticmethod
     def event_buffer(user_id: UUID) -> str:
         """5초 batch flush 버퍼. concurrency.md §6."""
         return f"events:buffer:{user_id}"
+
+    @staticmethod
+    def system_config_cache(key: str) -> str:
+        """system_config 테이블 값 캐시. lifespan startup 시 1회 SETEX.
+
+        A6 가 도입한 `system_config` 테이블의 (interest_params, event_weights) 값을
+        매 요청 DB hit 회피용으로 Redis 에 캐싱. TTL 60s — A10 admin-console 가
+        PUT /admin/system-config 시 즉시 DEL 로 invalidate. read-only 경로만 본 캐시 사용.
+        """
+        return f"system_config:{key}"
+
+    @staticmethod
+    def interest_decay_lock(user_id: UUID) -> str:
+        """A6 daily decay cron 의 per-user mutex. 10s TTL.
+
+        traversal_lock 과 분리하는 이유: A7 의 trace mutation 과 동시 수행 가능해야
+        하고 (decay 는 read-mostly + UPDATE 만), 같은 키 사용 시 A7 latency 충돌.
+        """
+        return f"lock:interest_decay:{user_id}"
+
+    @staticmethod
+    def event_duplicate_cache(user_id: UUID, client_request_id: str) -> str:
+        """event idempotency payload-hash 캐시 (hot path).
+
+        DB UNIQUE(user_id, client_request_id) 가 1차 SOR. 본 캐시는 응답 RTT 단축용.
+        TTL `EVENT_DUPLICATE_CACHE_TTL_SECONDS` (default 24h) — UserEvent 생성 시
+        SETEX, EventBuffer flush 후에도 보존되어 client retry 시 200 응답 가능.
+        """
+        return f"event:dup:{user_id}:{client_request_id}"
 
     @staticmethod
     def cso_clusters_cache() -> str:

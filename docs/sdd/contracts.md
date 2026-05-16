@@ -85,6 +85,14 @@ class CollectionJobStatus(str, Enum):
     SKIPPED = "skipped"   # 외부 소스 비활성/조건 미충족 (2026-05-11 추가)
 
 
+class JobType(str, Enum):
+    DAILY_COLLECT = "daily_collect"
+    LEAF_LIFECYCLE = "leaf_lifecycle"
+    MERGE_EVALUATION = "merge_evaluation"
+    SUMMARY_GENERATION = "summary_generation"
+    INTEREST_DECAY = "interest_decay"   # A6 daily decay + 14-day boost 만료 (2026-05-17 추가)
+
+
 class AdminRole(str, Enum):
     SUPER = "super"
     OPERATOR = "operator"
@@ -141,7 +149,10 @@ class ErrorCode(str, Enum):
     EVENT_CONSENT_REQUIRED = "event.consent_required"
     EVENT_DUPLICATE = "event.duplicate"
     EVENT_INVALID_TARGET = "event.invalid_target"
+    EVENT_BUFFER_FULL = "event.buffer_full"
     FEEDBACK_ALREADY_SAVED = "feedback.already_saved"
+    # interest (A6)
+    INTEREST_SYSTEM_CONFIG_MISSING = "interest.system_config_missing"
     # onboarding
     ONBOARDING_CONSENT_REQUIRED = "onboarding.consent_required"
     ONBOARDING_NO_CLUSTER_SELECTED = "onboarding.no_cluster_selected"
@@ -250,13 +261,33 @@ class RedisKey:
 
     @staticmethod
     def dwell_tick_count(user_id: UUID, document_id: UUID) -> str:
-        # atomic SQL UPSERT 사용 시 별도 Redis 키 불필요. 본 함수는 만약 Redis
-        # 카운터 기반으로 갈 경우 대비.
-        return f"dwell:{user_id}:{document_id}"
+        """A6 가 atomic INCR + TTL 으로 dwell cap 4회 (≥2분) 관리.
+        algorithms/interest-bayesian.md §의사 코드. TTL 은 `DWELL_TICK_CAP_TTL_SECONDS`
+        (default 3600s). cap 초과 시 베이지안 갱신 skip (UserEvent INSERT + active_day
+        는 그대로)."""
+        return f"dwell:tick:{user_id}:{document_id}"
 
     @staticmethod
     def event_buffer(user_id: UUID) -> str:
         return f"events:buffer:{user_id}"
+
+    @staticmethod
+    def system_config_cache(key: str) -> str:
+        """A6 의 system_config 테이블 값 캐시. lifespan startup SETEX. TTL 60s.
+        A10 PUT /admin/system-config 시 명시 DEL 로 invalidate."""
+        return f"system_config:{key}"
+
+    @staticmethod
+    def interest_decay_lock(user_id: UUID) -> str:
+        """A6 daily decay cron 의 per-user mutex. 10s TTL. traversal_lock 과 분리 —
+        A7 trace mutation 과 latency 충돌 방지."""
+        return f"lock:interest_decay:{user_id}"
+
+    @staticmethod
+    def event_duplicate_cache(user_id: UUID, client_request_id: str) -> str:
+        """A6 event idempotency payload-hash 캐시 (hot path).
+        TTL `EVENT_DUPLICATE_CACHE_TTL_SECONDS` (default 24h). DB UNIQUE 가 1차 SOR."""
+        return f"event:dup:{user_id}:{client_request_id}"
 
     @staticmethod
     def cso_clusters_cache() -> str:

@@ -97,6 +97,8 @@ class NotInterestedRequest(BaseModel):
 | code | HTTP | 의미 |
 |---|---|---|
 | `event.consent_required` | 403 | UserConsent 비활성 (FR-59, NFR-19) — 클라이언트는 UI-05 재동의 화면으로 |
-| `event.duplicate` | 409 | client_request_id 중복 |
-| `event.invalid_target` | 422 | document_id/topic_id 매칭 실패 |
-| `feedback.already_saved` | 409 | 중복 저장 |
+| `event.duplicate` | 409 | client_request_id 중복 — 같은 (user_id, client_request_id) 로 재호출 시 payload_hash 불일치인 경우. payload 일치 시 200 + 기존 row 반환 (idempotency hot path, decision 매트릭스). |
+| `event.invalid_target` | 422 | document_id/topic_id 매칭 실패 — NotInterestedRequest 가 cso/leaf/document_id 중 하나도 없는 경우 model_validator 실패 포함. |
+| `event.buffer_full` | 503 | EventBuffer flush 실패 또는 buffer 가 일시 cap 초과. 1차 시연에서는 거의 발생 X — Pydantic min/max_length 가 50건 cap 1차 차단. forward-compatible 보존. |
+| `feedback.already_saved` | 409 | 중복 저장 — SavedDocument composite PK 중복 시 ON CONFLICT DO NOTHING 후 본 코드로 응답. |
+| `interest.system_config_missing` | 503 | lifespan startup 시 system_config 테이블의 (interest_params, event_weights) 행이 비어 있거나 누락. seed 가 alembic 0004 op.bulk_insert 로 자동 INSERT 되므로 일반 운영에선 발생 X. A10 admin-console 에서 잘못 DELETE 한 경우 등 비상시. |

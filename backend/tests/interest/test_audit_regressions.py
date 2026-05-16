@@ -51,6 +51,7 @@ class TestRound1CodexFixGuards:
     async def test_c01_atomic_upsert_no_lost_update(
         self,
         db_session,
+        redis_client: aioredis.Redis,
         seeded_user: User,
         seeded_cso_topics: list[CSOTopic],
         seeded_system_config,
@@ -61,8 +62,10 @@ class TestRound1CodexFixGuards:
         INSERT 시도 후 DO NOTHING 으로 손실. alpha 가 (prior + delta * 1) 만 가산.
         fix 후: 두 번째 호출도 ON CONFLICT DO UPDATE 로 UPDATE 진입 → alpha 가
         (prior + delta * 2) 누적.
+
+        Codex round-2 S-08 fix: redis_client fixture 주입 (load_system_config 내부 SETEX).
         """
-        params, _ = await load_system_config(db_session, None)  # type: ignore[arg-type]
+        params, _ = await load_system_config(db_session, redis_client)
         cso_id = seeded_cso_topics[0].cso_topic_id
         # 같은 (user, cso) 에 두 번 INSERT — delta=1.0 씩.
         for _ in range(2):
@@ -323,6 +326,79 @@ class TestRound1CodexFixGuards:
         assert hasattr(settings, "SYSTEM_CONFIG_REQUIRED")
         # default = True (운영 안전)
         assert settings.SYSTEM_CONFIG_REQUIRED is True
+
+    @pytest.mark.asyncio
+    async def test_c03_batch_race_preserves_prior_inserts(
+        self,
+        db_session,
+        redis_client: aioredis.Redis,
+        seeded_user: User,
+        seeded_document: Document,
+        seeded_cso_topics: list[CSOTopic],
+        seeded_system_config,
+    ) -> None:
+        """Codex round-2 C-03 fix: batch 안 entry-B race 가 entry-A row 를 소실시키지 않음.
+
+        fix 전 (round 1 S-01): IntegrityError 시 db.rollback() → batch 전체 트랜잭션 rollback
+        → entry-A user_event row 소실. Redis 캐시 만 잔존 → false positive.
+        fix 후 (round 2 C-03): _record_user_event 가 ON CONFLICT DO NOTHING RETURNING.
+        race 시 None 반환 → 트랜잭션 보존 → entry-A row 안전.
+
+        본 테스트는 sequential 호출 두 번 (같은 req_id) 으로 race 효과 시뮬레이션.
+        """
+        settings = get_settings()
+        params, weights = await load_system_config(db_session, redis_client)
+        # entry-A INSERT — 성공
+        req_a = f"req-A-{uuid.uuid4().hex[:8]}"
+        result_a = await ingest_event_atomic(
+            db_session,
+            redis_client,
+            nx.DiGraph(),
+            settings,
+            params,
+            weights,
+            user=seeded_user,
+            event_type=EventType.CLICK,
+            document_id=seeded_document.document_id,
+            cso_topic_id=None,
+            leaf_topic_id=None,
+            dwell_ms=None,
+            client_request_id=req_a,
+            occurred_at=datetime.now(UTC),
+            active_day=seeded_user.active_day_counter,
+        )
+        # entry-B 가 같은 req_a 로 race → duplicate=True (트랜잭션 rollback 없음)
+        result_b = await ingest_event_atomic(
+            db_session,
+            redis_client,
+            nx.DiGraph(),
+            settings,
+            params,
+            weights,
+            user=seeded_user,
+            event_type=EventType.CLICK,
+            document_id=seeded_document.document_id,
+            cso_topic_id=None,
+            leaf_topic_id=None,
+            dwell_ms=None,
+            client_request_id=req_a,
+            occurred_at=result_a.server_received_at,
+            active_day=seeded_user.active_day_counter,
+        )
+        assert result_b.duplicate is True
+        # entry-A row 가 살아 있음 (rollback 안 됨)
+        from app.db.models import UserEvent as _UserEvent
+
+        ue_rows = (
+            await db_session.execute(
+                select(_UserEvent).where(
+                    _UserEvent.user_id == seeded_user.user_id,
+                    _UserEvent.client_request_id == req_a,
+                )
+            )
+        ).scalars().all()
+        assert len(ue_rows) == 1
+        assert ue_rows[0].event_id == result_a.event_id
 
     @pytest.mark.asyncio
     async def test_s06_onboarding_savepoint_isolation(

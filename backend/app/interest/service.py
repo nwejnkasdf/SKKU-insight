@@ -26,7 +26,6 @@ import networkx as nx
 import redis.asyncio as aioredis
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_settings
@@ -238,12 +237,18 @@ async def _record_user_event(
     client_request_id: str,
     payload_hash: str,
     occurred_at: datetime,
-) -> UUID:
-    """UserEvent INSERT (audit log). cap/view 경로도 호출 (베이지안 skip 이어도 record)."""
-    event_id = uuid4()
-    db.add(
-        UserEvent(
-            event_id=event_id,
+) -> UUID | None:
+    """UserEvent INSERT (audit log). cap/view 경로도 호출 (베이지안 skip 이어도 record).
+
+    Codex C-03 fix: db.add + flush 가 IntegrityError 발생 시 batch 트랜잭션 전체
+    rollback (앞선 entry 의 row 소실). ON CONFLICT DO NOTHING RETURNING 패턴으로 교체
+    — race 시 IntegrityError 없이 None 반환 → caller 가 lookup + duplicate 응답.
+    """
+    new_event_id = uuid4()
+    stmt = (
+        pg_insert(UserEvent)
+        .values(
+            event_id=new_event_id,
             user_id=user_id,
             document_id=document_id,
             cso_topic_id=cso_topic_id,
@@ -254,9 +259,14 @@ async def _record_user_event(
             payload_hash=payload_hash,
             occurred_at=occurred_at,
         )
+        .on_conflict_do_nothing(index_elements=["user_id", "client_request_id"])
+        .returning(UserEvent.event_id)
     )
-    await db.flush()
-    return event_id
+    inserted = (await db.execute(stmt)).scalar_one_or_none()
+    if inserted is None:
+        # race — UNIQUE(user_id, client_request_id) 충돌. caller 가 lookup.
+        return None
+    return inserted
 
 
 async def _apply_bayesian_update(
@@ -451,23 +461,23 @@ async def ingest_event_atomic(
         if not within_cap:
             bayesian_skip = True
 
-    # 3) UserEvent INSERT (audit). 동시 두 호출 race → IntegrityError 보호 (Codex S-01).
-    try:
-        event_id = await _record_user_event(
-            db,
-            user_id=user.user_id,
-            event_type=event_type,
-            document_id=document_id,
-            cso_topic_id=cso_topic_id,
-            leaf_topic_id=leaf_topic_id,
-            dwell_ms=dwell_ms,
-            client_request_id=client_request_id,
-            payload_hash=payload_hash,
-            occurred_at=occurred_at,
-        )
-    except IntegrityError:
-        # 동시 호출 race — Redis/DB miss 동시 통과 후 둘 다 INSERT 시도. 한쪽만 성공.
-        await db.rollback()
+    # 3) UserEvent INSERT (audit). Codex C-03 fix: ON CONFLICT DO NOTHING RETURNING —
+    # race 시 None 반환 (IntegrityError 없음, 트랜잭션 보존 → batch 안 앞선 row 안전).
+    event_id = await _record_user_event(
+        db,
+        user_id=user.user_id,
+        event_type=event_type,
+        document_id=document_id,
+        cso_topic_id=cso_topic_id,
+        leaf_topic_id=leaf_topic_id,
+        dwell_ms=dwell_ms,
+        client_request_id=client_request_id,
+        payload_hash=payload_hash,
+        occurred_at=occurred_at,
+    )
+    if event_id is None:
+        # race — Redis/DB miss 동시 통과 후 ON CONFLICT 로 한쪽만 INSERT 성공.
+        # 트랜잭션 rollback 없이 lookup → duplicate 분기.
         race_lookup = await check_idempotent(
             db,
             redis,
@@ -488,7 +498,7 @@ async def ingest_event_atomic(
         raise EventDuplicateError(
             existing_event_id=race_lookup.existing_event_id,
             user_id=user.user_id,
-        ) from None
+        )
     # Codex C-02: store_idempotent 는 router 가 commit 성공 후 호출. 본 service 는
     # IngestResult 에 payload_hash + client_request_id 담아 반환.
 

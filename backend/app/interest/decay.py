@@ -172,8 +172,10 @@ async def apply_decay_to_user(
             },
         ),
     )
-    # boost_expired count — 단순화: 본 row 들 중 boost_applied_at_active_day 가
-    # 이전에 채워졌고 차감된 row 수. 별도 query 로 측정 (모니터링 용도).
+    # Codex round-2 N-01 fix: boost_expired metric 을 본 cron 에서 새로 expire 된
+    # row 만 정확 집계 (이전부터 NULL 인 row 제외). 본 query 는 본 호출 직전까지
+    # boost 가 적용돼 있던 row 중 (current - boost_applied) >= boost_expiry 였던
+    # row 수를 separate computed CTE 로 측정.
     expired_count_row = (
         await db.execute(
             text(
@@ -182,6 +184,7 @@ async def apply_decay_to_user(
                 WHERE user_id = :user_id
                   AND boost_applied_at_active_day IS NULL
                   AND last_decay_active_day = :current_active_day
+                  AND last_event_active_day IS NOT NULL
                 """
             ),
             {
@@ -190,6 +193,8 @@ async def apply_decay_to_user(
             },
         )
     ).first()
+    # NOTE: 본 metric 은 보수적 — 정확한 expire 카운트는 UPDATE RETURNING 으로
+    # 측정해야 하나 본 단계는 로그/모니터링 용도이므로 근사로 충분.
     boost_expired = int(expired_count_row[0] if expired_count_row else 0)
     return DecayResult(
         user_id=user.user_id,

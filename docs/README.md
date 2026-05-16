@@ -32,10 +32,10 @@
 ### Phase 1 — Data·정제 (Phase 0 후 병렬)
 - **A4. collection** ✅ — **(v13 라운드 pivot, 2026-05-11 docs + 2026-05-17 코드)** `LLMProvider.search_with_tools()` 단일 경로 (GPT-5.5 + Responses API web_search) + Document/DocumentTopic/CollectionJob/ClickbaitResult ORM + alembic 0003 + dedup + jitter + `/topics/{id}/documents` cross-cutting. [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) — Codex 3-라운드 audit fix 26건 + 실 OpenAI GPT-5.5 통합 시연 검증 (26 documents inserted)
 - **A5. clickbait** ✅ — 사용자 제공 DoRA 모듈 wrap, ClickbaitResult 저장 (FR-30~34). **(v13 라운드)** 1차 시연 default 비활성 — 사용자가 News 소스 명시 활성화 시만 호출
-- **A6. interest-bayesian** ⬜ — 행동 로그 API, Beta-Bernoulli 업데이트, 시간 감쇠, `interest_params.toml` (FR-12~20) — **다음 작업**
+- **A6. interest-bayesian** ✅ — 행동 로그 API, Beta-Bernoulli atomic UPSERT (INSERT ON CONFLICT DO UPDATE, partial UNIQUE 3종), active day 기반 시간 감쇠 (GREATEST floor), `system_config` DB 시드 (interest_params + event_weights JSONB, A6 read-only + A10 admin UI 분담), 9 endpoint + 6 신규 테이블 + alembic 0004 + decay daily cron 18 UTC + EventBuffer 5초 batch flush + Lua atomic dwell cap + 14-day boost 만료 + payload-hash idempotency 200/409 + not-interested 하이브리드 정렬 2 + 207 Multi-Status batch (FR-12~20). [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) — Codex 2 라운드 audit fix 12건 + 통합 시연 검증
 
-### Phase 2 — 추천 핵심 (Phase 1 후)
-- **A7. leaf-lifecycle** — `LifecycleEvaluator` 추상 + D 하이브리드 구현, LLM 프롬프트, `topic_lifecycle.toml` (FR-14~16)
+### Phase 2 — 추천 핵심 (Phase 1 후) — **다음 작업**
+- **A7. leaf-lifecycle** — `LifecycleEvaluator` 추상 + D 하이브리드 구현, LLM 프롬프트, `topic_lifecycle.toml` (FR-14~16). A6 의 INTEREST_PROPAGATION_ENABLED toggle 활성
 - **A8. recommendation** — core/adjacent/discovery 후보 생성, fallback, Cold-start LLM, 랭킹 (FR-35~45, FR-26)
 
 ### Phase 3 — UI (Phase 2 후 병렬)

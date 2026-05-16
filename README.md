@@ -50,8 +50,9 @@
 | **Phase 0b — A2 backend-foundation** | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 17 endpoint 본문 + 35건 결함 해소) |
 | **Phase 0b — A3 cso-topic** | ✅ 완료 (5 PR-stack — CSO 3.4 임포트 + NetworkX + 7 endpoint + 11 ORM + 3 라운드 감사 fix 15건) |
 | **v13 라운드 — A4 Topic-driven Pivot** | ✅ docs 정합 (2026-05-11) + 코드 구현 + Codex 3-라운드 audit fix 26건 + 통합 시연 검증 ([PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16), 2026-05-17). 6 source 어댑터 폐기 → LLM tool-use 검색 단일 경로 (GPT-5.5 + Responses API web_search). 26 documents inserted, NFR-25 self-summary 100% 준수. [`docs/decisions.md §10`](docs/decisions.md) |
-| Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian | 🟡 A6 대기 |
-| Phase 2 — A7 leaf-traversal / A8 recommendation | ⬜ |
+| **Phase 1 — A6 interest-bayesian** | ✅ 완료 ([PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18), 2026-05-17) — alembic 0004 (6 신규 테이블 + 12 partial UNIQUE + system_config 2 row seed) + 9 endpoint + decay daily cron + onboarding bootstrap 협업 + Codex 2 라운드 감사 12건 fix + 통합 시연 검증 (idempotency 200/409, batch 207, C-03 batch race fix 정합) |
+| Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian ✅ | 🟢 Phase 1 완료 |
+| Phase 2 — A7 leaf-traversal / A8 recommendation | 🟡 A7 대기 |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
 | 시연 리허설 + 발표 자료 | ⬜ |
@@ -172,4 +173,4 @@ docs/
 
 ---
 
-**다음 액션**: A6 interest-bayesian 본문 구현 ([`prompts/05-A6-interest-bayesian.md`](prompts/05-A6-interest-bayesian.md)) — 행동 로그 API + Beta-Bernoulli atomic UPSERT + active day 기반 시간 감쇠 + 1-hop propagation (FR-12~20). A4 (수집 후보 풀) + A3 (CSO 그래프) 의존 만족돼 진입 가능. A6 완료 후 A7 (leaf-lifecycle + traversal) → A8 (recommendation) 순. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.
+**다음 액션**: A7 leaf-lifecycle + traversal 본문 구현 ([`prompts/06-A7-leaf-lifecycle.md`](prompts/06-A7-leaf-lifecycle.md), 신규 작성 필요) — D 하이브리드 LifecycleEvaluator + TraversalEngine (extend/retract/split/archive) + 3단계 강등 (active→stale→retract→archive) + leaf 재배치 LLM + INTEREST_PROPAGATION_ENABLED=true 토글. A6 (UserInterestState + UserCSOTraversal) 의존 만족돼 진입 가능. A7 완료 후 A8 (recommendation: core/adjacent/discovery + cold-start + first trace 생성) 순. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.

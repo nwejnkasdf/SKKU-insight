@@ -256,9 +256,9 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 11 (해결 1, 무효 1 — P1-6 v13 pivot, 활성 9) | (없음) | reasonable default + stub |
 | P2 | 20 (해결 2, 무효 2 — P2-3·P2-4 v13 pivot, 활성 16) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot) | 33 (해결 33 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11) | (없음) | A2 + v13 라운드 |
+| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit) | 36 (해결 36 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17) | (없음) | A2 + v13 라운드 + A4 |
 
-**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효.**
+**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. 다음 진입 가능 모듈: A6 interest-bayesian.**
 
 ## 본 백로그의 출처
 
@@ -276,4 +276,4 @@
 - `sdd/architecture.md` (1, P0-1 해소되어 마커 제거)
 - `ux/wireframes.md` (정리 작업으로 본 백로그 P1-7로 이동)
 
-마지막 정리: 2026-05-11 (P0-1·P2-6 해소 + clickbait_module 코드 phase 완료로 P1-8·P2-7 해결 — 합계 4건 해소).
+마지막 정리: 2026-05-17 (A4 v13 코드 구현 + Codex round 2 fix 15건 (C-34) + round 3 재감사 fix 7건 (C-35) + 통합 시연 발견 fix 4건 (C-36) — [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 머지. 합계 26건 추가 해소. 실 OpenAI GPT-5.5 + docker compose 통합 시연으로 round 1/2/3 fix 검증 — 26 documents inserted, NFR-25 self-summary 100% 준수). 이전: 2026-05-11 (P0-1·P2-6 해소 + clickbait_module 코드 phase 완료로 P1-8·P2-7 해결 — 합계 4건 해소).

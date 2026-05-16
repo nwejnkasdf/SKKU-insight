@@ -23,7 +23,7 @@
 1. **가입 + 동의 + 12 클러스터(AI / Systems / Security / …) 중 N개 선택**
 2. **Cold-start LLM**이 첫 10개 추천을 즉시 생성 (`core 5 / adjacent 3 / discovery 2` 슬롯)
 3. 사용자가 카드를 보고 클릭·저장·숨김. 베이지안 관심도가 갱신됨
-4. 다음 날 일일 수집(arXiv·OpenAlex·Semantic Scholar·DBLP·빅테크 RSS·네이버뉴스) → 사용자별 trace에 맞춘 새 추천 10개
+4. 다음 날 일일 수집(**LLM tool-use 검색 — GPT-5.5 가 user trace 의 active leaf 를 입력 받아 web_search 도구로 자료 fetch**) → 사용자별 trace에 맞춘 새 추천 10개
 5. 시간이 지나면 **CSO 그래프 위 traversal trace**가 깊어지고 (예: AI → NLP → LLM), 그 끝에 사용자별 **dynamic leaf 토픽**이 분기 (예: "RAG 변형 기법", "Speculative Decoding")
 
 ## 핵심 디자인 포인트 (차별화)
@@ -49,8 +49,8 @@
 | **Phase 0a — A1 docs + A2-stub** | ✅ 완료 ([PR #4](https://github.com/nwejnkasdf/SKKU-insight/pull/4)) |
 | **Phase 0b — A2 backend-foundation** | ✅ 완료 ([PR #7](https://github.com/nwejnkasdf/SKKU-insight/pull/7) — 17 endpoint 본문 + 35건 결함 해소) |
 | **Phase 0b — A3 cso-topic** | ✅ 완료 (5 PR-stack — CSO 3.4 임포트 + NetworkX + 7 endpoint + 11 ORM + 3 라운드 감사 fix 15건) |
-| **v13 라운드 — A4 Topic-driven Pivot** | ✅ docs 정합 완료 (2026-05-11). 6 source 어댑터 폐기 → LLM tool-use 검색 단일 경로. [`docs/decisions.md §10`](docs/decisions.md) |
-| Phase 1 — A4 collection (LLM 검색 기반) / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian | 🟡 A4 본문 구현 대기 |
+| **v13 라운드 — A4 Topic-driven Pivot** | ✅ docs 정합 (2026-05-11) + 코드 구현 + Codex 3-라운드 audit fix 26건 + 통합 시연 검증 ([PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16), 2026-05-17). 6 source 어댑터 폐기 → LLM tool-use 검색 단일 경로 (GPT-5.5 + Responses API web_search). 26 documents inserted, NFR-25 self-summary 100% 준수. [`docs/decisions.md §10`](docs/decisions.md) |
+| Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian | 🟡 A6 대기 |
 | Phase 2 — A7 leaf-traversal / A8 recommendation | ⬜ |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
@@ -144,7 +144,7 @@ make check-all  # 6 cross-check (api_docs / schema / env / error_codes / redis_k
 | 인증 | JWT (HS256, Access 15m + Refresh Redis 14d) + bcrypt(12) |
 | LLM 어댑터 | Mock(default) / OpenAI / Anthropic / OpenRouter / CodexOAuth |
 | 토픽 그래프 | NetworkX (in-memory CSO graph cache) |
-| 외부 데이터 | arXiv API · OpenAlex · Semantic Scholar · DBLP · 빅테크 RSS 30+ · 네이버뉴스 BS4 |
+| 외부 데이터 | **(v13 라운드)** LLM tool-use web search 단일 경로 — OpenAI Responses API `web_search` 도구. Source 테이블 = sentinel 1행 `llm_search` + publisher 정보 Document.raw JSONB |
 | CI | GitHub Actions (lint + type + contracts cross-check + codegen diff) |
 
 ## 문서 구조 (54+ 파일)
@@ -172,4 +172,4 @@ docs/
 
 ---
 
-**다음 액션** (v13 라운드 pivot 반영): A4 collection 본문 구현 ([`prompts/03-A4-collection.md`](prompts/03-A4-collection.md)) — `LLMProvider.search_with_tools()` 확장 + Document/DocumentTopic/CollectionJob ORM + alembic 0003 + dedup + orchestrator + `/topics/{id}/documents` cross-cutting. 6 source 어댑터는 미구현(폐기). A4 완료 후 추천 후보 풀 확보 → A8 추천 파이프라인 가능. 자세히는 [`docs/decisions.md §10`](docs/decisions.md).
+**다음 액션**: A6 interest-bayesian 본문 구현 ([`prompts/05-A6-interest-bayesian.md`](prompts/05-A6-interest-bayesian.md)) — 행동 로그 API + Beta-Bernoulli atomic UPSERT + active day 기반 시간 감쇠 + 1-hop propagation (FR-12~20). A4 (수집 후보 풀) + A3 (CSO 그래프) 의존 만족돼 진입 가능. A6 완료 후 A7 (leaf-lifecycle + traversal) → A8 (recommendation) 순. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.

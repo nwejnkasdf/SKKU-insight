@@ -61,7 +61,7 @@
 │   ├── scripts/{create_admin, reset_password, export_openapi, import_cso}   # ✅ A3: import_cso CLI (--reset/--refresh/--dry-run, 단일 transaction)
 │   └── tests/{conftest + security/admin/llm_provider unit + auth/consent integration + topic/{test_mapping, test_graph, test_importer, test_audit_regressions, fixtures/small_cso.csv} + fixtures/mock_llm/}    # ✅ A3: 65 tests (45 + 12 자체감사 + 6 Codex 1st + 2 Codex 2nd)
 ├── scripts/                          # ✅ A2: 6 cross-check (api_docs / schema / env / error_codes / redis_keys / contracts) + _common.py
-├── prompts/                          # 에이전트별 kickoff prompts (A1 ✅ / A2-stub ✅ / A2 ✅ / A3 ✅ / 나머지 ⬜)
+├── prompts/                          # 에이전트별 kickoff prompts (A1 ✅ / A2-stub ✅ / A2 ✅ / A3 ✅ / A4 ✅ / A5 ✅ / 나머지 ⬜)
 ├── clickbait_module/                 # ✅ vLLM + DoRA 분류기 자체 서비스 (P0-1 해결)
 └── (이하 후속 에이전트가 만듦)
     client/  admin-console/  .github/
@@ -201,6 +201,8 @@ cd client && npm start
 4. 영향 큰 변경은 [`docs/decision-backlog.md`](docs/decision-backlog.md)에 기록.
 5. `docs/sdd/contracts.md` 변경 시 `backend/app/contracts.py` PR로 사용자 승인 받음.
 
-마지막 갱신: 2026-05-11 (**v13 라운드 — A4 Topic-driven Pivot**). A4 collection 본문 구현 직전 사용자 토의에서 합의된 fundamental design pivot 을 docs SOR 에 박음 — 6 source 어댑터(arxiv/openalex/s2/dblp/RSS/네이버BS4) 폐기 후 `LLMProvider.search_with_tools()` 단일 경로로 전환. 사용자 원안("에이전트 기반 추천 시스템의 하네스 + 토픽이 먼저고 문서가 나중") 회복. P1-6 / P2-3 / P2-4 무효 마킹, C-33 (pivot) 신규. SRS FR-22~25 식별자 보존 + v13 해석 박스. **다음 작업**: A4 본문 구현 (별도 세션) — Document/DocumentTopic/CollectionJob ORM + alembic 0003 + LLMProvider.search_with_tools 확장 + dedup + orchestrator + `/topics/{id}/documents` cross-cutting. 자세히는 [`docs/decisions.md §10`](docs/decisions.md), [`prompts/03-A4-collection.md`](prompts/03-A4-collection.md).
+마지막 갱신: 2026-05-17 (**Phase 1 A4 collection 완료** — v13 Topic-driven Pivot 단일 구현물). [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) (commit `a45f36f`) 머지. v13 라운드 docs pivot (2026-05-11) 의 코드 단일 구현물 — alembic 0003 (Document/DocumentTopic/CollectionJob/ClickbaitResult + llm_search sentinel) + `LLMProvider.search_with_tools()` (GPT-5.5 + OpenAI Responses API + web_search) + `app/collection/{llm_search, dedup, orchestrator, service, router}` + `app/topic/documents_service` + `app/worker/jobs/collection` + scheduler naver_cleanup 등록 제거 + CLICKBAIT_ENABLED env (default false). **3 라운드 Codex 독립 감사 26건 fix** (decision-backlog C-34/C-35/C-36): round 2 Critical 3 + Suggested 9 + Nit 3 + round 3 재감사 Critical 2 + Suggested 5 + Nit 1 + 통합 시연 발견 후속 4건. **실 OpenAI GPT-5.5 통합 시연 검증** (docker compose + 실 호출): 26 documents inserted (33 academic_paper / 14 vendor_blog), NFR-25 self-summary 100% 준수, dedup cross-leaf 정상. **다음 작업**: A6 interest-bayesian 본문 구현 — 행동 로그 API + Beta-Bernoulli atomic UPSERT + active day 기반 시간 감쇠 + 1-hop propagation (FR-12~20). A3·A4 의존 만족돼 진입 가능. 자세히는 [`prompts/05-A6-interest-bayesian.md`](prompts/05-A6-interest-bayesian.md).
+
+이전: 2026-05-11 (**v13 라운드 — A4 Topic-driven Pivot docs**). A4 collection 본문 구현 직전 사용자 토의에서 합의된 fundamental design pivot 을 docs SOR 에 박음 — 6 source 어댑터(arxiv/openalex/s2/dblp/RSS/네이버BS4) 폐기 후 `LLMProvider.search_with_tools()` 단일 경로로 전환. 사용자 원안("에이전트 기반 추천 시스템의 하네스 + 토픽이 먼저고 문서가 나중") 회복. P1-6 / P2-3 / P2-4 무효 마킹, C-33 (pivot) 신규. SRS FR-22~25 식별자 보존 + v13 해석 박스.
 
 이전: 2026-05-11 (Phase 0b A3 cso-topic 완료 — 5 PR-stack. CSO 3.4 임포트 + NetworkX 그래프 + 7 endpoint 본문 + 11 ORM 모델 + alembic 0002. 3 라운드 독립 감사. `ruff` · `mypy --strict 100 files` · `pytest 65/65` · 6 cross-check 통과).

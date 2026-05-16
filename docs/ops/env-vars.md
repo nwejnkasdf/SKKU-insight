@@ -38,14 +38,14 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `LLM_PROVIDER` | **`mock` (default)** / `openai` / `anthropic` / `openrouter` / `codex_oauth` (local experimental) | 1차 부트는 mock 으로 별도 키 없이 동작. 시연·운영은 정식 API 권장. CodexOAuth는 비공식 OAuth 세션이므로 본인 토이 빌드 전용 |
-| `LLM_MODEL_HIGH` | provider별. mock: `mock-high`. openai: `gpt-4o` / 사용 가능한 최신 추론 모델. codex_oauth: `gpt-5.5-xhigh` (예시) | 동적 리프 생성·병합 |
-| `LLM_MODEL_MEDIUM` | provider별. mock: `mock-medium`. openai: `gpt-4o-mini`. codex_oauth: `gpt-5.5-medium` (예시) | 요약·추천 이유 |
+| `LLM_PROVIDER` | **`mock` (default)** / `openai`. (v13 round 2 lifespan 가드 — `anthropic`/`openrouter`/`codex_oauth` 는 search_with_tools NotImplementedError 라 boot 거부.) 1차 부트는 mock 으로 별도 키 없이 동작. 시연·운영은 openai 정식 API. |
+| `LLM_MODEL_HIGH` | **`gpt-5.5` (default — v13 round 2 사용자 결정)**. mock 일 때도 fixture lookup 이라 model name 무관. 운영자가 OpenAI 의 다른 모델로 토글 가능. | 동적 리프 생성·병합 + search_with_tools |
+| `LLM_MODEL_MEDIUM` | **`gpt-5.5` (default — v13 round 2 사용자 결정)**. high/medium 슬롯 모두 동일 모델 (사용자 결정). 토글로 다른 모델 분리 가능. | 요약·추천 이유 |
 | `CODEX_OAUTH_TOKEN` | (선택; Codex CLI session token) | `LLM_PROVIDER=codex_oauth` 일 때만 필요. local experimental 경로. |
 | `OPENAI_API_KEY` | `sk-...` | LLM_PROVIDER=openai 일 때 필수 |
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | LLM_PROVIDER=anthropic 일 때 필수 |
 | `OPENROUTER_API_KEY` | `sk-or-...` | LLM_PROVIDER=openrouter 일 때 필수 |
-| `LLM_REQUEST_TIMEOUT_SECONDS` | `60` | |
+| `LLM_REQUEST_TIMEOUT_SECONDS` | `180` | |
 | `LLM_DAILY_TOKEN_BUDGET` | `1000000` | 운영 가드, 초과 시 fallback |
 | `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
 | `LLM_MAX_CONCURRENT_PER_USER` | `2` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
@@ -57,6 +57,7 @@
 |---|---|---|
 | `CLICKBAIT_SERVICE_URL` | (운영 결정) | 백엔드가 호출하는 URL. 호스팅·transport와 무관하게 동일 계약 충족 시 swap 가능 ([`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화) |
 | `CLICKBAIT_MODEL_NAME` | `ax-4.0-light-dora-clickbait-v1` | 응답에 그대로 사용 |
+| `CLICKBAIT_ENABLED` | **`false` (default — v13 라운드 2026-05-11)** | A4 collection orchestrator 가 post-filter 로 clickbait_module 호출할지 여부. 1차 시연 false (LLM 검색이 1차 정제). 사용자가 News 소스 명시 활성화 시 true. |
 
 ## 관리자 부트스트랩
 
@@ -177,15 +178,15 @@ BCRYPT_COST=12
 # === LLM ===
 # 1차 부트는 mock(deterministic fixture)으로 키 없이 동작. 실제 LLM 시연은 openai 권장.
 LLM_PROVIDER=mock
-LLM_MODEL_HIGH=mock-high
-LLM_MODEL_MEDIUM=mock-medium
+LLM_MODEL_HIGH=gpt-5.5
+LLM_MODEL_MEDIUM=gpt-5.5
 # 정식 API로 토글하려면 위 LLM_PROVIDER=openai 후 아래 키 채움
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 OPENROUTER_API_KEY=
 # CodexOAuth는 local experimental — 본인 토이 빌드 전용
 CODEX_OAUTH_TOKEN=
-LLM_REQUEST_TIMEOUT_SECONDS=60
+LLM_REQUEST_TIMEOUT_SECONDS=180
 LLM_DAILY_TOKEN_BUDGET=1000000
 LLM_MAX_CONCURRENT=8
 LLM_MAX_CONCURRENT_PER_USER=2
@@ -194,6 +195,8 @@ LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30
 # === Clickbait (URL은 운영 시점 결정 — 호스팅·transport와 무관) ===
 CLICKBAIT_SERVICE_URL=
 CLICKBAIT_MODEL_NAME=ax-4.0-light-dora-clickbait-v1
+# (v13 라운드 2026-05-11) A4 default 비활성. true 로 변경 시 A4 orchestrator post-filter 호출.
+CLICKBAIT_ENABLED=false
 
 # === Admin bootstrap ===
 ADMIN_BOOTSTRAP_EMAIL=admin@insight.test

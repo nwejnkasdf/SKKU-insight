@@ -23,6 +23,7 @@ dependencies = [
     "structlog>=24.1",
     "uvicorn[standard]>=0.30",
     "networkx>=3.3",
+    "rapidfuzz>=3.6,<4",
 ]
 
 [project.optional-dependencies]

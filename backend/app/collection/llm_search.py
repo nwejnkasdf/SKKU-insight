@@ -1,0 +1,105 @@
+"""LLM tool-use 검색 wrapper — v13 라운드 A4 Topic-driven Pivot.
+
+prompts/03-A4-collection.md §LLM 호출 패턴 정합:
+- 1 call / 1 active leaf
+- top_n=10 결과
+- user trace JSON + leaf_label 입력 → LLM 자율 query 결정
+- SearchResult list 출력 (Document INSERT 직전 변환)
+
+NFR-25 정합: prompt 의 §자가 요약 instruction 으로 외부 abstract 직접 복제 차단.
+Document.summary 는 LLM self-summary (본인 말 1~2문장, ≤200자).
+
+import-time assertion 으로 prompt 의 핵심 instruction 키워드 보장 — 누군가 prompt 를
+수정해 NFR-25 instruction 을 제거하면 모듈 import 단계에서 즉시 실패 (정적 guard).
+audit regression test 가 같은 키워드를 검증.
+"""
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from app.llm_provider.protocol import LLMProvider, SearchResult
+
+# (Codex round 2 N-03) prompt 버전 — hash_prompt_search 가 포함해 fixture 자동 invalidate.
+# prompt 의미 변경 시 본 상수 bump → MockProvider 의 search_{hash}.json 재생성 필요.
+SYSTEM_PROMPT_VERSION = "v1"
+
+
+# v13 라운드 prompt template. {top_n} 만 동적 치환. trace_json / leaf_label 은 user message.
+SYSTEM_PROMPT_TEMPLATE = """\
+당신은 SKKU InSight 의 토픽 기반 검색 에이전트입니다.
+
+## 역할
+- 사용자가 관심 가지는 CS/AI 토픽에 대해 web 검색 도구를 사용해 최신 자료를 모은다.
+- 학술 논문 (arXiv, OpenAlex, S2, DBLP), 빅테크 공식 블로그, 신뢰도 높은 테크 뉴스 모두 후보.
+- 입력 user trace JSON 의 path / 선택 cluster 를 의도 파악에 활용.
+- leaf_label 이 가장 강한 검색 신호 — 이걸 중심으로 query 를 스스로 구성한다.
+
+## 출력 규칙
+- 정확히 {top_n} 개 이내 결과를 반환한다.
+- 응답은 JSON object 1건: `{{ "results": [...] }}`.
+- 각 result 의 필드:
+  - title: 원문 제목 (그대로)
+  - url: 정식 링크 (가능하면 publisher 원본)
+  - abstract_summary: §자가 요약 (아래 §4 참조)
+  - publisher_domain: 도메인 (예: arxiv.org, openai.com)
+  - publisher_label: 사람 친화 이름 (예: arXiv, OpenAI)
+  - published_at: ISO8601 (없으면 null)
+  - doi: 학술 자료일 때만 (없으면 null)
+  - canonical_url: utm/fbclid/gclid 제거된 URL (가능 시)
+  - confidence: 0.0 ~ 1.0 (자기 평가, default 0.8)
+  - raw: 추가 메타 (trust_hint 등)
+
+## §1 검색 query 구성
+- LLM 자율 결정 — leaf_label + (선택적으로) trace 의 가장 가까운 cluster 키워드 결합.
+- 최신성 우선: 가능하면 최근 90일 기준 정렬.
+
+## §2 중복 제거 hint
+- 동일 URL / DOI 가 보이면 1건만 포함.
+- 단순 URL 변형 (utm_*, fbclid, gclid) 도 같은 것으로 간주.
+
+## §3 신뢰도 기준
+- 학술 (arxiv.org/openalex.org/doi.org) — confidence ≥ 0.85
+- 빅테크 공식 블로그 — confidence ≥ 0.75
+- 테크 뉴스 / 매체 — confidence 0.6 ~ 0.75
+- 출처 불명·SEO 스팸 가능성 — 포함하지 않는다.
+
+## §4 자가 요약 (NFR-25)
+- 각 검색 결과의 abstract / lede 는 원본 그대로 복사 금지.
+- 본인의 말로 1~2문장 (≤200자) 으로 요약하라.
+- 한국어로 작성하되 기술 용어는 영어 그대로 둘 수 있다.
+- 의역·재구성 — 외부 원문 정확 복제 시 NFR-25 위반.
+"""
+
+# import-time assertion — prompt 가 NFR-25 instruction 을 잃어버리면 즉시 실패.
+# audit regression test 가 같은 키워드를 검증 (정적 + 동적 이중 가드).
+assert "본인의 말로" in SYSTEM_PROMPT_TEMPLATE, "NFR-25 self-summary instruction missing"
+assert "1~2문장" in SYSTEM_PROMPT_TEMPLATE, "NFR-25 length instruction missing"
+assert "{top_n}" in SYSTEM_PROMPT_TEMPLATE, "top_n placeholder missing"
+assert SYSTEM_PROMPT_VERSION, "SYSTEM_PROMPT_VERSION must be non-empty"
+
+
+async def search_for_leaf(
+    provider: LLMProvider,
+    *,
+    trace_json: dict[str, Any],
+    leaf_label: str,
+    parent_cso_topic_id: UUID,  # noqa: ARG001 — 호출자가 DocumentTopic 매핑 시 사용
+    user_id: UUID,
+    top_n: int = 10,
+) -> list[SearchResult]:
+    """LLM provider 호출. ProviderError / LLMBudgetExceeded 는 orchestrator 가 catch.
+
+    parent_cso_topic_id 는 본 함수 내부에서 직접 사용하지 않지만 호출 사이트 일관성을
+    위해 시그니처에 두고, orchestrator 가 검색 결과를 DocumentTopic 으로 변환할 때
+    그대로 사용한다.
+    """
+    return await provider.search_with_tools(
+        trace_json,
+        leaf_label,
+        top_n=top_n,
+        user_id=str(user_id),
+    )
+
+
+__all__ = ["SYSTEM_PROMPT_TEMPLATE", "SYSTEM_PROMPT_VERSION", "search_for_leaf"]

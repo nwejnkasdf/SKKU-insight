@@ -4,11 +4,14 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.llm_provider.protocol import (
     ChatMessage,
     LLMResponse,
     ModelSlot,
     ResponseFormat,
+    SearchResult,
 )
 
 
@@ -25,6 +28,18 @@ class AnthropicAPIProvider:
     ) -> LLMResponse:
         raise NotImplementedError(
             "AnthropicAPIProvider 는 1차 미구현 — LLM_PROVIDER=mock 또는 openai 사용."
+        )
+
+    async def search_with_tools(
+        self,
+        trace_json: dict[str, Any],
+        leaf_label: str,
+        *,
+        top_n: int = 10,
+        user_id: str | None = None,
+    ) -> list[SearchResult]:
+        raise NotImplementedError(
+            "AnthropicAPIProvider.search_with_tools 는 1차 미구현 — LLM_PROVIDER=mock 또는 openai 사용."
         )
 
 

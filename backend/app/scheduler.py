@@ -1,16 +1,19 @@
-"""rq-scheduler 부트스트랩 — 4 cron job 등록.
+"""rq-scheduler 부트스트랩 — 3 cron job 등록.
 
 본 모듈은 `python -m app.scheduler` 로 one-shot 실행 (docker-compose worker 컨테이너의
 entrypoint 직전 또는 Makefile `register-cron` 타깃에서). 이미 등록된 cron 은 skip
 (idempotent — job_id 를 cron name 으로 고정).
 
 cron 등록 ownership (docs/sdd/agent-orchestration.md §5):
-- naver_cleanup_job: A2 stub → A4 본문
-- collection_job: A2 stub → A4 본문
+- collection_job: A2 stub → A4 본문 (v13 라운드 — LLM tool-use)
 - interest_decay_job: A2 stub → A6 본문
 - merge_evaluation_job: A2 stub → A7 본문
 
 cold_start_job 과 account_deletion_job 은 event-driven (cron 아님) → enqueue 만, 등록 X.
+
+(v13 라운드 폐기, 2026-05-11) naver_cleanup_job 등록 제거 — decision-backlog P1-6 무효
+(NaverBS4 어댑터 폐기). worker/jobs/naver_cleanup.py 파일과 NAVER_CLEANUP_CRON env 는
+향후 News 소스 재활성화 가능성 위해 보존만.
 """
 from __future__ import annotations
 
@@ -38,13 +41,6 @@ class _JobRegistration(TypedDict):
 
 JOB_REGISTRATIONS: list[_JobRegistration] = [
     {
-        "id": "naver_cleanup_job",
-        "cron_attr": "NAVER_CLEANUP_CRON",
-        "func": "app.worker.jobs.naver_cleanup.naver_cleanup_job",
-        "queue": "default",
-        "timeout": 600,
-    },
-    {
         "id": "collection_job",
         "cron_attr": "COLLECTION_CRON",
         "func": "app.worker.jobs.collection.collection_job",
@@ -69,7 +65,7 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
 
 
 def register_cron_jobs() -> None:
-    """4 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록."""
+    """3 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록."""
     settings = get_settings()
     conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)
     scheduler = Scheduler(queue_name="default", connection=conn)

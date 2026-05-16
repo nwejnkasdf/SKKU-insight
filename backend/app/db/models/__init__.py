@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from app.db.models.admin_user import AdminUser
 from app.db.models.broad_interest import BroadInterest
+from app.db.models.clickbait_result import ClickbaitResult
+from app.db.models.collection_job import CollectionJob
 from app.db.models.cso_topic import CSOTopic
 from app.db.models.cso_topic_parent import CSOTopicParent
+from app.db.models.document import Document
+from app.db.models.document_topic import DocumentTopic
 from app.db.models.dynamic_leaf_topic import DynamicLeafTopic
 from app.db.models.dynamic_leaf_topic_cso_topic import DynamicLeafTopicCSOTopic
 from app.db.models.source import Source
@@ -26,8 +30,12 @@ from app.db.models.user_cso_traversal import UserCSOTraversal
 __all__ = [
     "AdminUser",
     "BroadInterest",
+    "ClickbaitResult",
+    "CollectionJob",
     "CSOTopic",
     "CSOTopicParent",
+    "Document",
+    "DocumentTopic",
     "DynamicLeafTopic",
     "DynamicLeafTopicCSOTopic",
     "Source",

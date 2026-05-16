@@ -139,13 +139,13 @@
 | NFR-25 정합 | metadata 만 저장 | LLM self-summary (prompt instruction) |
 | 비용 모델 | API 호출 무료 + LLM 분류 medium slot | LLM 검색 호출 (검색 도구 사용량 + 토큰) |
 | Mock fixture | 어댑터별 HTTP 응답 JSON | `prompt_hash → search_result JSON` (기존 MockProvider 패턴 확장) |
-| 시연 발화 | "RSS 파서 6종이 모은 자료" | "Claude 가 검색해서 추천한다" |
+| 시연 발화 | "RSS 파서 6종이 모은 자료" | "GPT-5.5 가 web_search 도구로 검색해서 추천한다" (v13 round 2 갱신, Anthropic 미사용) |
 
 ### 사용자 결정 (4 batch AskUserQuestion)
 
 | 결정 | 값 |
 |---|---|
-| LLM provider | Provider-agnostic toggle (LLM_PROVIDER env). MockProvider default + OpenAI/Anthropic 정식 토글 |
+| LLM provider | Provider-agnostic toggle (LLM_PROVIDER env). MockProvider default + **OpenAI 정식 (GPT-5.5)**. Anthropic/OpenRouter/CodexOAuth 는 search_with_tools NotImplementedError — v13 round 2 (2026-05-16) lifespan 가드 (`_SUPPORTED_A4_PROVIDERS = {mock, openai}`) 가 boot 시 차단 |
 | Query 구성 | LLM 이 user trace JSON 통째 받아 스스로 query 결정 (agent-driven) |
 | Source 테이블 | sentinel 1행 `llm_search` + publisher Document.raw JSONB |
 | Clickbait | 폐기 X. 1차 시연 default 비활성. 사용자가 News 소스 활성화 시 post-LLM filter |

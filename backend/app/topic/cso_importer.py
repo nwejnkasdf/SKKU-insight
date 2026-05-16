@@ -9,8 +9,9 @@ BroadInterest 12 행 시드: `backend/app/config/broad_interests.toml` 의 entry
 """
 from __future__ import annotations
 
-import csv
+import csv  # noqa: F401 — 옛 호환 import 보존 (다른 곳에서 사용 가능성)
 import logging
+import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -48,6 +49,22 @@ def _strip_brackets(value: str) -> str:
         if end > 0:
             return value[1:end]
     return value
+
+
+def _strip_outer_csv_quote(token: str) -> str:
+    """CSO 3.4.1 csv-quoted N-Triples 의 outer `"` 한 쌍 제거.
+
+    토큰 형태 변환:
+        `"<URI>"`  →  `<URI>`     (URI 의 outer csv quote 만 제거, `<>` 보존)
+        `<URI>`    →  `<URI>`     (옛 형식 그대로)
+        `"label"@en`  →  `"label"@en`  (literal — outer quote 가 의미 — 그대로)
+
+    `_strip_brackets` 가 그 다음 `<URI>` 또는 `"label"@en` 모두 처리.
+    """
+    token = token.strip()
+    if token.startswith('"<') and token.endswith('>"'):
+        return token[1:-1]
+    return token
 
 
 def _unescape_literal(value: str) -> str:
@@ -96,19 +113,40 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
     return target
 
 
+# CSO 3.4.1 (2026 시점) CSV-quoted N-Triples + 옛 unquoted N-Triples 둘 다 흡수.
+# 각 라인 = (subject, predicate, object) 3 token + 종결자 ` .`.
+# subject/predicate 는 URI (`<...>`), object 는 URI 또는 literal (`"text"@en`).
+# 옛: `<S> <P> <O> .`
+# 새: `"<S>","<P>","<O>" .` 또는 `"<S>","<P>","label"@en .`
+_TOKEN_RE = re.compile(
+    r'<[^>]+>|"(?:\\.|[^"\\])*"(?:@\w+)?(?:\^\^<[^>]+>)?'
+)
+
+
 def parse_cso_csv(path: Path) -> dict[str, dict[str, Any]]:
     """CSO CSV → {uri: {"label": str | None, "parent_uris": [...], "equivalents": [...]}}.
 
     superTopicOf 의 subject 는 부모, object 는 자식 — child[parent_uris].append(subject).
+
+    (2026-05-16 fix) CSO 3.4.1 이 각 field 를 outer quote 로 감싸기 시작 +
+    `"label"@en .` 같은 trailing 텍스트가 csv.reader 의 quote 처리와 충돌.
+    csv.reader 대신 라인별 regex 로 RDF triple token 3개 추출 → 양 형식 모두 흡수.
     """
     topics: dict[str, dict[str, Any]] = {}
     # utf-8-sig: CSO CSV 가 BOM 으로 시작할 경우 첫 URI 매칭 실패 방지 (자체감사 B-4).
     with path.open(encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if len(row) < 3:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
                 continue
-            s_raw, p_raw, o_raw = row[0], row[1], row[2]
+            tokens = _TOKEN_RE.findall(line)
+            if len(tokens) < 3:
+                continue
+            # CSO 3.4.1 csv-quoted (`"<URI>"`) 형식의 outer quote 한 쌍 제거.
+            # literal token (`"label"@en`) 은 변환 안 됨 — _strip_brackets 가 처리.
+            s_raw = _strip_outer_csv_quote(tokens[0])
+            p_raw = _strip_outer_csv_quote(tokens[1])
+            o_raw = _strip_outer_csv_quote(tokens[2])
             s_uri = _strip_brackets(s_raw)
             o_val = _strip_brackets(o_raw)
             p = p_raw.strip()

@@ -14,20 +14,29 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 # CSO 12 cluster seed (cso-mapping.md §12 클러스터). lowercase 매칭 — label_to_uri 도 lower 정규화.
+#
+# (2026-05-16 fix) CSO 3.4.1 에는 다음 5 cluster 의 root 라벨이 명시적으로 없음.
+# CSO 에 실재하는 가장 가까운 root 토픽으로 교체:
+#   - "Computer Systems Organization" → "Operating Systems"
+#   - "Theory of Computation"         → "Automata Theory"
+#   - "Computer Graphics"             → "Interactive Computer Graphics"
+#   - "Multimedia"                    → "Multimedia Systems"
+#   - "Computational Science"         → "Scientific Computing"
+# cluster_label 자체는 보존 (BroadInterest.cso_cluster_label 호환).
 SEEDS: dict[str, str] = {
     "Artificial Intelligence": "AI",
-    "Computer Systems Organization": "Systems",
+    "Operating Systems": "Systems",
     "Hardware": "Hardware",
-    "Theory of Computation": "Theory",
+    "Automata Theory": "Theory",
     "Software Engineering": "SE",
     "Computer Networks": "Networks",
     "Information Systems": "IS·DB",
     "Information Retrieval": "IR",
     "Security and Privacy": "Security",
     "Human-Computer Interaction": "HCI",
-    "Computer Graphics": "Graphics·Multimedia",
-    "Multimedia": "Graphics·Multimedia",
-    "Computational Science": "Computational Science",
+    "Interactive Computer Graphics": "Graphics·Multimedia",
+    "Multimedia Systems": "Graphics·Multimedia",
+    "Scientific Computing": "Computational Science",
 }
 
 # 12 unique cluster labels (Graphics·Multimedia 가 2 seed → 1 cluster). verify_cso_import 에서 사용.
@@ -35,8 +44,18 @@ EXPECTED_CLUSTERS: frozenset[str] = frozenset(SEEDS.values())
 
 
 def _norm_label(label: str) -> str:
-    """label 매칭 정규화 — lowercase + strip."""
-    return label.lower().strip()
+    """label 매칭 정규화 — lowercase + underscore → space + 다중 공백 collapse + strip.
+
+    (2026-05-16 fix) CSO 3.4.1 이 토픽 라벨을 snake_case (`artificial_intelligence`) 로
+    저장 → 기존 lowercase+strip 만으로는 broad_interests.toml 의 `"Artificial Intelligence"`
+    와 매칭 실패. underscore → space 변환 추가 + 다중 공백 정리로 양쪽 형태 모두 흡수.
+    """
+    import re
+
+    s = label.lower().strip()
+    s = s.replace("_", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def assign_cluster_labels(

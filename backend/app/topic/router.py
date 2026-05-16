@@ -1,10 +1,11 @@
-"""topic router — A3 7 endpoint 본문 + documents NotImplementedError 유지.
+"""topic router — A3 7 endpoint + /documents 본문 (A4 round 2 cross-cutting).
 
 docs/api/topics.md 비즈니스 룰:
 - consent_gate 자동 적용 (`/topics(/.*)?` PROTECTED_PATTERNS).
-- 사용자별 격리 (leaves/traces): JWT user_id 기반 WHERE.
+- 사용자별 격리 (leaves/traces/documents leaf): JWT user_id 기반 WHERE.
 - score_tail NFR-04 마스킹 (trace_service 에서 항상 None — 결정 7).
-- /topics/{topic_id}/documents: NotImplementedError 유지 (결정 3, A4·A5·A8 의존).
+- /topics/{topic_id}/documents: A4 본문 (documents_service.list_topic_documents).
+  A8 후속 PR 이 NotInterestedTopic/HiddenDocument/ClickbaitResult 필터 추가 예정.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from app.db.models import User
 from app.db.session import get_session
 from app.redis import get_redis
 from app.security.deps import get_current_user
-from app.topic import cso_service, leaf_service, trace_service
+from app.topic import cso_service, documents_service, leaf_service, trace_service
 from app.topic.schemas import (
     AdjacentResponse,
     ClustersResponse,
@@ -140,12 +141,14 @@ async def get_topic_documents(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> TopicDocumentsResponse:
-    """NotInterestedTopic 제외 + HiddenDocument 제외 + clickbait 제외 (FR-31).
+    """v13 라운드 A4 본문 — Document/DocumentTopic JOIN, cursor pagination, since 필터.
 
-    A3 결정 3: NotImplementedError 유지. A4 (Document) · A5 (clickbait) · A8 (filter)
-    완료 후 본 endpoint 본문 채움.
+    A8 filter PLACEHOLDER 주석 documents_service.list_topic_documents 안 (NotInterestedTopic
+    / HiddenDocument / ClickbaitResult — TODO A8).
     """
-    raise NotImplementedError("A4·A8 에서 Document/Filter 본문 구현")
+    return await documents_service.list_topic_documents(
+        db, user.user_id, topic_id, since, cursor, limit
+    )
 
 
 @router.get(

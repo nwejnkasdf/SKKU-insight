@@ -110,6 +110,19 @@ class CollectionJobStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class JobType(str, Enum):
+    """CollectionJob.job_type. (Codex round 2 S-06) inline Literal 폐기.
+
+    decisions.md §10 v13 round + decision-backlog C-33·C-34.
+    1차 시연은 `DAILY_COLLECT` 만 사용 — 나머지는 후속 phase (A7 leaf-lifecycle / A8 merge).
+    """
+
+    DAILY_COLLECT = "daily_collect"
+    LEAF_LIFECYCLE = "leaf_lifecycle"
+    MERGE_EVALUATION = "merge_evaluation"
+    SUMMARY_GENERATION = "summary_generation"
+
+
 class AdminRole(str, Enum):
     """관리자 권한. admin.md §권한 매트릭스."""
 
@@ -434,6 +447,7 @@ __all__ = [
     "ErrorResponse",
     "EventType",
     "InterestBucket",
+    "JobType",
     "LLMProviderType",
     "LeafTopicStatus",
     "PageMeta",

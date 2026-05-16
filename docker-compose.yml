@@ -11,7 +11,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:5432:5432"
+      # 호스트 5432 가 native PostgreSQL 과 충돌 가능 → 5433 으로 매핑 (2026-05-16).
+      # 컨테이너 내부 (api ↔ postgres) 통신은 `postgres:5432` 그대로 유지.
+      # 호스트 client (psql 등) 접근 시: `psql -h localhost -p 5433`
+      - "127.0.0.1:5433:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

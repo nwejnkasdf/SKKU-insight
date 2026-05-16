@@ -21,6 +21,7 @@ import structlog
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.contracts import LLMProviderType
 from app.db.engine import dispose_engines, get_engine
 from app.middleware.structlog_mask import mask_secrets
 from app.redis import close_redis, get_redis
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """FastAPI lifespan context manager."""
     settings = get_settings()
     _validate_secrets(settings.JWT_SECRET, settings.POSTGRES_PASSWORD)
+    _validate_llm_provider(settings.LLM_PROVIDER)
     _configure_structlog(settings.LOG_LEVEL, settings.STRUCTLOG_RENDER)
     # DB engine 초기화 (api 모드)
     get_engine("api")
@@ -114,6 +116,24 @@ def _validate_secrets(jwt_secret: str, postgres_password: str) -> None:
     if postgres_password.lower() in _POSTGRES_PASSWORD_PLACEHOLDERS:
         raise RuntimeError(
             "POSTGRES_PASSWORD 가 placeholder 값입니다 — 실제 운영 secret 으로 교체."
+        )
+
+
+# (Codex round 2 S-08) A4 collection 이 search_with_tools 본문을 구현한 provider 만 허용.
+# anthropic / openrouter / codex_oauth 는 NotImplementedError 라 runtime crash 방지 목적.
+# 향후 본문 구현 시 본 set 에 추가.
+_SUPPORTED_A4_PROVIDERS = frozenset(
+    {LLMProviderType.MOCK, LLMProviderType.OPENAI}
+)
+
+
+def _validate_llm_provider(provider: LLMProviderType) -> None:
+    if provider not in _SUPPORTED_A4_PROVIDERS:
+        supported = sorted(p.value for p in _SUPPORTED_A4_PROVIDERS)
+        raise RuntimeError(
+            f"LLM_PROVIDER={provider.value} 는 A4 collection 미지원 "
+            f"(search_with_tools NotImplementedError). 지원 provider: {supported}. "
+            ".env 의 LLM_PROVIDER 를 mock 또는 openai 로 변경하세요."
         )
 
 

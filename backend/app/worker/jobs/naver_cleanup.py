@@ -1,9 +1,10 @@
-"""naver_cleanup worker stub — A4 (collection) 가 본문 구현.
+"""naver_cleanup worker stub — (v13 라운드 폐기, 2026-05-11).
 
-decision-backlog P1-6. cron = `NAVER_CLEANUP_CRON` (default `0 17 * * *` UTC).
+decision-backlog P1-6 무효 — NaverBS4 어댑터 폐기로 본 cleanup job 자체가 불필요.
+`scheduler.py` 의 JOB_REGISTRATIONS 에서 등록 제거됨. NAVER_CLEANUP_CRON env 와 본 파일은
+향후 News 소스 재활성화 가능성 위해 보존만.
 
-A4 책임: 토픽 매핑이 사라지고 `created_at >= 30 day` 인 `content_type=tech_news` Document 삭제.
-NFR-25 (외부 원문 무단 복제 금지) 정합.
+원래 책임 (보존용 기록): 30 day+ 지난 tech_news Document 정리.
 """
 from __future__ import annotations
 

@@ -24,6 +24,8 @@ from app.llm_provider.protocol import (
     LLMBudgetExceeded,
     LLMProvider,
     LLMResponse,
+    ProviderError,
+    SearchResult,
 )
 
 
@@ -55,5 +57,7 @@ __all__ = [
     "MockProvider",
     "OpenAIAPIProvider",
     "OpenRouterProvider",
+    "ProviderError",
+    "SearchResult",
     "get_provider",
 ]

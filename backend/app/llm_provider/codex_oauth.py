@@ -5,11 +5,14 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.llm_provider.protocol import (
     ChatMessage,
     LLMResponse,
     ModelSlot,
     ResponseFormat,
+    SearchResult,
 )
 
 
@@ -26,6 +29,18 @@ class CodexOAuthProvider:
     ) -> LLMResponse:
         raise NotImplementedError(
             "CodexOAuthProvider 는 local experimental — 1차 미구현."
+        )
+
+    async def search_with_tools(
+        self,
+        trace_json: dict[str, Any],
+        leaf_label: str,
+        *,
+        top_n: int = 10,
+        user_id: str | None = None,
+    ) -> list[SearchResult]:
+        raise NotImplementedError(
+            "CodexOAuthProvider.search_with_tools 는 local experimental — 1차 미구현."
         )
 
 

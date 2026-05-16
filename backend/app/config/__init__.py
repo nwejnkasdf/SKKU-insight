@@ -58,13 +58,17 @@ class Settings(BaseSettings):
 
     # === LLM ===
     LLM_PROVIDER: LLMProviderType = LLMProviderType.MOCK
-    LLM_MODEL_HIGH: str = "mock-high"
-    LLM_MODEL_MEDIUM: str = "mock-medium"
+    # (v13 round 2, 2026-05-16) GPT-5.5 default. ModelSlot high/medium 슬롯 양쪽 모두
+    # env 로 토글 가능 (운영자가 다른 모델로 분리 운용 시). 사용자 결정 — Claude/Anthropic
+    # 시연·운영 어디서도 사용 X. lifespan 가드 (S-08) 가 LLM_PROVIDER ∈ {mock, openai}
+    # 외 토글 차단.
+    LLM_MODEL_HIGH: str = "gpt-5.5"
+    LLM_MODEL_MEDIUM: str = "gpt-5.5"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     CODEX_OAUTH_TOKEN: str = ""
-    LLM_REQUEST_TIMEOUT_SECONDS: int = 60
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 180
     LLM_DAILY_TOKEN_BUDGET: int = 1_000_000
     LLM_MAX_CONCURRENT: int = 8
     LLM_MAX_CONCURRENT_PER_USER: int = 2
@@ -75,6 +79,10 @@ class Settings(BaseSettings):
     # === Clickbait module (clickbait_module/ 자체 호스팅 또는 외부) ===
     CLICKBAIT_SERVICE_URL: str = ""
     CLICKBAIT_MODEL_NAME: str = "ax-4.0-light-dora-clickbait-v1"
+    # (v13 라운드, 2026-05-11) A4 Topic-driven Pivot — clickbait 통합 default 비활성.
+    # 사용자가 News 소스 명시 활성화 시 (true) 만 A4 orchestrator 가 post-filter 로 호출.
+    # 1차 시연 default false — LLM 검색이 1차 정제 담당이라 clickbait 불필요.
+    CLICKBAIT_ENABLED: bool = False
 
     # === Admin bootstrap ===
     ADMIN_BOOTSTRAP_EMAIL: str = "admin@insight.test"

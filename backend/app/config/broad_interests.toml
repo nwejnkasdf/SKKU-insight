@@ -22,7 +22,7 @@ display_order = 0
 name = "Systems"
 description_ko = "운영체제·분산 시스템·가상화·동시성 등 컴퓨터 시스템 레이어의 자원 관리와 구조를 다루는 분야."
 cso_cluster_label = "Systems"
-seed_topic_label = "Computer Systems Organization"
+seed_topic_label = "Operating Systems"
 display_order = 1
 
 [[broad_interest]]
@@ -36,7 +36,7 @@ display_order = 2
 name = "Theory"
 description_ko = "알고리즘·계산복잡도·논리·암호이론 등 컴퓨터 과학의 수학적 기반을 다루는 분야."
 cso_cluster_label = "Theory"
-seed_topic_label = "Theory of Computation"
+seed_topic_label = "Automata Theory"
 display_order = 3
 
 [[broad_interest]]
@@ -85,12 +85,12 @@ display_order = 9
 name = "Graphics·Multimedia"
 description_ko = "3D 렌더링·이미지 처리·비디오·음향·VR/AR 등 시각·청각 정보의 생성과 처리를 다루는 분야."
 cso_cluster_label = "Graphics·Multimedia"
-seed_topic_label = "Computer Graphics"
+seed_topic_label = "Interactive Computer Graphics"
 display_order = 10
 
 [[broad_interest]]
 name = "Computational Science"
 description_ko = "수치 시뮬레이션·과학 계산·계산물리·계산생물학 등 도메인 과학을 위한 컴퓨팅 분야."
 cso_cluster_label = "Computational Science"
-seed_topic_label = "Computational Science"
+seed_topic_label = "Scientific Computing"
 display_order = 11

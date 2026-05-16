@@ -19,13 +19,14 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 import networkx as nx
 import redis.asyncio as aioredis
-from sqlalchemy import CursorResult, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_settings
@@ -50,7 +51,6 @@ from app.interest.idempotency import (
     IdempotencyOutcome,
     check_idempotent,
     compute_payload_hash,
-    store_idempotent,
 )
 from app.interest.propagation import compute_ancestor_propagation
 from app.interest.topic_distribution import (
@@ -68,13 +68,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class IngestResult:
-    """ingest_event_atomic 응답."""
+    """ingest_event_atomic 응답.
+
+    Codex C-02 fix: payload_hash + client_request_id 가 결과에 포함되어 router 가
+    db.commit() 성공 후 store_idempotent(Redis SETEX) 호출. commit 전 SETEX 시
+    commit 실패 → cache 만 잔존 → 다음 retry 가 DB row 없는 200 응답 위험 차단.
+    """
 
     event_id: UUID
     accepted: bool
     server_received_at: datetime
     posterior_applied: bool
     duplicate: bool
+    # Codex C-02: router 가 commit 후 store_idempotent 에 사용. duplicate=True 시 None.
+    payload_hash: str | None = None
+    client_request_id: str | None = None
 
 
 async def _atomic_upsert_interest_state(
@@ -87,14 +95,16 @@ async def _atomic_upsert_interest_state(
     params: InterestParams,
     active_day: int,
 ) -> None:
-    """atomic INSERT/UPDATE — concurrency.md §4.1 패턴.
+    """atomic INSERT/UPDATE — concurrency.md §4.1 패턴. race-safe single SQL.
 
     weighted > 0 → short_alpha/long_alpha 가산
     weighted < 0 → short_beta/long_beta 에 |weighted| 가산
     weighted = 0 → no-op (early return)
 
-    partial UNIQUE 3종 (cso_only / leaf_only / pair) 매칭 후 DO UPDATE.
-    score 캐시는 새 alpha/beta 로 재계산.
+    **Codex C-01 fix**: UPDATE WHERE → 0 row 시 INSERT ON CONFLICT DO NOTHING 패턴은
+    동시 INSERT 두 개가 같은 partial unique index 매치 시 DO NOTHING 쪽이 posterior
+    update 손실 (lost update). 단일 INSERT ON CONFLICT DO UPDATE 로 교체해 race-safe.
+    partial unique 3종 (cso_only / leaf_only / pair) 별 ON CONFLICT (cols) WHERE 명시.
     """
     if weighted == 0.0:
         return
@@ -103,132 +113,79 @@ async def _atomic_upsert_interest_state(
     else:
         absw = -weighted
         da_s, db_s, da_l, db_l = 0.0, absw, 0.0, absw
-
-    # ON CONFLICT target 결정 — partial unique 3종 분기.
-    # SQLAlchemy 에서는 untargeted on_conflict_do_nothing 으로 다중 partial unique 모두 매치
-    # 하기 어렵 → service 가 SELECT 로 기존 row 존재 여부 먼저 확인 후 UPDATE / INSERT.
-    # 단순화: SELECT existing → UPDATE 또는 INSERT (concurrency 는 user-level mutex 또는
-    # row-level locking 으로 보장. 일반 endpoint 는 동시 호출 가능 — race 시 INSERT 실패
-    # → 재시도 1회).
-    #
-    # 더 강건한 패턴: pg_insert + on_conflict_do_nothing → row_count==0 면 UPDATE.
-    # 본 구현은 사용 패턴이 race-적으므로 단일 atomic SQL UPDATE WHERE 우선 + 없으면 INSERT
-    # 패턴. interest-bayesian.md 의사 코드 그대로.
-    if cso_topic_id is not None and leaf_topic_id is not None:
-        # pair: cso + leaf
-        update_sql = text(
-            """
-            UPDATE user_interest_state
-            SET short_alpha = short_alpha + :da_s,
-                short_beta  = short_beta  + :db_s,
-                long_alpha  = long_alpha  + :da_l,
-                long_beta   = long_beta   + :db_l,
-                short_score = (short_alpha + :da_s) /
-                              NULLIF(short_alpha + :da_s + short_beta + :db_s, 0),
-                long_score  = (long_alpha + :da_l) /
-                              NULLIF(long_alpha + :da_l + long_beta + :db_l, 0),
-                last_event_active_day = :active_day,
-                updated_at = NOW()
-            WHERE user_id = :user_id
-              AND cso_topic_id = :cso_id
-              AND leaf_topic_id = :leaf_id
-            """
-        )
-        cond = {
-            "user_id": user_id,
-            "cso_id": cso_topic_id,
-            "leaf_id": leaf_topic_id,
-        }
-    elif cso_topic_id is not None:
-        update_sql = text(
-            """
-            UPDATE user_interest_state
-            SET short_alpha = short_alpha + :da_s,
-                short_beta  = short_beta  + :db_s,
-                long_alpha  = long_alpha  + :da_l,
-                long_beta   = long_beta   + :db_l,
-                short_score = (short_alpha + :da_s) /
-                              NULLIF(short_alpha + :da_s + short_beta + :db_s, 0),
-                long_score  = (long_alpha + :da_l) /
-                              NULLIF(long_alpha + :da_l + long_beta + :db_l, 0),
-                last_event_active_day = :active_day,
-                updated_at = NOW()
-            WHERE user_id = :user_id
-              AND cso_topic_id = :cso_id
-              AND leaf_topic_id IS NULL
-            """
-        )
-        cond = {"user_id": user_id, "cso_id": cso_topic_id}
-    elif leaf_topic_id is not None:
-        update_sql = text(
-            """
-            UPDATE user_interest_state
-            SET short_alpha = short_alpha + :da_s,
-                short_beta  = short_beta  + :db_s,
-                long_alpha  = long_alpha  + :da_l,
-                long_beta   = long_beta   + :db_l,
-                short_score = (short_alpha + :da_s) /
-                              NULLIF(short_alpha + :da_s + short_beta + :db_s, 0),
-                long_score  = (long_alpha + :da_l) /
-                              NULLIF(long_alpha + :da_l + long_beta + :db_l, 0),
-                last_event_active_day = :active_day,
-                updated_at = NOW()
-            WHERE user_id = :user_id
-              AND cso_topic_id IS NULL
-              AND leaf_topic_id = :leaf_id
-            """
-        )
-        cond = {"user_id": user_id, "leaf_id": leaf_topic_id}
-    else:
+    if cso_topic_id is None and leaf_topic_id is None:
         # 토픽 둘 다 NULL — CHECK 위반. 호출자가 가드.
         return
 
-    update_result = cast(
-        CursorResult[Any],
-        await db.execute(
-            update_sql,
-            {
-                **cond,
-                "da_s": da_s,
-                "db_s": db_s,
-                "da_l": da_l,
-                "db_l": db_l,
-                "active_day": active_day,
-            },
-        ),
-    )
-    if update_result.rowcount and update_result.rowcount > 0:
-        return
+    # partial unique 매칭 — ON CONFLICT (cols) WHERE 명시. 3종 분기.
+    if cso_topic_id is not None and leaf_topic_id is not None:
+        conflict_cols = "(user_id, cso_topic_id, leaf_topic_id)"
+        conflict_where = (
+            "WHERE cso_topic_id IS NOT NULL AND leaf_topic_id IS NOT NULL"
+        )
+    elif cso_topic_id is not None:
+        conflict_cols = "(user_id, cso_topic_id)"
+        conflict_where = (
+            "WHERE leaf_topic_id IS NULL AND cso_topic_id IS NOT NULL"
+        )
+    else:
+        conflict_cols = "(user_id, leaf_topic_id)"
+        conflict_where = (
+            "WHERE cso_topic_id IS NULL AND leaf_topic_id IS NOT NULL"
+        )
 
-    # INSERT — alpha_prior + 변동분, beta_prior + 변동분.
-    initial_short_alpha = params.alpha_prior + da_s
-    initial_short_beta = params.beta_prior + db_s
-    initial_long_alpha = params.alpha_prior + da_l
-    initial_long_beta = params.beta_prior + db_l
-    initial_short_score = initial_short_alpha / (
-        initial_short_alpha + initial_short_beta
+    upsert_sql = text(
+        f"""
+        INSERT INTO user_interest_state (
+            state_id, user_id, cso_topic_id, leaf_topic_id,
+            long_alpha, long_beta, short_alpha, short_beta,
+            long_score, short_score,
+            last_event_active_day, last_decay_active_day,
+            boost_applied_at_active_day, updated_at
+        ) VALUES (
+            gen_random_uuid(), :user_id, :cso_id, :leaf_id,
+            :alpha_prior + :da_l, :beta_prior + :db_l,
+            :alpha_prior + :da_s, :beta_prior + :db_s,
+            (:alpha_prior + :da_l) /
+                NULLIF(:alpha_prior + :da_l + :beta_prior + :db_l, 0),
+            (:alpha_prior + :da_s) /
+                NULLIF(:alpha_prior + :da_s + :beta_prior + :db_s, 0),
+            :active_day, :active_day, NULL, NOW()
+        )
+        ON CONFLICT {conflict_cols} {conflict_where} DO UPDATE SET
+            short_alpha = user_interest_state.short_alpha + :da_s,
+            short_beta  = user_interest_state.short_beta  + :db_s,
+            long_alpha  = user_interest_state.long_alpha  + :da_l,
+            long_beta   = user_interest_state.long_beta   + :db_l,
+            short_score = (user_interest_state.short_alpha + :da_s) /
+                NULLIF(
+                    user_interest_state.short_alpha + :da_s +
+                    user_interest_state.short_beta + :db_s, 0
+                ),
+            long_score  = (user_interest_state.long_alpha + :da_l) /
+                NULLIF(
+                    user_interest_state.long_alpha + :da_l +
+                    user_interest_state.long_beta + :db_l, 0
+                ),
+            last_event_active_day = :active_day,
+            updated_at = NOW()
+        """
     )
-    initial_long_score = initial_long_alpha / (
-        initial_long_alpha + initial_long_beta
+    await db.execute(
+        upsert_sql,
+        {
+            "user_id": user_id,
+            "cso_id": cso_topic_id,
+            "leaf_id": leaf_topic_id,
+            "alpha_prior": params.alpha_prior,
+            "beta_prior": params.beta_prior,
+            "da_s": da_s,
+            "db_s": db_s,
+            "da_l": da_l,
+            "db_l": db_l,
+            "active_day": active_day,
+        },
     )
-    insert_stmt = pg_insert(UserInterestState).values(
-        state_id=uuid4(),
-        user_id=user_id,
-        cso_topic_id=cso_topic_id,
-        leaf_topic_id=leaf_topic_id,
-        long_alpha=initial_long_alpha,
-        long_beta=initial_long_beta,
-        short_alpha=initial_short_alpha,
-        short_beta=initial_short_beta,
-        long_score=initial_long_score,
-        short_score=initial_short_score,
-        last_event_active_day=active_day,
-        last_decay_active_day=active_day,
-        boost_applied_at_active_day=None,
-    )
-    # ON CONFLICT DO NOTHING — 동시 INSERT race 시 한 쪽만 성공. 재시도 X (다음 호출이 UPDATE).
-    insert_stmt = insert_stmt.on_conflict_do_nothing()
-    await db.execute(insert_stmt)
 
 
 async def _ensure_active_state_for_decay(
@@ -357,6 +314,15 @@ async def _apply_bayesian_update(
                 )
 
 
+_DWELL_INCR_LUA = """
+local v = redis.call('INCR', KEYS[1])
+if v == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return v
+"""
+
+
 async def _check_dwell_tick_cap(
     redis: aioredis.Redis,
     settings: Settings,
@@ -364,12 +330,17 @@ async def _check_dwell_tick_cap(
     user_id: UUID,
     document_id: UUID,
 ) -> bool:
-    """dwell_tick 카운터 atomic INCR + TTL. 4 초과 시 False (베이지안 skip 신호)."""
+    """dwell_tick 카운터 atomic INCR + TTL. 4 초과 시 False (베이지안 skip 신호).
+
+    Codex S-02 fix: INCR 성공 후 EXPIRE 전 crash 시 TTL 없는 영구 키가 잔존하는 race
+    를 Lua script 로 단일 atomic 처리. EXPIRE 는 count==1 일 때만 (TTL 갱신 회피).
+    """
     key = RedisKey.dwell_tick_count(user_id, document_id)
-    count = await redis.incr(key)
-    if count == 1:
-        await redis.expire(key, settings.DWELL_TICK_CAP_TTL_SECONDS)
-    return int(count) <= settings.DWELL_TICK_CAP_PER_DOCUMENT
+    count_raw = await redis.eval(  # type: ignore[misc]
+        _DWELL_INCR_LUA, 1, key, settings.DWELL_TICK_CAP_TTL_SECONDS
+    )
+    count = int(count_raw)
+    return count <= settings.DWELL_TICK_CAP_PER_DOCUMENT
 
 
 async def _insert_not_interested_topic(
@@ -480,27 +451,46 @@ async def ingest_event_atomic(
         if not within_cap:
             bayesian_skip = True
 
-    # 3) UserEvent INSERT (audit)
-    event_id = await _record_user_event(
-        db,
-        user_id=user.user_id,
-        event_type=event_type,
-        document_id=document_id,
-        cso_topic_id=cso_topic_id,
-        leaf_topic_id=leaf_topic_id,
-        dwell_ms=dwell_ms,
-        client_request_id=client_request_id,
-        payload_hash=payload_hash,
-        occurred_at=occurred_at,
-    )
-    await store_idempotent(
-        redis,
-        user_id=user.user_id,
-        client_request_id=client_request_id,
-        payload_hash=payload_hash,
-        event_id=event_id,
-        ttl_seconds=settings.EVENT_DUPLICATE_CACHE_TTL_SECONDS,
-    )
+    # 3) UserEvent INSERT (audit). 동시 두 호출 race → IntegrityError 보호 (Codex S-01).
+    try:
+        event_id = await _record_user_event(
+            db,
+            user_id=user.user_id,
+            event_type=event_type,
+            document_id=document_id,
+            cso_topic_id=cso_topic_id,
+            leaf_topic_id=leaf_topic_id,
+            dwell_ms=dwell_ms,
+            client_request_id=client_request_id,
+            payload_hash=payload_hash,
+            occurred_at=occurred_at,
+        )
+    except IntegrityError:
+        # 동시 호출 race — Redis/DB miss 동시 통과 후 둘 다 INSERT 시도. 한쪽만 성공.
+        await db.rollback()
+        race_lookup = await check_idempotent(
+            db,
+            redis,
+            user_id=user.user_id,
+            client_request_id=client_request_id,
+            payload_hash=payload_hash,
+        )
+        if race_lookup.outcome == IdempotencyOutcome.DUPLICATE_MATCH:
+            assert race_lookup.existing_event_id is not None
+            return IngestResult(
+                event_id=race_lookup.existing_event_id,
+                accepted=True,
+                server_received_at=race_lookup.existing_created_at
+                or server_received_at,
+                posterior_applied=False,
+                duplicate=True,
+            )
+        raise EventDuplicateError(
+            existing_event_id=race_lookup.existing_event_id,
+            user_id=user.user_id,
+        ) from None
+    # Codex C-02: store_idempotent 는 router 가 commit 성공 후 호출. 본 service 는
+    # IngestResult 에 payload_hash + client_request_id 담아 반환.
 
     # 4) base weight check
     base_weight = weights.lookup(event_type.value)
@@ -541,6 +531,8 @@ async def ingest_event_atomic(
         server_received_at=server_received_at,
         posterior_applied=posterior_applied,
         duplicate=False,
+        payload_hash=payload_hash,
+        client_request_id=client_request_id,
     )
 
 

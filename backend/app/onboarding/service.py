@@ -157,10 +157,15 @@ async def post_interests(
     # A6 협업: 12 cluster + 1-hop child UserInterestState row prefilled (alpha_prior+boost,
     # boost_applied_at_active_day = user.active_day_counter). 14-day decay cron 이 자연 만료.
     # cso_graph 는 lifespan startup 에서 app.state.cso_graph 에 binding 됨.
+    #
+    # Codex S-06 fix: bootstrap 중간 실패 시 partial INSERT row 만 rollback 하도록
+    # savepoint 로 격리. begin_nested() 사용 — 실패 시 savepoint 만 rollback 하고
+    # outer 트랜잭션 (User.onboarding_complete=true 등) 은 commit 유지.
     cso_graph = getattr(request.app.state, "cso_graph", None)
     if cso_graph is not None:
         from app.interest.service import bootstrap_interest_state
 
+        savepoint = await db.begin_nested()
         try:
             await bootstrap_interest_state(
                 db,
@@ -171,15 +176,18 @@ async def post_interests(
                 redis=redis,
             )
         except Exception as exc:
-            # boost 시드 실패는 onboarding 자체를 막지 않음 — A6 decay cron 또는
-            # 첫 이벤트 시 lazy 시드로 회복. WARN 만.
+            # boost 시드 실패는 onboarding 자체를 막지 않음 — savepoint rollback 으로
+            # partial INSERT row 제거 + A6 decay cron / 첫 이벤트 시 lazy 시드로 회복.
+            await savepoint.rollback()
             import structlog as _structlog
 
             _structlog.get_logger("onboarding").warning(
-                "bootstrap_interest_state failed",
+                "bootstrap_interest_state failed (savepoint rolled back)",
                 user_id=str(user.user_id),
                 error=str(exc),
             )
+        else:
+            await savepoint.commit()
     await db.commit()
     _enqueue_cold_start_job(
         request_id=request_id,

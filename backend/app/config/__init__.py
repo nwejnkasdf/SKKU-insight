@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     # event idempotency payload-hash 캐시 TTL (초). client retry window 가정.
     # DB UNIQUE(user_id, client_request_id) 가 1차 SOR.
     EVENT_DUPLICATE_CACHE_TTL_SECONDS: int = 86400
+    # Codex S-05 fix: system_config seed (interest_params, event_weights) 누락 시 lifespan
+    # 동작 모드. true (default 운영) → SystemConfigMissingError 로 startup 차단 (fail-fast).
+    # false → WARN + endpoint fallback (테스트 환경 / 의도적 비활성).
+    SYSTEM_CONFIG_REQUIRED: bool = True
 
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.

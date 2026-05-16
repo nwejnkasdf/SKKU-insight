@@ -64,7 +64,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await topic_startup(app)
 
     # A6: system_config 로더 — interest_params + event_weights 캐시 SETEX.
-    # 빈 테이블 (테스트 환경 보호) 이면 SystemConfigMissingError WARN 후 startup 계속.
+    # Codex S-05 fix: SYSTEM_CONFIG_REQUIRED=true (default 운영) → fail-fast (RuntimeError).
+    # false (테스트 / 의도적 비활성) → WARN 후 startup 계속, endpoint 가 fallback DB 로드.
     redis_default = get_redis("default")
     async with AsyncSessionLocal() as session:
         try:
@@ -72,8 +73,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.system_config_loaded = True
         except SystemConfigMissingError as exc:
             app.state.system_config_loaded = False
+            if settings.SYSTEM_CONFIG_REQUIRED:
+                raise RuntimeError(
+                    f"system_config seed 누락 (key={exc.key}) — alembic 0004 또는 "
+                    "A10 admin-console 에서 복원. SYSTEM_CONFIG_REQUIRED=false 로 "
+                    "운영 가능하나 endpoint 호출 시 503 응답."
+                ) from exc
             logger.warning(
-                "lifespan: system_config seed 누락 — endpoint 호출 시 fallback DB 로드",
+                "lifespan: system_config seed 누락 — SYSTEM_CONFIG_REQUIRED=false "
+                "이므로 startup 계속. endpoint 호출 시 fallback DB 로드",
                 error=str(exc),
                 key=exc.key,
             )

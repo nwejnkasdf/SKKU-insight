@@ -61,6 +61,10 @@ async def apply_decay_to_user(
     # alpha 에서 일률 `onboarding_prior_boost` 차감. 자식 row 는 부정확하지만 1차 데모는
     # OK — Codex round-2 fix 에서 정확한 cluster/child 구분 추가 고려.
 
+    # Codex S-03 fix: GREATEST(alpha_prior, computed) 로 alpha 가 prior 미만으로
+    # 떨어지지 않게 floor. cluster row 는 +1.0 boost 였고 자식 row 는 +0.5 boost 였는데
+    # decay 가 모두 1.0 일률 차감 시 자식 row 의 alpha 가 (prior + 0.5 - 1.0) = (prior - 0.5)
+    # 까지 떨어질 수 있어 음수 또는 prior 미만 발생. GREATEST 로 prior floor 적용.
     update_sql = text(
         """
         WITH decay_factors AS (
@@ -93,31 +97,53 @@ async def apply_decay_to_user(
         )
         UPDATE user_interest_state s
         SET
-            short_alpha = :alpha_prior + (c.short_alpha - :alpha_prior) * c.f_short
-                           - CASE WHEN c.expire_boost THEN :boost ELSE 0 END,
-            short_beta  = :beta_prior  + (c.short_beta  - :beta_prior)  * c.f_short,
-            long_alpha  = :alpha_prior + (c.long_alpha  - :alpha_prior) * c.f_long
-                           - CASE WHEN c.expire_boost THEN :boost ELSE 0 END,
-            long_beta   = :beta_prior  + (c.long_beta   - :beta_prior)  * c.f_long,
-            short_score = (
+            short_alpha = GREATEST(
+                :alpha_prior,
+                :alpha_prior + (c.short_alpha - :alpha_prior) * c.f_short
+                    - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
+            ),
+            short_beta  = GREATEST(
+                :beta_prior,
+                :beta_prior + (c.short_beta - :beta_prior) * c.f_short
+            ),
+            long_alpha  = GREATEST(
+                :alpha_prior,
+                :alpha_prior + (c.long_alpha - :alpha_prior) * c.f_long
+                    - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
+            ),
+            long_beta   = GREATEST(
+                :beta_prior,
+                :beta_prior + (c.long_beta - :beta_prior) * c.f_long
+            ),
+            short_score = GREATEST(
+                :alpha_prior,
                 :alpha_prior + (c.short_alpha - :alpha_prior) * c.f_short
                 - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
             ) / NULLIF(
-                (
+                GREATEST(
+                    :alpha_prior,
                     :alpha_prior + (c.short_alpha - :alpha_prior) * c.f_short
                     - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
                 )
-                + :beta_prior + (c.short_beta - :beta_prior) * c.f_short, 0
+                + GREATEST(
+                    :beta_prior,
+                    :beta_prior + (c.short_beta - :beta_prior) * c.f_short
+                ), 0
             ),
-            long_score  = (
+            long_score  = GREATEST(
+                :alpha_prior,
                 :alpha_prior + (c.long_alpha - :alpha_prior) * c.f_long
                 - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
             ) / NULLIF(
-                (
+                GREATEST(
+                    :alpha_prior,
                     :alpha_prior + (c.long_alpha - :alpha_prior) * c.f_long
                     - CASE WHEN c.expire_boost THEN :boost ELSE 0 END
                 )
-                + :beta_prior + (c.long_beta - :beta_prior) * c.f_long, 0
+                + GREATEST(
+                    :beta_prior,
+                    :beta_prior + (c.long_beta - :beta_prior) * c.f_long
+                ), 0
             ),
             boost_applied_at_active_day = CASE
                 WHEN c.expire_boost THEN NULL

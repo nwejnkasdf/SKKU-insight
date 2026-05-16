@@ -182,12 +182,15 @@ async def _ingest_one_event(
     user: User,
     req: EventRequest,
     cache_invalidate: bool,
-    now: datetime,
-) -> EventResponse:
-    """단일 event ingest. EventDuplicateError → 409. InvalidEventTargetError → 422."""
+) -> interest_service.IngestResult:
+    """단일 event ingest. EventDuplicateError → 409. InvalidEventTargetError → 422.
+
+    Codex C-02 fix: store_idempotent (Redis SETEX) 는 caller (post_event / batch) 가
+    db.commit() 성공 후 호출. 본 함수는 service.IngestResult 만 반환.
+    """
     cso_graph = getattr(request_state.app.state, "cso_graph", None)
     try:
-        result = await interest_service.ingest_event_atomic(
+        return await interest_service.ingest_event_atomic(
             db,
             redis,
             cso_graph,
@@ -224,10 +227,27 @@ async def _ingest_one_event(
             str(exc),
             request=request_state,
         ) from exc
-    return EventResponse(
+
+
+async def _store_idempotent_after_commit(
+    redis: aioredis.Redis,
+    result: interest_service.IngestResult,
+    *,
+    user_id: UUID,
+    settings: Settings,
+) -> None:
+    """Codex C-02: db.commit() 성공 후 Redis SETEX. duplicate(이미 caching 됨) 시 skip."""
+    if result.duplicate or result.payload_hash is None or result.client_request_id is None:
+        return
+    from app.interest.idempotency import store_idempotent
+
+    await store_idempotent(
+        redis,
+        user_id=user_id,
+        client_request_id=result.client_request_id,
+        payload_hash=result.payload_hash,
         event_id=result.event_id,
-        accepted=result.accepted,
-        server_received_at=result.server_received_at,
+        ttl_seconds=settings.EVENT_DUPLICATE_CACHE_TTL_SECONDS,
     )
 
 
@@ -256,7 +276,7 @@ async def post_event(
     await _ensure_active_day(db, user, now)
     redis = _redis()
     params, weights = await _load_params_and_weights(redis, db)
-    response = await _ingest_one_event(
+    result = await _ingest_one_event(
         db,
         redis,
         settings,
@@ -266,10 +286,16 @@ async def post_event(
         user=user,
         req=req,
         cache_invalidate=_is_cache_invalidating(req.event_type),
-        now=now,
     )
     await db.commit()
-    return response
+    await _store_idempotent_after_commit(
+        redis, result, user_id=user.user_id, settings=settings
+    )
+    return EventResponse(
+        event_id=result.event_id,
+        accepted=result.accepted,
+        server_received_at=result.server_received_at,
+    )
 
 
 @router.post(
@@ -294,6 +320,7 @@ async def post_events_batch(
     cso_graph = getattr(request.app.state, "cso_graph", None)
     items: list[EventResponse] = []
     accepted_count = 0
+    successful_results: list[interest_service.IngestResult] = []
     for entry in req.events:
         try:
             result = await interest_service.ingest_event_atomic(
@@ -341,8 +368,14 @@ async def post_events_batch(
                 server_received_at=result.server_received_at,
             )
         )
+        successful_results.append(result)
         accepted_count += 1
     await db.commit()
+    # Codex C-02: 모든 commit 성공 후 Redis SETEX (per entry).
+    for r in successful_results:
+        await _store_idempotent_after_commit(
+            redis, r, user_id=user.user_id, settings=settings
+        )
     return BatchResponse(items=items, total_accepted=accepted_count)
 
 
@@ -403,6 +436,9 @@ async def post_feedback_save(
         # 미사용 (idempotent 의도).
         pass
     await db.commit()
+    await _store_idempotent_after_commit(
+        redis, result, user_id=user.user_id, settings=settings
+    )
     return EventResponse(
         event_id=result.event_id,
         accepted=result.accepted,
@@ -455,6 +491,9 @@ async def post_feedback_hide(
             request=request,
         ) from exc
     await db.commit()
+    await _store_idempotent_after_commit(
+        redis, result, user_id=user.user_id, settings=settings
+    )
     return EventResponse(
         event_id=result.event_id,
         accepted=result.accepted,
@@ -510,6 +549,9 @@ async def post_feedback_not_interested(
             request=request,
         ) from exc
     await db.commit()
+    await _store_idempotent_after_commit(
+        redis, result, user_id=user.user_id, settings=settings
+    )
     return EventResponse(
         event_id=result.event_id,
         accepted=result.accepted,

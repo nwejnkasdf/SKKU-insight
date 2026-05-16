@@ -118,6 +118,7 @@
 | `DWELL_TICK_CAP_TTL_SECONDS` | `3600` | dwell_tick Redis 카운터 TTL (초). 문서당 cap 4회 도달 후 1시간 자연 소멸. |
 | `DWELL_TICK_CAP_PER_DOCUMENT` | `4` | dwell_tick 문서당 베이지안 갱신 cap (30s×4=2분). cap 초과 시 베이지안 skip, active_day 와 UserEvent INSERT 는 그대로. SRS 체류 ≥2분 기준 정렬. |
 | `EVENT_DUPLICATE_CACHE_TTL_SECONDS` | `86400` | event idempotency payload-hash Redis 캐시 TTL (초). DB UNIQUE(user_id, client_request_id) 가 1차 SOR — 본 캐시는 응답 RTT 단축용. |
+| `SYSTEM_CONFIG_REQUIRED` | `true` | **(Codex S-05 fix)** lifespan startup 시 system_config seed (interest_params, event_weights) 누락 동작. `true` (default 운영) → RuntimeError 로 startup 차단 (fail-fast). `false` (테스트 / 의도적 비활성) → WARN + endpoint fallback. |
 
 ## 외부 소스 키 (있을 때만 채움)
 
@@ -253,6 +254,7 @@ INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS=10
 DWELL_TICK_CAP_TTL_SECONDS=3600
 DWELL_TICK_CAP_PER_DOCUMENT=4
 EVENT_DUPLICATE_CACHE_TTL_SECONDS=86400
+SYSTEM_CONFIG_REQUIRED=true
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

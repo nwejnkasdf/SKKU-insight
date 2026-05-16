@@ -58,13 +58,22 @@ class EventBuffer:
     _stopped: bool = False
 
     async def add(self, item: BufferedEvent) -> None:
-        """buffer 에 추가. cap 도달 시 즉시 flush_inner 호출."""
+        """buffer 에 추가. cap 도달 시 즉시 flush_inner 호출.
+
+        Codex S-04 fix: stop() 가 _stopped=True 셋팅 후 final flush 진행 중에 add()
+        호출 시 lock 밖에서 _stopped 검사하면 item 유실 가능. lock 안에서 검사 후
+        rejected 시 directly fallback flush (즉시 callback 호출) — 데이터 손실 방지.
+        """
         items_to_flush: list[BufferedEvent] | None = None
         async with self._lock:
-            self._buffer.append(item)
-            if len(self._buffer) >= self.batch_size:
-                items_to_flush = self._buffer[:]
-                self._buffer.clear()
+            if self._stopped:
+                # shutdown 중 — buffer 에 추가하지 않고 즉시 callback 호출 (fallback).
+                items_to_flush = [item]
+            else:
+                self._buffer.append(item)
+                if len(self._buffer) >= self.batch_size:
+                    items_to_flush = self._buffer[:]
+                    self._buffer.clear()
         if items_to_flush is not None:
             await self._safe_flush(items_to_flush)
 

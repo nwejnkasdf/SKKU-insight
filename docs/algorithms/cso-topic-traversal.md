@@ -107,18 +107,24 @@ trace 자체의 operation은 **룰 기반**. LLM은 operation에 수반되는 dy
 
 ### 3.3 split (분기)
 
-**트리거**: 동일 부모 노드 산하 두 자식이 split window 내(default 7 active days) 모두 extend 임계 도달.
+**트리거**: path 위 어느 노드든 그 그래프 자식 2개가 split window 내(default 7 active days) 모두 extend 임계 도달.
 
 ```
-1. 기존 trace T를 active 유지
-2. 새 trace T' 생성 — path는 T의 path 그대로 복사 + 다른 자식 append
-3. 분기점(= 두 trace의 path 공통 마지막 노드)에 매핑된 leaf들에 대해:
-   - LLM 호출 (model_slot="high"): "각 leaf가 두 자식 path 중 어느 쪽(혹은 양쪽)에 의미 있는가?"
-   - 응답에 따라 leaf의 매핑을 양쪽 path 노드 모두에 유지 / 한쪽으로 이동 / archive
-4. T, T' 모두 last_activity_active_day = current
+1. T 단축 + T'=분기점+B (A7 결정 #20, 2026-05-17):
+   - 기존 trace T 의 path = path + child_A (분기점에서 child_A 방향으로 확장)
+   - 새 trace T' 생성 — path = path + child_B (분기점에서 child_B 방향으로 확장)
+2. 분기점(= 양 trace 의 공통 부모, T 와 T' path 의 직전 끝 노드)에 매핑된 leaf 들에 대해:
+   - LLM 호출 (model_slot="high"): "각 leaf 가 child_A vs child_B 중 어느 쪽에 의미 있는가?"
+   - 응답에 따라 leaf 의 cso_topic 매핑을 target (child_A or child_B) 로 갱신, 또는 archive
+3. T, T' 모두 last_activity_active_day = current
+4. active_cap=10 초과 시: 가장 idle stale trace 자동 archive 후 split, 또는 split 거부.
 ```
 
 **LLM 호출**: 1회 (leaf 분배). split 트리거는 룰.
+
+**의도**: T 가 child_A path 를, T' 가 child_B path 를 표현 — 사용자의 두 관심 영역이
+각자 trace 로 분리되어 추천 슬롯에서 양쪽 다 cover. 기존 시도 (T 그대로 유지 + child_B
+신규) 는 child_A 방향이 산하 leaf 매핑에만 머무는 단점 → A7 round 1 결정으로 변경.
 
 ### 3.4 archive
 
@@ -136,7 +142,39 @@ trace 자체의 operation은 **룰 기반**. LLM은 operation에 수반되는 dy
 
 §3.2 표 참고. trace.status를 active → stale로만 전환하고 path는 유지. 추가 idle이 누적되면 §3.2의 retract로 진행.
 
-## 4. Leaf 활성도 propagation
+### 3.6 merge (A7 신규, 2026-05-17)
+
+**도입 배경**: trace operation 4 (extend/retract/split/archive) → 5 로 확장 (A7 결정 #17). 사용자 활동이 한 영역으로 수렴 시 또는 splits 후 두 trace 의 path 가 충분히 겹쳐 분리 보존 가치 없을 때 두 trace 를 통합.
+
+**트리거 (룰 + LLM 결합, 결정 #21)**:
+
+| 조건 | 의미 |
+|---|---|
+| 두 active trace path 가 같은 cso_topic_id ≥ `merge_path_overlap_min` (default 3) 공유 | 의미 영역 중첩 |
+| 한 path 가 다른 path 의 proper subset | 한쪽이 다른쪽을 완전 포함 |
+
+룰 trigger 만족 후 LLM `trace_merge_verify` 호출 — "두 trace 가 의미상 동일 관심 영역인가?" 판단. LLM merge 결정 시 execute_merge.
+
+**Winner 결정 (결정 #22)**:
+
+```
+1. winner = max(last_activity_active_day) — 더 최근 활동 trace
+2. tie 시 trace_id 더 작은 쪽 (deterministic, plan TBD)
+```
+
+**Execute (결정 #22)**:
+
+```
+1. winner trace.path 유지 + last_activity 갱신
+2. loser trace.status = "archived" + loser.merged_into_trace_id = winner.trace_id (alembic 0005 신규 컬럼)
+3. loser 산하 leaf 들 — winner.path 위 노드에 이미 매핑된 leaf 는 skip,
+   미매핑 leaf 는 첫 매핑 cso_topic 을 winner.path 끝 노드로 재매핑
+4. winner 의 추천 가중치 증가 효과 (활동도 합산 의미)
+```
+
+**LLM 호출**: 1회 (trace_merge_verify). 룰 trigger 는 daily 18 UTC cron (A6 INTEREST_DECAY 와 같은 시각, decision #23). user-mutex (traversal_lock) 공유.
+
+**Audit/recovery**: `UserCSOTraversal.merged_into_trace_id: UUID | None` FK (self) 컬럼 — winner trace 가 archive 또는 삭제되어도 ondelete='SET NULL' 로 loser row 보존.
 
 ### 4.1 propagation 룰
 

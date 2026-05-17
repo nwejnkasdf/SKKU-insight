@@ -247,6 +247,26 @@
 - **검증 가드**: `scripts/check_contracts.py` CHECKS 리스트에 JobType 항목 일시 제외 (false-positive FAIL 차단). alembic 갱신 후 재추가.
 - **시점**: A7 머지 직전 (decay cron 안정성 확보).
 
+### P2-22. cold_start_orchestrator concurrent race (R2 Critical #1, 2026-05-17)
+- **원본**: `backend/app/recommendation/cold_start.py:run_cold_start`
+- **현황**: `onboarding_lock` TTL=30s 만료 후 동일 user 두 cold-start POST → 2 worker enqueue → 동시 실행 가능. `_count_cold_start_attempts` 가 atomic 아니라 cap=3 우회 가능 (4 row INSERT 됨).
+- **영향**: 1차 시연 (UVICORN_WORKERS=1 + RQ single worker) 영향 작음 — sequential 처리. multi-worker 환경에서 실 race 발생.
+- **default action**: contracts.py `RedisKey.cold_start_worker_lock(user_id)` 신규 + worker 진입 시 Lua atomic SET NX EX=180s acquire. 또는 PostgreSQL `pg_advisory_xact_lock(hashtext('cold_start:'||user_id))` 적용.
+- **시점**: 운영 단계 (multi-worker 도입 직전).
+
+### P2-23. daily UNIQUE functional index volatility (R2 Discussion #1, 2026-05-17)
+- **원본**: `backend/alembic/versions/0006_a8_recommendation_tables.py:84` — `CREATE UNIQUE INDEX ux_recommendation_user_doc_slot_day ON recommendation (user_id, document_id, slot_type, ((created_at AT TIME ZONE 'UTC')::date))`
+- **현황**: PostgreSQL 의 `timezone()` 가 STABLE volatility (not IMMUTABLE). functional index 의 expression 은 일반적으로 IMMUTABLE 요구 (16+ 일부 STABLE 허용?). `make migrate` 실제 실행 시 PostgreSQL 16 가 본 expression index 받아들이는지 검증 필요.
+- **영향**: migrate 단계 실패 시 시연 차단 — 빠른 fallback 필요.
+- **default action**: PostgreSQL 16 에서 actual `alembic upgrade head` 검증. 실패 시 alembic 0006 patch — `created_day_utc DATE GENERATED ALWAYS AS ((created_at AT TIME ZONE 'UTC')::date) STORED` 컬럼 + 그 컬럼 + (user_id, document_id, slot_type) UNIQUE INDEX.
+- **시점**: R3 통합 시연 진입 직전 (사용자 OPENAI_API_KEY 설정 후 첫 `make migrate` 시점).
+
+### P2-24. `_is_cold_start` 재진입 정책 (R2 Discussion #2, 2026-05-17)
+- **원본**: `backend/app/recommendation/engine.py:_is_cold_start` — `active_traces == 0` AND `boost_applied_at_active_day IS NULL` AND `long_alpha <= 2.0` 모두 충족 시 cold-start
+- **현황**: 14-day boost 만료 (boost_applied_at_active_day → NULL 으로 차감) 후 사용자가 행동 신호 미발생 시 cold-start 재진입 가능. 정책 의도 (재활성화 cold-start = cold-start.md §적용 조건 "마지막 활동 60 active days 이상") 와 정합? 또는 명시 "cold_start_completed_at" marker 필요?
+- **default action**: cold-start.md §적용 조건 "재활성화" 패턴이 본 동작과 일치 — 의도된 정책으로 결정. 단 60 active days 임계 적용 시 명시 marker 필요. 1차 시연은 본 묵시 정책 유지.
+- **시점**: M4 발표 후 운영 단계.
+
 ### P2-15. UUID v7 (time-ordered) cursor pagination (자체감사 C-3)
 - **원본**: `backend/app/topic/leaf_service.py / trace_service.py` cursor
 - **현황**: leaf_id / trace_id 가 UUID v4 — cursor tie-break 시 lexicographic 순서 (안전하지만 의미 없음). v7 (time-ordered) 사용 시 더 자연 정렬.

@@ -28,7 +28,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -97,6 +97,29 @@ class ColdStartItem:
 _SOURCE_TYPE_VALID = ("academic", "vendor_blog", "tech_news")
 _SLOT_DISTRIBUTION = {SlotType.CORE: 5, SlotType.ADJACENT: 3, SlotType.DISCOVERY: 2}
 _REASON_MAX_LENGTH = 80
+
+_ACQUIRE_ONBOARDING_LOCK_LUA = """
+local current = redis.call('GET', KEYS[1])
+local current_request = redis.call('GET', KEYS[2])
+if (not current) or current == ARGV[1] or
+   (current == '1' and ((not current_request) or current_request == ARGV[1])) then
+    redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+    redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+    return 1
+end
+return 0
+"""
+
+_RELEASE_ONBOARDING_LOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('DEL', KEYS[1])
+    if redis.call('GET', KEYS[2]) == ARGV[1] then
+        redis.call('DEL', KEYS[2])
+    end
+    return 1
+end
+return 0
+"""
 
 
 def _build_cold_start_prompt(
@@ -285,6 +308,14 @@ async def _count_cold_start_attempts(
     return (await db.execute(stmt)).scalar_one() or 0
 
 
+async def _acquire_user_attempt_lock(db: AsyncSession, user_id: UUID) -> None:
+    """사용자별 cold-start count+insert 구간을 PostgreSQL transaction lock 으로 직렬화."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"cold_start:{user_id}"},
+    )
+
+
 async def _get_sentinel_source_id(db: AsyncSession) -> UUID:
     """sentinel `cold_start_pseudo` source_id lookup. alembic 0001 시드."""
     stmt = select(Source.source_id).where(
@@ -405,15 +436,29 @@ async def _insert_pseudo_document(
     )
 
 
+# Lua atomic INCR + EXPIRE — A6 dwell cap 패턴 (R2 Suggested #1 fix).
+# INCR 성공 후 EXPIRE 전 crash 시 TTL 없는 영구 key 잔존 race 차단.
+_DAILY_CAP_INCR_LUA = """
+local v = redis.call('INCR', KEYS[1])
+if v == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return v
+"""
+
+
 async def _check_global_daily_cap(
     redis: aioredis.Redis, settings: Settings
 ) -> None:
-    """전역 일 cap (COLD_START_MAX_PER_DAY). Redis INCR + EXPIRE 86400."""
+    """전역 일 cap (COLD_START_MAX_PER_DAY). Lua atomic INCR + EXPIRE 86400.
+
+    R2 Suggested #1 fix: INCR + EXPIRE 분리 패턴은 INCR 성공 후 EXPIRE 전 crash 시
+    TTL 없는 영구 key 잔존. A6 dwell_tick Lua atomic 패턴으로 교체.
+    """
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     daily_key = f"cold_start:daily:{today}"
-    count = await redis.incr(daily_key)
-    if count == 1:
-        await redis.expire(daily_key, 86400)
+    count_raw = await redis.eval(_DAILY_CAP_INCR_LUA, 1, daily_key, 86400)  # type: ignore[misc]
+    count = int(count_raw)
     if count > settings.COLD_START_MAX_PER_DAY:
         raise ColdStartCapExceeded(
             ErrorCode.COLD_START_LLM_FAILED,
@@ -442,6 +487,50 @@ async def _set_status(
         mapping["completed_at"] = datetime.now(UTC).isoformat()
     await redis.hset(  # type: ignore[misc]
         RedisKey.cold_start_status(request_id), mapping=mapping
+    )
+
+
+def _cold_start_lock_ttl_seconds(settings: Settings) -> int:
+    """LLM timeout 보다 긴 worker-owned onboarding lock TTL."""
+    return max(settings.COLD_START_LLM_TIMEOUT_SECONDS + 120, 300)
+
+
+async def _acquire_cold_start_lock(
+    redis: aioredis.Redis,
+    settings: Settings,
+    *,
+    user_id: UUID,
+    request_id: UUID,
+) -> bool:
+    """onboarding lock 을 worker request_id 소유로 연장해 중복 cold-start 를 차단."""
+    lock_key = RedisKey.onboarding_lock(user_id)
+    request_key = f"{lock_key}:request_id"
+    result = await redis.eval(  # type: ignore[misc]
+        _ACQUIRE_ONBOARDING_LOCK_LUA,
+        2,
+        lock_key,
+        request_key,
+        str(request_id),
+        _cold_start_lock_ttl_seconds(settings),
+    )
+    return int(result) == 1
+
+
+async def _release_cold_start_lock(
+    redis: aioredis.Redis,
+    *,
+    user_id: UUID,
+    request_id: UUID,
+) -> None:
+    """worker 가 소유한 onboarding lock 만 CAS 로 해제."""
+    lock_key = RedisKey.onboarding_lock(user_id)
+    request_key = f"{lock_key}:request_id"
+    await redis.eval(  # type: ignore[misc]
+        _RELEASE_ONBOARDING_LOCK_LUA,
+        2,
+        lock_key,
+        request_key,
+        str(request_id),
     )
 
 
@@ -549,6 +638,23 @@ async def run_cold_start(
         logger.warning("cold_start: failed to set initial status request=%s", request_id)
         return
 
+    try:
+        lock_acquired = await _acquire_cold_start_lock(
+            redis, settings, user_id=user_uuid, request_id=request_uuid
+        )
+    except Exception:
+        logger.warning("cold_start: failed to acquire user lock request=%s", request_id)
+        lock_acquired = False
+    if not lock_acquired:
+        await _set_status(
+            redis,
+            request_uuid,
+            status="failed",
+            progress_percent=100,
+            error_code=ErrorCode.COLD_START_IN_PROGRESS.value,
+        )
+        return
+
     async with session_factory() as session:
         try:
             # 1. cap 검증.
@@ -557,6 +663,7 @@ async def run_cold_start(
                 raise InvalidColdStartResponse(
                     ErrorCode.COLD_START_LLM_FAILED, f"user not found: {user_uuid}"
                 )
+            await _acquire_user_attempt_lock(session, user_uuid)
             attempts = await _count_cold_start_attempts(session, user_uuid)
             if attempts >= settings.COLD_START_MAX_PER_USER_LIFETIME:
                 raise ColdStartCapExceeded(
@@ -635,10 +742,14 @@ async def run_cold_start(
                     progress_percent=100,
                     error_code=code,
                 )
-                # onboarding_lock 명시 DEL (자연 만료보다 빨리 해제, 사용자 retry 허용).
-                await redis.delete(RedisKey.onboarding_lock(user_uuid))
             except Exception:
                 logger.exception("cold_start: failed to set failed status")
+            try:
+                await _release_cold_start_lock(
+                    redis, user_id=user_uuid, request_id=request_uuid
+                )
+            except Exception:
+                logger.exception("cold_start: failed to release user lock")
             return
         except Exception as exc:
             await session.rollback()
@@ -651,9 +762,14 @@ async def run_cold_start(
                     progress_percent=100,
                     error_code=ErrorCode.COLD_START_LLM_FAILED.value,
                 )
-                await redis.delete(RedisKey.onboarding_lock(user_uuid))
             except Exception:
                 logger.exception("cold_start: failed to set failed status")
+            try:
+                await _release_cold_start_lock(
+                    redis, user_id=user_uuid, request_id=request_uuid
+                )
+            except Exception:
+                logger.exception("cold_start: failed to release user lock")
             _ = exc
             return
 
@@ -667,10 +783,14 @@ async def run_cold_start(
             progress_percent=100,
             dashboard_ready=True,
         )
-        # onboarding_lock 명시 DEL.
-        await redis.delete(RedisKey.onboarding_lock(user_uuid))
     except Exception:
         logger.warning("cold_start: failed to set completed status request=%s", request_id)
+    try:
+        await _release_cold_start_lock(
+            redis, user_id=user_uuid, request_id=request_uuid
+        )
+    except Exception:
+        logger.warning("cold_start: failed to release user lock request=%s", request_id)
 
 
 __all__ = [

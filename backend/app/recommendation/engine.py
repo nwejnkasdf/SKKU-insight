@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -102,6 +102,8 @@ async def _load_cold_start_dashboard(
 ) -> DashboardResponse:
     """이미 cold-start 완료된 사용자 — 저장된 Recommendation rows 를 serialize."""
     today_recs = await _select_today_recommendations(db, user.user_id)
+    if not today_recs:
+        today_recs = await _select_latest_recommendations(db, user.user_id)
     cards = await _materialize_cards(db, today_recs, user.user_id)
     slot_summaries = _serialize_slot_summaries_from_recs(today_recs)
     return DashboardResponse(
@@ -124,6 +126,39 @@ async def _select_today_recommendations(
         .where(
             func.date(func.timezone("UTC", Recommendation.created_at))
             == func.date(func.timezone("UTC", func.now()))
+        )
+        .order_by(Recommendation.created_at.desc())
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def _select_latest_recommendations(
+    db: AsyncSession, user_id: UUID
+) -> list[Recommendation]:
+    """UTC today rows 가 없으면 가장 최근 생성일의 Recommendation rows 를 복원."""
+    latest_created = (
+        await db.execute(
+            select(func.max(Recommendation.created_at)).where(
+                Recommendation.user_id == user_id
+            )
+        )
+    ).scalar_one_or_none()
+    if latest_created is None:
+        return []
+    if latest_created.tzinfo is None:
+        latest_utc = latest_created.replace(tzinfo=UTC)
+    else:
+        latest_utc = latest_created.astimezone(UTC)
+    day_start = datetime(
+        latest_utc.year, latest_utc.month, latest_utc.day, tzinfo=UTC
+    )
+    day_end = day_start + timedelta(days=1)
+    stmt = (
+        select(Recommendation)
+        .where(
+            Recommendation.user_id == user_id,
+            Recommendation.created_at >= day_start,
+            Recommendation.created_at < day_end,
         )
         .order_by(Recommendation.created_at.desc())
     )

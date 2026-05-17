@@ -377,9 +377,9 @@ class ClickbaitResult(Base):
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 ```
 
-### RecommendationSlot (A8 ⬜ 미완 — ORM/alembic 미생성)
+### RecommendationSlot
 
-> **현재 상태**: 본 ORM 은 schema.md 명세에 존재하나 `backend/app/db/models/` 디렉토리에 미생성, alembic migration 도 부재. `app/recommendation/router.py` 가 `NotImplementedError` 상태. A8 머지 시 alembic 0005 (가칭) + ORM 4종 (`Recommendation`, `RecommendationSlot`, `ReprocessRequest`, `TopicLinkageError`) 동시 생성 예정.
+> **A8 (2026-05-17 머지)**: alembic 0006 + ORM `backend/app/db/models/recommendation_slot.py` 영속. `app/recommendation/engine.py` 의 `build_dashboard` 가 slot 별 1 row INSERT.
 
 ```python
 class RecommendationSlot(Base):
@@ -393,9 +393,11 @@ class RecommendationSlot(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 ```
 
-### Recommendation (A8 ⬜ 미완 — ORM/alembic 미생성)
+### Recommendation
 
-> A8 머지 시 ORM 활성. 1차 시연 A4~A6 단계에서는 본 테이블 부재.
+> **A8 (2026-05-17 머지)**: alembic 0006 + ORM `backend/app/db/models/recommendation.py` 영속.
+> score 컬럼은 nullable 영속 — admin 노출용. NFR-04 정합 위해 일반 사용자 응답 schema
+> `RecommendationCard` 에는 score field 부재 (응답 변환 시 명시 매핑, no `**row`).
 
 ```python
 class Recommendation(Base):
@@ -409,7 +411,24 @@ class Recommendation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 ```
 
-UNIQUE(user_id, document_id, slot_type, created_at::date) — 같은 일자에 동일 문서 중복 추천 방지 (FR-28).
+UNIQUE(user_id, document_id, slot_type, (created_at AT TIME ZONE 'UTC')::date) — 같은 일자에 동일 문서 중복 추천 방지 (FR-28). alembic 0006 raw SQL `CREATE UNIQUE INDEX ux_recommendation_user_doc_slot_day` — functional expression 이라 ORM 메타에는 정의 X (autogenerate 정확 감지 불가).
+
+### DocumentSummaryCache
+
+> **A8 (2026-05-17 머지)**: FR-51 섹션형 LLM 요약 1:1 캐시. alembic 0006 + ORM `backend/app/db/models/document_summary_cache.py`.
+
+```python
+class DocumentSummaryCache(Base):
+    __tablename__ = "document_summary_cache"
+    document_id: Mapped[UUID] = mapped_column(ForeignKey("document.document_id", ondelete="CASCADE"), primary_key=True)
+    sections: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)   # list[{section, title_ko, body_ko}]
+    reason_short: Mapped[str] = mapped_column(String(255), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    model_used: Mapped[str] = mapped_column(String(120), nullable=False)
+    generator: Mapped[str] = mapped_column(String(20), nullable=False)   # 'llm' | 'source_abstract'
+```
+
+CHECK: `generator IN ('llm','source_abstract')`. PK = document_id (1:1). 동시 INSERT race 는 `pg_insert(...).on_conflict_do_nothing(index_elements=["document_id"])` + caller None-check + lookup fallback 패턴 (A6 C-03 lesson). LLM 호출 실패 시 generator='source_abstract' + Document.summary[:500] 1 섹션 fallback (503 `document.summary_unavailable` 가 마지막 fallback).
 
 ### UserEvent
 
@@ -513,9 +532,9 @@ class SystemConfig(Base):
 
 전체 JSON 은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) §구성 파일 스키마.
 
-### ReprocessRequest (A8 ⬜ 미완 — ORM/alembic 미생성)
+### ReprocessRequest (A10 ⬜ 미완 — admin 본문에서 생성)
 
-> admin router 의 `POST /admin/collection/jobs/{id}/reprocess` 는 stub (NotImplementedError). A8 머지 시 본 ORM + admin 본문 활성.
+> admin router 의 `POST /admin/collection/jobs/{id}/reprocess` 는 stub (NotImplementedError). A10 admin-console 머지 시 본 ORM + admin 본문 활성 — A8 는 본 테이블 범위 외 (recommendation engine 만).
 
 ```python
 class ReprocessRequest(Base):

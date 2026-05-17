@@ -45,6 +45,7 @@ from app.contracts import (
 from app.db.models import (
     BroadInterest,
     Document,
+    DocumentTopic,
     Recommendation,
     RecommendationSlot,
     Source,
@@ -343,6 +344,30 @@ async def _resolve_cluster_labels(
     return [str(label) for label in (await db.execute(stmt)).scalars().all()]
 
 
+async def _resolve_cluster_seed_topic_ids(
+    db: AsyncSession, cluster_ids: Iterable[UUID]
+) -> list[UUID]:
+    """BroadInterest.broad_interest_id → BroadInterest.cso_seed_topic_id list.
+
+    cold_start 의 pseudo Document → DocumentTopic 매핑 시 사용. A8 trace creation
+    hook 이 `_document_topic_cso_ids` 로 cso_id 추출 — 본 매핑이 있어야 첫 click
+    시 새 trace 자동 생성 동작 (A7 결정 #6 plan TBD 완성 정합).
+
+    cluster_ids 순서 보존 — slot 별 round-robin 매핑 가능.
+    """
+    ids = list(cluster_ids)
+    if not ids:
+        return []
+    stmt = select(
+        BroadInterest.broad_interest_id, BroadInterest.cso_seed_topic_id
+    ).where(BroadInterest.broad_interest_id.in_(ids))
+    seed_by_id: dict[UUID, UUID] = {}
+    for row in await db.execute(stmt):
+        seed_by_id[row.broad_interest_id] = row.cso_seed_topic_id
+    # input 순서 보존
+    return [seed_by_id[cid] for cid in ids if cid in seed_by_id]
+
+
 async def _lookup_existing_document(
     db: AsyncSession,
     *,
@@ -373,16 +398,28 @@ async def _insert_pseudo_document(
     request_id: str,
     item_idx: int,
     model_used: str,
+    default_cso_topic_id: UUID | None = None,
 ) -> UUID:
     """pseudo Document INSERT — sentinel source + content_type='pseudo_cold_start'.
 
     url_hint 매칭 시 기존 Document 재사용 (A4 dedup 패턴).
     untargeted on_conflict_do_nothing — race 시 lookup fallback.
+
+    (R3 시연 발견 결함 fix, 2026-05-17) `default_cso_topic_id` 가 주어지면 신규 INSERT
+    한 Document 에 대해 DocumentTopic 도 함께 INSERT — 트레이스 자동 생성 hook
+    (`_document_topic_cso_ids`) 가 cso_id 추출 가능. user 선택 cluster 의
+    `cso_seed_topic_id` 가 default (slot 별 round-robin 또는 동일 cluster).
+    confidence=0.5 (cold-start LLM 추정 신뢰도).
     """
     existing = await _lookup_existing_document(
         db, canonical_url=item.url_hint, doi=item.doi_hint
     )
     if existing is not None:
+        # 기존 Document — DocumentTopic 이미 있을 가능성. on_conflict_do_nothing 으로 안전.
+        if default_cso_topic_id is not None:
+            await _upsert_pseudo_document_topic(
+                db, existing, default_cso_topic_id
+            )
         return existing
     new_id = uuid4()
     url = item.url_hint or f"internal://cold-start/{request_id}/{item_idx}"
@@ -423,17 +460,53 @@ async def _insert_pseudo_document(
     result = await db.execute(stmt)
     inserted = result.scalar_one_or_none()
     if inserted is not None:
+        # 신규 INSERT 성공 — DocumentTopic 도 매핑 (trace creation hook 정합).
+        if default_cso_topic_id is not None:
+            await _upsert_pseudo_document_topic(
+                db, inserted, default_cso_topic_id
+            )
         return inserted
     # race — 재 lookup.
     fallback = await _lookup_existing_document(
         db, canonical_url=item.url_hint, doi=item.doi_hint
     )
     if fallback is not None:
+        if default_cso_topic_id is not None:
+            await _upsert_pseudo_document_topic(
+                db, fallback, default_cso_topic_id
+            )
         return fallback
     raise InvalidColdStartResponse(
         ErrorCode.COLD_START_LLM_FAILED,
         f"failed to persist pseudo Document for item[{item_idx}]",
     )
+
+
+async def _upsert_pseudo_document_topic(
+    db: AsyncSession, document_id: UUID, cso_topic_id: UUID
+) -> None:
+    """pseudo Document → DocumentTopic 매핑 INSERT (race-safe).
+
+    partial UNIQUE `ux_document_topic_cso_only` (WHERE leaf IS NULL) 매칭 —
+    동일 (document_id, cso_topic_id, leaf=NULL) 가 이미 있으면 skip.
+
+    confidence=0.5 (cold-start LLM 추정 신뢰도, 일반 검색 0.8~0.9 보다 낮음).
+    """
+    stmt = (
+        pg_insert(DocumentTopic)
+        .values(
+            id=uuid4(),
+            document_id=document_id,
+            cso_topic_id=cso_topic_id,
+            leaf_topic_id=None,
+            confidence=0.5,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["document_id", "cso_topic_id"],
+            index_where=DocumentTopic.leaf_topic_id.is_(None),
+        )
+    )
+    await db.execute(stmt)
 
 
 # Lua atomic INCR + EXPIRE — A6 dwell cap 패턴 (R2 Suggested #1 fix).
@@ -698,9 +771,21 @@ async def run_cold_start(
             items = _validate_cold_start(llm_resp.parsed_json)
 
             # 4. pseudo Document INSERT.
+            # (R3 시연 발견 fix, 2026-05-17) cluster_seed_topic_ids 추출 — DocumentTopic
+            # 매핑에 사용. user 가 선택한 cluster 의 cso_seed_topic_id round-robin.
+            # 빈 list (cluster_uuids=[]) 시 default_cso=None → DocumentTopic 매핑 skip.
+            cluster_seeds = await _resolve_cluster_seed_topic_ids(
+                session, cluster_uuids
+            )
             sentinel_id = await _get_sentinel_source_id(session)
             doc_ids: list[UUID] = []
             for idx, item in enumerate(items):
+                # round-robin: 0→cluster[0], 1→cluster[1], 2→cluster[2], 3→cluster[0]...
+                default_cso = (
+                    cluster_seeds[idx % len(cluster_seeds)]
+                    if cluster_seeds
+                    else None
+                )
                 doc_id = await _insert_pseudo_document(
                     session,
                     sentinel_source_id=sentinel_id,
@@ -708,6 +793,7 @@ async def run_cold_start(
                     request_id=request_id,
                     item_idx=idx,
                     model_used=llm_resp.model,
+                    default_cso_topic_id=default_cso,
                 )
                 doc_ids.append(doc_id)
             await _set_status(

@@ -134,6 +134,10 @@ async def _atomic_upsert_interest_state(
             "WHERE cso_topic_id IS NULL AND leaf_topic_id IS NOT NULL"
         )
 
+    # (A8 R3 시연 fix, 2026-05-17) asyncpg `unknown + unknown` 회피 — bind parameter
+    # 끼리 산술 연산 시 PostgreSQL 이 type 추론 못 함 (operator is not unique).
+    # SQLAlchemy text() 의 named bind `:x` 가 PostgreSQL `::` cast 와 충돌 →
+    # `CAST(:x AS float8)` 패턴 사용. 모든 float bind 에 명시 cast.
     upsert_sql = text(
         f"""
         INSERT INTO user_interest_state (
@@ -144,28 +148,32 @@ async def _atomic_upsert_interest_state(
             boost_applied_at_active_day, updated_at
         ) VALUES (
             gen_random_uuid(), :user_id, :cso_id, :leaf_id,
-            :alpha_prior + :da_l, :beta_prior + :db_l,
-            :alpha_prior + :da_s, :beta_prior + :db_s,
-            (:alpha_prior + :da_l) /
-                NULLIF(:alpha_prior + :da_l + :beta_prior + :db_l, 0),
-            (:alpha_prior + :da_s) /
-                NULLIF(:alpha_prior + :da_s + :beta_prior + :db_s, 0),
+            CAST(:alpha_prior AS float8) + CAST(:da_l AS float8),
+            CAST(:beta_prior AS float8) + CAST(:db_l AS float8),
+            CAST(:alpha_prior AS float8) + CAST(:da_s AS float8),
+            CAST(:beta_prior AS float8) + CAST(:db_s AS float8),
+            (CAST(:alpha_prior AS float8) + CAST(:da_l AS float8)) /
+                NULLIF(CAST(:alpha_prior AS float8) + CAST(:da_l AS float8)
+                       + CAST(:beta_prior AS float8) + CAST(:db_l AS float8), 0),
+            (CAST(:alpha_prior AS float8) + CAST(:da_s AS float8)) /
+                NULLIF(CAST(:alpha_prior AS float8) + CAST(:da_s AS float8)
+                       + CAST(:beta_prior AS float8) + CAST(:db_s AS float8), 0),
             :active_day, :active_day, NULL, NOW()
         )
         ON CONFLICT {conflict_cols} {conflict_where} DO UPDATE SET
-            short_alpha = user_interest_state.short_alpha + :da_s,
-            short_beta  = user_interest_state.short_beta  + :db_s,
-            long_alpha  = user_interest_state.long_alpha  + :da_l,
-            long_beta   = user_interest_state.long_beta   + :db_l,
-            short_score = (user_interest_state.short_alpha + :da_s) /
+            short_alpha = user_interest_state.short_alpha + CAST(:da_s AS float8),
+            short_beta  = user_interest_state.short_beta  + CAST(:db_s AS float8),
+            long_alpha  = user_interest_state.long_alpha  + CAST(:da_l AS float8),
+            long_beta   = user_interest_state.long_beta   + CAST(:db_l AS float8),
+            short_score = (user_interest_state.short_alpha + CAST(:da_s AS float8)) /
                 NULLIF(
-                    user_interest_state.short_alpha + :da_s +
-                    user_interest_state.short_beta + :db_s, 0
+                    user_interest_state.short_alpha + CAST(:da_s AS float8) +
+                    user_interest_state.short_beta + CAST(:db_s AS float8), 0
                 ),
-            long_score  = (user_interest_state.long_alpha + :da_l) /
+            long_score  = (user_interest_state.long_alpha + CAST(:da_l AS float8)) /
                 NULLIF(
-                    user_interest_state.long_alpha + :da_l +
-                    user_interest_state.long_beta + :db_l, 0
+                    user_interest_state.long_alpha + CAST(:da_l AS float8) +
+                    user_interest_state.long_beta + CAST(:db_l AS float8), 0
                 ),
             last_event_active_day = :active_day,
             updated_at = NOW()

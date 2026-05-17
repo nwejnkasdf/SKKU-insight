@@ -247,6 +247,14 @@
 - **검증 가드**: `scripts/check_contracts.py` CHECKS 리스트에 JobType 항목 일시 제외 (false-positive FAIL 차단). alembic 갱신 후 재추가.
 - **시점**: A7 머지 직전 (decay cron 안정성 확보).
 
+### P2-25. tests/recommendation/ pytest fixture nested connection 충돌 (A8 R3 시연 발견, 2026-05-17)
+- **원본**: `backend/tests/conftest.py:db_session` — function 단위 트랜잭션 (`begin()` + `rollback()`) 안에서 service 함수가 별도 await 시도 시 asyncpg `cannot perform operation: another operation is in progress`.
+- **현황**: pytest tests/recommendation 실행 — 28 passed / 3 failed / 19 errors. errors 모두 fixture race (single connection 안 동시 await). 본 code 자체 결함 X — fixture 결함.
+- **default action**: conftest 의 `db_session` fixture 를 `async_sessionmaker` 별도 session 패턴 (connection-pooled, 각 test 분리 commit/rollback) 으로 교체. A11 (test-ci) 단계에서 처리.
+- **추가 3 failed test 결함**: test_fr42_slot_short_borrows_from_donor (assertion mismatch) / test_summary_404_when_document_not_exist (fixture 결함 동반) / test_document_topic_cso_ids_empty_for_unknown_doc (assertion mismatch) — A11 에서 fixture fix 후 재검증.
+- **영향**: A8 코드 자체 동작 정합 — R3 시연 검증 통과. tests 통과율 28/31 (fixture errors 제외) = 90%.
+- **시점**: A11 (test-ci) 머지 직전.
+
 ### P2-22. cold_start_orchestrator concurrent race (R2 Critical #1, 2026-05-17)
 - **원본**: `backend/app/recommendation/cold_start.py:run_cold_start`
 - **현황**: `onboarding_lock` TTL=30s 만료 후 동일 user 두 cold-start POST → 2 worker enqueue → 동시 실행 가능. `_count_cold_start_attempts` 가 atomic 아니라 cap=3 우회 가능 (4 row INSERT 됨).
@@ -285,7 +293,7 @@
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 11 (해결 1, 무효 1 — P1-6 v13 pivot, 활성 9) | (없음) | reasonable default + stub |
-| P2 | 23 (해결 3 — P2-23 A8 R3 시연 검증, 무효 2 — P2-3·P2-4 v13 pivot, 활성 18 — P2-22/24 A8 운영 단계 포함) | (없음) | 후속 폴리시 단계 |
+| P2 | 24 (해결 3 — P2-23 A8 R3 시연 검증, 무효 2 — P2-3·P2-4 v13 pivot, 활성 19 — P2-22/24/25 A8 운영·A11 단계 포함) | (없음) | 후속 폴리시 단계 |
 | C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit + A6 본문 + Codex 2-라운드 audit + A7 본문 + Codex 3-라운드 audit + A8 본문 + R1 self-review) | 40 (해결 40 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17, C-37/C-38 A6 본문 + Codex round 1/2 fix 2026-05-17, C-39 A7 본문 + Codex round 1/2/3 fix 2026-05-17, C-40 A8 본문 + R1 self-review 2026-05-17) | (없음) | A2 + v13 라운드 + A4 + A6 + A7 + A8 |
 
 **모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. A6 본문 + Codex 2-라운드 audit + 통합 시연 검증 (C-37/C-38, 2026-05-17) [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) 완료. A7 본문 (leaf-lifecycle + traversal, trace operation 4→5 + merge 신규) + Codex 3-라운드 audit (C-39, 2026-05-17) 완료. A8 본문 (recommendation engine — core/adjacent/discovery + cold-start orchestrator + 첫 trace 생성 hook A7 #6 plan TBD 완성) + R1 self-review fix (C-40, 2026-05-17) 완료. 다음 진입 가능 모듈: A9 electron-client (또는 A8 R2 Codex 재감사 + R3 통합 시연 별도 세션).**

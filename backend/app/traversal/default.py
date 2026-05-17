@@ -210,12 +210,14 @@ class DefaultTraversalEngine:
             )
             return None
         fork = trace_row.path[-1]
-        # truncated_path = 분기점까지 (현 path 끝 = 분기점, 그래서 그대로 유지).
-        # 결정 #20: T 단축 — 산하 child 가 없는 path 로 단축. 분기점이 이미 path 끝이라
-        # truncated_path = path 그대로 (child_A 는 T 의 산하 leaf 매핑으로 표현).
-        # new_path = path + child_B (T' 가 분기점 + B 로 1-hop 확장).
-        truncated_path = list(trace_row.path)
-        new_path = [*list(trace_row.path), diverging_children[1]]
+        # 결정 #20: T 단축 + T'=분기점+B. 분기점은 path 의 현재 끝. T 는 child_A 를
+        # path 끝에 append (T 가 child_A 방향으로 확장), T' 는 fork + child_B path.
+        # (Codex R2-NEW-1 fix) 이전 구현은 child_A 를 plan/path 어디에도 반영 안 함 —
+        # source 의 path 가 fork 이전 상태로 유지되어 leaf 매핑이 fork 산하만 표현됐다.
+        source_child = diverging_children[0]
+        new_child = diverging_children[1]
+        truncated_path = [*list(trace_row.path), source_child]
+        new_path = [*list(trace_row.path), new_child]
         leaves = await queries.get_descendant_leaves(
             self.db, trace_row.user_id, trace=trace_row
         )
@@ -226,12 +228,12 @@ class DefaultTraversalEngine:
             new_path=new_path,
             leaves_to_dispatch=[lf.leaf_topic_id for lf in leaves],
         )
-        # LLM dispatch decisions (1차 시연 stub: 모두 source 유지).
+        # LLM dispatch decisions (1차 시연 stub: 모두 source 유지 — child_A 로 재매핑).
         decisions: list[dict[str, Any]] = [
             {
                 "leaf_id": lid,
                 "target_trace": "source",
-                "target_cso_topic_id": fork,
+                "target_cso_topic_id": source_child,
             }
             for lid in plan.leaves_to_dispatch
         ]

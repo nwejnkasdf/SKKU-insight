@@ -535,6 +535,20 @@ async def ingest_event_atomic(
     if cache_invalidate:
         await _invalidate_recommendation_cache(redis, user.user_id)
 
+    # 9) A7 협업 (Codex R2-DEF-S5 fix, plan #6 결정):
+    # ingest 직후 1단계 stale 마킹 — score_tail ≤ TRACE_STALE_THRESHOLD_SCORE AND
+    # idle ≥ TRACE_STALE_IDLE_DAYS 인 active trace 를 stale 로 즉시 전이 (no LLM).
+    # cold-start trace 생성 hook (TraversalEngine.ingest_event) 은 A8 진입 시 본문 완성
+    # (plan TBD — A8 cold-start orchestrator 가 사용자 첫 카드 클릭 시점에 호출).
+    # 본 hook 은 단일 SQL UPDATE 1회로 비용 최소화.
+    try:
+        from app.traversal.operations import mark_stale_if_idle
+
+        await mark_stale_if_idle(db, user.user_id, active_day)
+    except Exception:
+        # A7 module import 실패는 무시 (A6 단독 운영도 가능해야 함).
+        pass
+
     return IngestResult(
         event_id=event_id,
         accepted=True,

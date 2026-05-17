@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, delete, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +146,29 @@ async def execute_retract(
         elif action == "remap":
             new_cso = decision.get("new_cso_topic_id")
             if new_cso is None:
+                continue
+            # (Codex R2-RG-4 fix) DynamicLeafTopicCSOTopic composite PK 충돌 회피.
+            # leaf 가 이미 new_cso 에 바인딩됐으면 UPDATE 가 PK 위반 — 대신 retracted
+            # row 만 DELETE (new 매핑이 이미 존재, leaf 는 new 산하 유지).
+            exists_stmt = select(
+                DynamicLeafTopicCSOTopic.leaf_topic_id
+            ).where(
+                DynamicLeafTopicCSOTopic.leaf_topic_id == leaf_id,
+                DynamicLeafTopicCSOTopic.cso_topic_id == new_cso,
+            )
+            already_mapped = (
+                await db.execute(exists_stmt)
+            ).scalar_one_or_none()
+            if already_mapped is not None:
+                # 기존 retracted 매핑만 삭제 (new 매핑은 보존).
+                await db.execute(
+                    delete(DynamicLeafTopicCSOTopic).where(
+                        DynamicLeafTopicCSOTopic.leaf_topic_id == leaf_id,
+                        DynamicLeafTopicCSOTopic.cso_topic_id
+                        == plan.retracted_cso_topic_id,
+                    )
+                )
+                remapped += 1
                 continue
             # DynamicLeafTopicCSOTopic 의 retracted cso_topic_id 행 → new cso 로 갱신.
             await db.execute(

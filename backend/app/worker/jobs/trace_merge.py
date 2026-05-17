@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from sqlalchemy import select
 
@@ -24,6 +25,12 @@ from app.redis import get_redis
 from app.traversal.default import DefaultTraversalEngine
 
 logger = logging.getLogger("trace_merge_job")
+
+
+# (Codex R2-RG-3 fix) lock release Lua atomic — 자기 token 일치 시만 DEL.
+_RELEASE_LOCK_LUA = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
+)
 
 
 async def _run() -> int:
@@ -40,10 +47,18 @@ async def _run() -> int:
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
-            lock_key = RedisKey.trace_merge_lock(user.user_id)
+            # (Codex R2-RG-1 fix) lock key 통일 — daily_lifecycle_evaluation 와
+            # trace_merge 둘 다 trace mutation 이므로 같은 user-mutex 사용해야 race 차단.
+            # TRACE_MERGE_LOCK_TTL_SECONDS=120s 가 LLM 호출 동반이라 TTL 길게.
+            # (R2-RG-3) lock value = uuid4 토큰 — release 시 Lua atomic CAS.
+            lock_key = RedisKey.traversal_lock(user.user_id)
             settings = get_settings()
+            lock_token = str(uuid.uuid4())
             acquired = await redis.set(
-                lock_key, "1", nx=True, ex=settings.TRACE_MERGE_LOCK_TTL_SECONDS
+                lock_key,
+                lock_token,
+                nx=True,
+                ex=settings.TRACE_MERGE_LOCK_TTL_SECONDS,
             )
             if not acquired:
                 continue
@@ -65,7 +80,16 @@ async def _run() -> int:
                 )
                 await db.rollback()
             finally:
-                await redis.delete(lock_key)
+                # R2-RG-3 fix: Lua atomic — 자기 token 일치 시만 DEL.
+                try:
+                    await redis.eval(  # type: ignore[misc]
+                        _RELEASE_LOCK_LUA, 1, lock_key, lock_token
+                    )
+                except Exception:
+                    logger.warning(
+                        "trace_merge_job lock release race user=%s",
+                        user.user_id,
+                    )
     logger.info("trace_merge_job total_merged=%d", total_merged)
     return total_merged
 

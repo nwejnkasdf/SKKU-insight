@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,13 @@ from app.redis import get_redis
 from app.traversal.default import DefaultTraversalEngine
 
 logger = logging.getLogger("daily_lifecycle_evaluation_job")
+
+
+# (Codex R2-RG-3 fix) lock release 가 자기 토큰 일치 시만 DEL — TTL 만료 후 다른 worker
+# 의 lock 을 잘못 해제하는 race 차단.
+_RELEASE_LOCK_LUA = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
+)
 
 
 async def _evaluate_trace_demotion_for_user(
@@ -79,6 +87,14 @@ async def _evaluate_trace_demotion_for_user(
                 archived += 1
             continue
         if idle >= retract_threshold:
+            # (Codex R2-RG-2 fix) path 길이 1 인 trace 는 retract 무의미 — archive 로 직접 전이.
+            # evaluate_retract 가 None 반환하면 caller (retracted += 1 카운트 누락) +
+            # cache invalidate skip 됨. 본 fix 가 path=1 시점 명시 archive count.
+            if len(list(trace.path or [])) <= 1:
+                ok = await engine.archive_if_eligible(trace.trace_id)
+                if ok:
+                    archived += 1
+                continue
             plan = await engine.evaluate_retract(trace.trace_id)
             if plan is not None:
                 retracted += 1
@@ -159,12 +175,14 @@ async def _run() -> int:
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
-            # (Codex R1 Suggested 3) user-mutex (traversal_lock) — 동일 사용자의 trace
-            # mutation 이 ingest 또는 trace_merge_job 과 동시 실행 차단.
+            # (Codex R1 Suggested 3 + R2-RG-3) user-mutex (traversal_lock) — 동일 사용자의 trace
+            # mutation 이 ingest 또는 trace_merge_job 과 동시 실행 차단. lock value 가
+            # 고유 token (uuid4) — release 시 자기 토큰만 DEL (Lua atomic GET+DEL CAS).
             mutation_key = RedisKey.traversal_lock(user.user_id)
+            lock_token = str(uuid.uuid4())
             acquired = await redis.set(
                 mutation_key,
-                "1",
+                lock_token,
                 nx=True,
                 ex=settings.TRAVERSAL_USER_LOCK_TTL_SECONDS,
             )
@@ -193,7 +211,16 @@ async def _run() -> int:
                 )
                 await db.rollback()
             finally:
-                await redis.delete(mutation_key)
+                # R2-RG-3 fix: Lua atomic — 자기 token 일치 시만 DEL.
+                try:
+                    await redis.eval(  # type: ignore[misc]
+                        _RELEASE_LOCK_LUA, 1, mutation_key, lock_token
+                    )
+                except Exception:
+                    logger.warning(
+                        "daily_lifecycle_evaluation lock release race user=%s",
+                        user.user_id,
+                    )
     logger.info(
         "daily_lifecycle_evaluation_job retracted=%d archived=%d leaf_demoted=%d",
         total_retracted,

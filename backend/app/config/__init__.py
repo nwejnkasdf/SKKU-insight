@@ -125,6 +125,28 @@ class Settings(BaseSettings):
     TRAVERSAL_USER_LOCK_TTL_SECONDS: int = 10
     CONSENT_CACHE_TTL_SECONDS: int = 60
 
+    # === A8 Recommendation Engine (recommendation-ranking.md + cold-start.md) ===
+    # decision-backlog C-40 (A8 round 1). 결정 매트릭스는 decisions.md §13.
+    #
+    # single-flight (sdd/concurrency.md §2). lock token 은 uuid4 + Lua atomic CAS DEL.
+    RECOMMENDATION_BUILD_POLL_TIMEOUT_SECONDS: int = 8
+    RECOMMENDATION_BUILD_POLL_INTERVAL_SECONDS: float = 0.2
+    # cold-start LLM (cold-start.md §비용 가드). 전역 일 cap + 사용자 lifetime cap.
+    COLD_START_MAX_PER_DAY: int = 100
+    COLD_START_MAX_PER_USER_LIFETIME: int = 3
+    # cold-start LLM 호출 timeout (초). 일반 LLM_REQUEST_TIMEOUT_SECONDS=180 과 정합.
+    COLD_START_LLM_TIMEOUT_SECONDS: int = 180
+    # cold-start orchestrator 가 pseudo Document 매칭 시 사용할 dedup window (일).
+    # A4 _DEDUP_WINDOW_DAYS=30 과 동일 (기존 LLM 검색 결과 재활용).
+    COLD_START_DEDUP_WINDOW_DAYS: int = 30
+    # POST /recommendations/dashboard/refresh slowapi rate limit.
+    RATE_LIMIT_DASHBOARD_REFRESH: str = "1/minute"
+    # GET /documents/{id}/summary LLM timeout (초). DB 영속 캐시 (DocumentSummaryCache) 가
+    # 1차 SOR — 본 timeout 은 miss 시 LLM 호출 한계.
+    DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS: int = 60
+    # Document.summary fallback 시 표시할 최대 문자 수 (LLM 실패 시 source_abstract 1 섹션).
+    DOCUMENT_SUMMARY_SOURCE_ABSTRACT_MAX_CHARS: int = 500
+
     # === A6 Interest Bayesian (algorithms/interest-bayesian.md) ===
     # 1-hop trace path 조상 propagation. A7 본문 PR-3 (2026-05-17) 머지로 default true.
     # false 로 명시 토글 시 ingest_event 는 단일 노드 (부모 cso_topic_id) + 직접 지정 토픽만 갱신.

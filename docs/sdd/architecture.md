@@ -57,7 +57,10 @@
 `LifecycleEvaluator` 추상 인터페이스의 D 하이브리드 구현체. 신규 동적 리프 식별과 병합 평가만 LLM 호출. emerging/active/stale/archived 상태 전이는 `topic_lifecycle.toml` 임계 룰. FR-14~16. 자세한 알고리즘은 [`../algorithms/leaf-topic-lifecycle.md`](../algorithms/leaf-topic-lifecycle.md).
 
 ### interest-bayesian
-Beta-Bernoulli 사후 업데이트. UserEvent 입력 → `event_weights.toml` 가중치 → 단/장기 두 관측창 사후 갱신. UserInterestState에 long_score / short_score 저장. FR-17~20. 알고리즘은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md).
+Beta-Bernoulli 사후 업데이트. UserEvent 입력 → `event_weights.toml` 가중치 → 단/장기 두 관측창 사후 갱신. UserInterestState에 long_score / short_score 저장. **A6 (2026-05-17)**: atomic UPSERT 단일 SQL `INSERT ... ON CONFLICT DO UPDATE` + 12 partial UNIQUE. daily decay cron (18 UTC = 03 KST). cluster + 1-hop child propagation (env `INTEREST_PROPAGATION_ENABLED` default false, A7 도래 후 true). 14-day onboarding boost daily 차감 (`boost_applied_at_active_day` 컬럼). GREATEST(:alpha_prior, computed) floor. FR-17~20. 알고리즘은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md).
+
+### events (A6 신규, 2026-05-17)
+사용자 행동 로그 수집의 5초 batch flush + active_day_counter atomic 갱신. `POST /events` 단건 + `POST /events/batch` 207 Multi-Status (부분 성공 허용). payload-hash + `client_request_id` idempotency (match 200 + 기존 row / mismatch 409 `EVENT_DUPLICATE`). dwell_tick cap = Redis Lua atomic `INCR + EXPIRE` per-document day. lifespan 부팅 시 `EventBuffer` task 시작 + shutdown 시 lock 안 `_stopped` 검사 + 즉시 flush. flush callback → `interest-bayesian` 모듈로 atomic UPSERT 위임. `app/events/{buffer, active_day}.py`.
 
 ### recommendation-engine
 core/adjacent/discovery 후보 생성 + 신뢰도 임계 + fallback. Cold-start는 LLM이 직접 10개 추천 JSON 생성. 일반 추천은 (관심 적합도 × 신선도 × 소스 신뢰도) 점수로 랭킹. FR-26, FR-35~45. 알고리즘은 [`../algorithms/recommendation-ranking.md`](../algorithms/recommendation-ranking.md).
@@ -88,8 +91,6 @@ A4 Topic-driven Pivot 으로 폐기. `app/source_adapters/` 디렉토리 미생�
 |---|---|
 | 이메일 계정 인증 시스템 | auth (FastAPI) |
 | CSO 데이터 | topic-engine (cso-import.md 워크플로 + NetworkX 캐시) |
-| 학술지/논문 데이터 소스 | Source Adapters (arXiv / OpenAlex / Semantic Scholar / DBLP) |
-| 빅테크 공식 채널 | Source Adapters (RSS) |
-| 테크 뉴스 소스 | Source Adapters (RSS / 네이버 BS4) → Clickbait DoRA 통과 필수 |
-| 낚시성 탐지 모듈 | Clickbait DoRA |
+| 외부 자료 검색 (학술·빅테크·뉴스 통합) | **(v13 라운드 pivot, 2026-05-11)** LLM Adapter `LLMProvider.search_with_tools()` 단일 경로. sentinel `llm_search` Source 1행 + publisher 정보는 `Document.raw` JSONB. 6 source 어댑터 폐기 |
+| 낚시성 탐지 모듈 | Clickbait DoRA (`clickbait_module/` 외부 서비스). **(v13 라운드)** 1차 시연 default 비활성, 사용자 News 소스 명시 활성화 시만 post-LLM filter |
 | 관리자 웹 콘솔 | Next.js Admin Console + admin API |

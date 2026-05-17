@@ -23,7 +23,7 @@ S — Spoofing (위장), T — Tampering (변조), R — Repudiation (부인), I
 | 위협 | 위치 | 위험도 | 완화 |
 |---|---|---|---|
 | Access JWT 변조 | API 호출 | 낮 | HS256 서명 + JWT_SECRET 64자, jose 라이브러리 검증 |
-| DB 직접 변조 | Postgres 컨테이너 | 중 | 컨테이너 격리, 5432는 127.0.0.1만 바인딩, 운영 시 admin password + TLS |
+| DB 직접 변조 | Postgres 컨테이너 | 중 | 컨테이너 격리, 호스트 포트 **5433** 은 127.0.0.1 만 바인딩 (v13 round 3 R3-C03 fix, 2026-05-16 — native PostgreSQL 충돌 회피로 5432→5433). 컨테이너 내부는 5432 유지. 운영 시 admin password + TLS |
 | Refresh 토큰 위조 | Redis | 낮 | opaque random 64바이트 + HMAC index. 위조 사실상 불가능 |
 | 추천 응답 변조 (MITM) | client ↔ api | 중 | HTTPS 강제 (NFR-20). 시연 환경은 docker localhost — 위협 낮음. 운영은 TLS 종료 프록시 |
 | 외부 소스 응답 변조 | Source fetch | 낮 | TLS 검증, content-type 확인, 파서 robust |

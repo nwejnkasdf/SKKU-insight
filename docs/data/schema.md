@@ -210,6 +210,10 @@ class UserInterestState(Base):
     # Active day 기반 시간 감쇠 (algorithms/interest-bayesian.md §시간 감쇠)
     last_event_active_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_decay_active_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # A6 (2026-05-17): 14-day onboarding prior boost 만료 추적. interest_decay_job 가 daily 차감,
+    # `current_active_day - boost_applied_at_active_day >= onboarding_boost_active_days(=14)` 충족 시 prior 원복 후 NULL.
+    # NULL = boost 미적용 (행동 신호로만 갱신된 row).
+    boost_applied_at_active_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
 ```
 
 > ⚠️ **NULL 의미론 보완**: surrogate `state_id` PK는 그대로 두되, 일반 `UNIQUE(user_id, cso_topic_id, leaf_topic_id)`는 NULL ≠ NULL 의미론 때문에 중복 방지를 못 한다. 따라서 케이스별 partial UNIQUE INDEX로 표현.
@@ -366,7 +370,9 @@ class ClickbaitResult(Base):
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 ```
 
-### RecommendationSlot
+### RecommendationSlot (A8 ⬜ 미완 — ORM/alembic 미생성)
+
+> **현재 상태**: 본 ORM 은 schema.md 명세에 존재하나 `backend/app/db/models/` 디렉토리에 미생성, alembic migration 도 부재. `app/recommendation/router.py` 가 `NotImplementedError` 상태. A8 머지 시 alembic 0005 (가칭) + ORM 4종 (`Recommendation`, `RecommendationSlot`, `ReprocessRequest`, `TopicLinkageError`) 동시 생성 예정.
 
 ```python
 class RecommendationSlot(Base):
@@ -380,7 +386,9 @@ class RecommendationSlot(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 ```
 
-### Recommendation
+### Recommendation (A8 ⬜ 미완 — ORM/alembic 미생성)
+
+> A8 머지 시 ORM 활성. 1차 시연 A4~A6 단계에서는 본 테이블 부재.
 
 ```python
 class Recommendation(Base):
@@ -409,11 +417,14 @@ class UserEvent(Base):
     event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     dwell_ms: Mapped[int | None] = mapped_column(Integer)
     client_request_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    # A6 (2026-05-17): payload-hash idempotency. SHA-256(client_request_id + event_type + target + dwell_ms)[:32] hex (64 ASCII).
+    # 동일 client_request_id 재시도 시 hash match 200 + 기존 row, mismatch 409 EVENT_DUPLICATE.
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
 
-UNIQUE(user_id, client_request_id) — idempotency.
+UNIQUE(user_id, client_request_id) — idempotency. `payload_hash` 는 Redis `event_duplicate_cache` (TTL `EVENT_DUPLICATE_CACHE_TTL_SECONDS`) hot path + DB 영구 보존 양쪽 사용. A6 ingest 패턴: `pg_insert(UserEvent).on_conflict_do_nothing(...).returning(event_id)` + caller None-check → race 시 idempotency lookup (round 2 C-03 fix).
 
 ### SavedDocument
 
@@ -495,7 +506,9 @@ class SystemConfig(Base):
 
 전체 JSON 은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) §구성 파일 스키마.
 
-### ReprocessRequest
+### ReprocessRequest (A8 ⬜ 미완 — ORM/alembic 미생성)
+
+> admin router 의 `POST /admin/collection/jobs/{id}/reprocess` 는 stub (NotImplementedError). A8 머지 시 본 ORM + admin 본문 활성.
 
 ```python
 class ReprocessRequest(Base):
@@ -508,9 +521,9 @@ class ReprocessRequest(Base):
     result_message: Mapped[str | None] = mapped_column(Text)
 ```
 
-## 추가 테이블 (TopicLinkageError, FR-64)
+## 추가 테이블 (TopicLinkageError, FR-64) — A5/A7 ⬜ 미완
 
-SRS Data Dictionary에 명시되진 않았지만 FR-64 (토픽 연결 오류 표시)를 위해 별도 테이블 생성.
+> SRS Data Dictionary 외 별도 테이블. **현재 미생성** — `app/db/models/` 디렉토리에 부재, alembic migration 도 부재. admin router 의 `/admin/topic-linkage/errors` 는 NotImplementedError. A5 (clickbait classifier 실패 시 INSERT) 또는 A7 (leaf-lifecycle LLM 호출 실패 시 INSERT) 머지 후 본문 활성.
 
 ```python
 class TopicLinkageError(Base):

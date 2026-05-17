@@ -31,8 +31,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # v13 round 3 R3-C03 fix (2026-05-16): 호스트 포트 5433 — native PostgreSQL (5432) 충돌 회피.
+    # 컨테이너 내부는 5432 그대로. DATABASE_URL 의 host 가 컨테이너 이름이라면 5432 유지.
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

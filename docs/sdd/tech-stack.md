@@ -13,20 +13,19 @@
 | `sqlalchemy[asyncio]` | `^2.0` | ORM async 지원 |
 | `alembic` | `^1.13` | 스키마 마이그레이션 표준 |
 | `asyncpg` | `^0.29` | Postgres async 드라이버 |
-| `passlib[bcrypt]` | `^1.7` | bcrypt(cost=12) 비밀번호 해시 (NFR-16) |
+| `bcrypt` | `>=4.1` | 비밀번호 해시 직접 호출 + SHA-256 hex pre-hash (C-11 fix, `passlib` 1.7.4 bcrypt 4.x 호환성 깨짐으로 폐기). UTF-8 한국어 128자 정책 보장 |
 | `python-jose[cryptography]` | `^3.3` | JWT 발급/검증 (NFR-17) |
 | `slowapi` | `^0.1.9` | Rate limiting (Redis 백엔드, NFR 보안) |
-| `redis` | `^5.0` | Refresh token store, 추천 캐시 |
-| `rq` | `^1.16` | 작업 큐 (Redis 기반, 별도 인프라 불필요) |
-| `httpx` | `^0.27` | async HTTP 클라이언트 (어댑터 호출) |
-| `beautifulsoup4` | `^4.12` | 네이버뉴스 IT/과학 BS4 크롤링 |
-| `lxml` | `^5.2` | RSS/XML 파서 |
-| `feedparser` | `^6.0` | RSS 정상화 |
+| `redis` | `^5.0` | Refresh token store, 추천 캐시, 분산 semaphore (C-19), Lua dwell cap (A6) |
+| `rq` | `>=2.0` | 작업 큐 (Redis 기반, 별도 인프라 불필요) |
+| `rq-scheduler` | `^0.13` | cron job 등록 |
+| `httpx` | `^0.27` | async HTTP 클라이언트 (LLM provider, clickbait service) |
 | `networkx` | `^3.3` | CSO 그래프 인접/거리 탐색 메모리 캐시 |
-| `python-Levenshtein` | `^0.25` | 제목 유사도 dedup |
+| `rapidfuzz` | `>=3.6,<4` | 제목 유사도 dedup (`python-Levenshtein` 폐기, A4 round 2 후속) |
 | `tomli` / `tomllib` | stdlib (3.11+) | `interest_params.toml` 등 로딩 |
-| `tenacity` | `^9.0` | 외부 API retry |
 | `structlog` | `^24.1` | 구조화 로그 |
+
+> **v13 라운드 (2026-05-11) 폐기**: `beautifulsoup4` / `lxml` / `feedparser` (6 source 어댑터 폐기 — NaverBS4/RSS 미사용) / `tenacity` (외부 API retry 대상 사라짐 — LLM provider 자체 retry). `passlib[bcrypt]` 는 A2 자체 검수 단계에서 bcrypt 4.x 호환성 문제로 폐기 (C-11). 모두 `pyproject.toml` 에 미포함.
 
 ### 백엔드 도구
 
@@ -35,9 +34,10 @@
 | `pytest` | `^8.2` | 단위·통합 테스트 |
 | `pytest-asyncio` | `^0.23` | 비동기 테스트 |
 | `pytest-cov` | `^5.0` | 커버리지 |
-| `vcrpy` | `^6.0` | 외부 소스 호출 fixture 녹화 |
 | `ruff` | `^0.5` | Lint + Format (black/isort/flake8 대체) |
 | `mypy` | `^1.10` | 정적 타입 검사 |
+
+> **v13 라운드 폐기**: `vcrpy` (외부 HTTP 호출 녹화) — A4 round 2 부터 `LLMProvider=mock` deterministic fixture (`tests/collection/fixtures/llm_search_mock/`) 가 그 역할 대체. dev 의존성 미포함.
 
 ## 클라이언트 (Electron + React)
 

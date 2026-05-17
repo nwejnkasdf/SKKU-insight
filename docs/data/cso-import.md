@@ -48,7 +48,9 @@ def download_cso():
 
 ## 2. 파싱
 
-CSV의 각 행은 `<subject> <predicate> <object>` triple. 우리가 사용하는 predicate:
+CSO 3.4.1 의 CSV 형식은 실제로는 **csv-quoted N-Triples** (각 라인이 `"<URI>","<P>","label"@en .` 형태). v13 round 3 (2026-05-16, R3-C03 fix) 에서 발견되어 parser 재작성.
+
+우리가 사용하는 predicate:
 
 - `<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>` — 부모/자식 관계
 - `<http://cso.kmi.open.ac.uk/schema/cso#preferentialEquivalent>` — 정규 라벨
@@ -57,52 +59,71 @@ CSV의 각 행은 `<subject> <predicate> <object>` triple. 우리가 사용하�
 - `<http://cso.kmi.open.ac.uk/schema/cso#relatedEquivalent>` — 동등 변형
 
 ```python
-PRED_SUPER = "<http://cso.kmi.open.ac.uk/schema/cso#superTopicOf>"
-PRED_LABEL = "<http://www.w3.org/2000/01/rdf-schema#label>"
-PRED_PREF  = "<http://cso.kmi.open.ac.uk/schema/cso#preferentialEquivalent>"
-PRED_REL   = "<http://cso.kmi.open.ac.uk/schema/cso#relatedEquivalent>"
+import re
+
+PRED_SUPER = "http://cso.kmi.open.ac.uk/schema/cso#superTopicOf"
+PRED_LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
+PRED_PREF  = "http://cso.kmi.open.ac.uk/schema/cso#preferentialEquivalent"
+PRED_REL   = "http://cso.kmi.open.ac.uk/schema/cso#relatedEquivalent"
+
+# csv-quoted N-Triples 토크나이저: <URI> 또는 "literal"@lang 또는 "literal"^^<type>
+_TOKEN_RE = re.compile(r'<([^>]+)>|"((?:[^"\\]|\\.)*)"(?:@\w+|\^\^<[^>]+>)?')
+
+def _strip_outer_csv_quote(line: str) -> str:
+    """CSO 3.4.1 의 라인은 보통 `"<URI>","<P>","label"@en` 처럼 outer csv quote 로 감싸져 있다.
+    csv.reader 가 outer quote 를 벗기되 내부 escape 처리는 별도 필요."""
+    return line.strip()
 
 def parse_cso_csv(path):
     topics: dict[str, dict] = {}     # uri -> {label, parent_uris[], equivalents[]}
-    with path.open() as f:
-        reader = csv.reader(f)
-        for s, p, o in reader:
-            s_uri = strip_brackets(s)
-            o_val = strip_brackets(o)
+    with path.open(encoding="utf-8") as f:
+        for raw_line in f:
+            line = _strip_outer_csv_quote(raw_line)
+            if not line:
+                continue
+            tokens = _TOKEN_RE.findall(line)
+            if len(tokens) < 3:
+                continue
+            # tokens: list[(uri_group, literal_group)] — uri 면 첫 그룹, literal 이면 둘째
+            def _val(t): return t[0] if t[0] else t[1]
+            s_uri, p_uri, o_val = _val(tokens[0]), _val(tokens[1]), _val(tokens[2])
             t = topics.setdefault(s_uri, {"label": None, "parent_uris": [], "equivalents": []})
-            if p == PRED_LABEL:
-                t["label"] = unescape_literal(o_val)
-            elif p == PRED_SUPER:
+            if p_uri == PRED_LABEL:
+                t["label"] = o_val
+            elif p_uri == PRED_SUPER:
                 # superTopicOf: subject is parent, object is child
                 child = topics.setdefault(o_val, {"label": None, "parent_uris": [], "equivalents": []})
                 child["parent_uris"].append(s_uri)
-            elif p == PRED_REL:
+            elif p_uri == PRED_REL:
                 t["equivalents"].append(o_val)
-            elif p == PRED_PREF:
-                # 정규 라벨 매핑은 별도 dict
+            elif p_uri == PRED_PREF:
                 ...
     return topics
+
+def _norm_label(label: str) -> str:
+    """CSO URI 의 snake_case label (`operating_systems`) 을 사람이 읽는 라벨 (`Operating Systems`) 로 정규화."""
+    return label.replace("_", " ").strip()
 ```
 
 ## 3. 12 cluster seed 매핑 (BFS)
 
-`algorithms/cso-mapping.md`의 12 seed 라벨을 URI로 변환 후 BFS:
+`algorithms/cso-mapping.md`의 12 seed 라벨을 URI로 변환 후 BFS. v13 round 3 (2026-05-16, R3-C03 fix) — CSO 3.4.1 에는 5 cluster 의 원래 seed 라벨이 없어 실제 존재하는 라벨로 교체.
 
 ```python
 SEEDS = {
     "Artificial Intelligence": "AI",
-    "Computer Systems Organization": "Systems",
-    "Hardware": "Hardware",
-    "Theory of Computation": "Theory",
+    "Operating Systems": "Systems",                  # was "Computer Systems Organization" (CSO 3.4.1 부재)
+    "Computer Hardware": "Hardware",
+    "Automata Theory": "Theory",                     # was "Theory of Computation" (CSO 3.4.1 부재)
     "Software Engineering": "SE",
     "Computer Networks": "Networks",
     "Information Systems": "IS·DB",
     "Information Retrieval": "IR",
-    "Security and Privacy": "Security",
+    "Computer Security": "Security",
     "Human-Computer Interaction": "HCI",
-    "Computer Graphics": "Graphics·Multimedia",
-    "Multimedia": "Graphics·Multimedia",
-    "Computational Science": "Computational Science",
+    "Interactive Computer Graphics": "Graphics·Multimedia",   # was "Computer Graphics" (CSO 3.4.1 부재)
+    "Multimedia Systems": "Graphics·Multimedia",     # was "Multimedia" (CSO 3.4.1 부재)
+    "Scientific Computing": "Computational Science", # was "Computational Science" (CSO 3.4.1 부재)
 }
 
 def assign_cluster_labels(topics):

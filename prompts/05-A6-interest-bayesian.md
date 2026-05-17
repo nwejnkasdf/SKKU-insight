@@ -1,7 +1,8 @@
-# A6 — Interest Bayesian (Phase 1)
+# A6 — Interest Bayesian (Phase 1) — ✅ 완료 (2026-05-17)
 
 > 작업 디렉토리: ``
 > **사전조건**: A2 backend + A3 cso-topic 완료. A4·A5와 병렬 가능.
+> **상태**: ✅ [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) merge `a0a3fbf` (2026-05-17). 본 prompt 는 kickoff input 보존용 (재실행 가이드). 실 결정·구현 변경은 [`docs/decisions.md §11`](../docs/decisions.md) + [`decision-backlog.md` C-37/C-38](../docs/decision-backlog.md) 참조 — 17건 결정 매트릭스 + Codex 2-라운드 audit 12 fix 가 본 prompt 작성 시점 이후 합의된 사항.
 
 ## 너의 역할
 

@@ -1,7 +1,8 @@
 # A7 — Leaf Lifecycle + Traversal Engine (Phase 2)
 
 > 작업 디렉토리: ``
-> **사전조건**: A2 + A3 + A4 + A6 완료. 본 모듈이 가장 알고리즘 깊은 부분.
+> **사전조건**: A2 + A3 + A4 + A6 ✅ 완료 (2026-05-17). 본 모듈이 가장 알고리즘 깊은 부분.
+> **A6 머지로 활성된 의존**: `UserInterestState` atomic UPSERT + active day daily decay + `boost_applied_at_active_day` 만료 + propagation hook (`app/interest/propagation.py`). 본 propagation 은 현재 `INTEREST_PROPAGATION_ENABLED=false` (default) — **A7 머지 작업의 일부로 `true` 로 토글**.
 
 ## 너의 역할
 
@@ -24,11 +25,17 @@
 
 ## 산출
 
+### 0. INTEREST_PROPAGATION_ENABLED 토글 (A6 협업)
+- `.env.example` x 2 (루트 + backend) + `docs/ops/env-vars.md` 표 + `docker-compose.yml` (필요시) 모두 `INTEREST_PROPAGATION_ENABLED=true` 로 변경
+- `app/interest/propagation.py` 가 본 flag false 시 빈 리스트를 반환하던 가드 (A6 round 1 결정) 가 자동 해제
+- A7 의 `TraversalEngine.ingest_event` 가 활성 trace path 의 조상 노드 list 를 `propagation.py` 에 전달하면 1-hop 0.5 decay 로 가산
+- A7 머지 PR 에서 `decisions.md §11 propagation feature flag` 항목 "default true (A7 도래)" 로 갱신
+
 ### 1. `app/traversal/` 모듈
 - `protocol.py` — `TraversalEngine` Protocol (module-boundaries.md 그대로)
 - `default.py` — `DefaultTraversalEngine` 구현체
 - `operations.py` — extend / retract / split / archive 4 함수 (cso-topic-traversal.md §3)
-- `propagation.py` — A6의 `propagation.py` 와 통합 또는 호출
+- `propagation.py` — A6의 `app/interest/propagation.py` 와 통합 또는 호출 (활성 path 의 조상 노드 list 를 제공)
 
 ### 2. `app/leaf_lifecycle/` 모듈
 - `protocol.py` — `LifecycleEvaluator` Protocol

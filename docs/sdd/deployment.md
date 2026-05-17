@@ -2,20 +2,25 @@
 
 본 파일은 SKKU InSight 로컬 풀스택 데모 배포 구성을 정의한다. 시연·개발 모두 단일 `docker-compose.yml`로 기동하며, Electron 클라이언트만 호스트에서 `npm start`. 환경변수는 [`../ops/env-vars.md`](../ops/env-vars.md), CI/CD는 [`../ops/ci-cd.md`](../ops/ci-cd.md) 참고.
 
-## 서비스 목록
+## 서비스 목록 (5 서비스 default)
 
 | 서비스 | 이미지 / Dockerfile | 포트 (호스트:컨테이너) | 의존 | 볼륨 | Healthcheck |
 |---|---|---|---|---|---|
-| `postgres` | `postgres:16-alpine` | `5432:5432` | (없음) | `pg_data:/var/lib/postgresql/data` | `pg_isready -U insight` |
+| `postgres` | `postgres:16-alpine` | `5433:5432` (v13 round 3 R3-C03 fix, 2026-05-16 — native PostgreSQL 충돌 회피) | (없음) | `pg_data:/var/lib/postgresql/data` | `pg_isready -U insight` |
 | `redis` | `redis:7-alpine` | `6379:6379` | (없음) | `redis_data:/data` | `redis-cli ping` |
 | `api` | `./backend/Dockerfile` (uvicorn) | `8000:8000` | `postgres`, `redis` | `./backend:/app:ro` (개발 모드 hot reload) | `curl -f http://localhost:8000/health` |
 | `worker` | `./backend/Dockerfile` (rq worker entrypoint) | (없음) | `postgres`, `redis` | `./backend:/app:ro` | `rq info` |
-
-> **DB pool 분리** ([`../sdd/concurrency.md §1`](concurrency.md)): api와 worker가 같은 `DATABASE_URL`을 쓰지만 application 레벨에서 풀을 분리한다. api는 `PG_API_POOL_MAX=30` (사용자 20명 + 폴링 + 캐시 갱신 여유), worker는 `PG_WORKER_POOL_MAX=10` (수집·라이프사이클·병합 잡). 같은 풀을 공유하면 worker의 긴 작업이 api 요청을 굶긴다.
-| `clickbait-detector` | `./clickbait_module/Dockerfile` (옵션, 자체 도커 호스팅 시) | `8100:8100` | (없음, 모델 in-process) | `./models:/models:ro` | `curl -f http://localhost:8100/health` |
 | `admin-console` | `./admin-console/Dockerfile` (Next.js) | `3001:3000` | `api` | `./admin-console:/app:ro` | `curl -f http://localhost:3000` |
 
-> `clickbait-detector`는 호스팅·transport가 운영 결정. 외부 호스팅 시 본 컨테이너는 정의하지 않고 backend env `CLICKBAIT_SERVICE_URL`이 외부 URL을 가리킨다. 자세히는 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md) §호스팅·transport 추상화.
+> **DB pool 분리** ([`../sdd/concurrency.md §1`](concurrency.md)): api와 worker가 같은 `DATABASE_URL`을 쓰지만 application 레벨에서 풀을 분리한다. api는 `PG_API_POOL_MAX=30` (사용자 20명 + 폴링 + 캐시 갱신 여유), worker는 `PG_WORKER_POOL_MAX=10` (수집·라이프사이클·병합 잡). 같은 풀을 공유하면 worker의 긴 작업이 api 요청을 굶긴다.
+
+### clickbait-detector (옵션, v13 라운드 default 비활성)
+
+| 서비스 | 이미지 / Dockerfile | 포트 (호스트:컨테이너) | 의존 | 볼륨 | Healthcheck |
+|---|---|---|---|---|---|
+| `clickbait-detector` | `./clickbait_module/Dockerfile` | `8100:8100` | (없음, vLLM in-process) | `./models:/models:ro` | `curl -f http://localhost:8100/health` |
+
+> **(v13 라운드, 2026-05-11)** 1차 시연 default 비활성. 사용자가 News 소스 명시 활성화 시만 post-LLM filter 로 호출. 호스팅·transport 는 운영 결정 — 외부 호스팅 시 본 컨테이너 정의 X, backend env `CLICKBAIT_SERVICE_URL` 이 외부 URL 지목. `docker-compose.yml` 에는 주석 처리 상태로 보존. 자세히는 [`../algorithms/clickbait-integration.md`](../algorithms/clickbait-integration.md).
 
 Electron 클라이언트(`./client`)는 컨테이너에 포함하지 않는다. 호스트에서 `npm install && npm start`로 띄우고 `.env.local`의 `VITE_API_BASE=http://localhost:8000`을 통해 `api` 서비스에 붙는다.
 

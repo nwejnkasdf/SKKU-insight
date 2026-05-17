@@ -79,6 +79,10 @@ async def filter_clickbait(documents: list[Document], classifier: ClickbaitClass
                 evaluated_at=now(),
             ))
             # 추천 후보로 사용하지 않음. 재처리 대상으로 표기.
+            # NOTE: TopicLinkageError ORM 은 schema.md 명세는 있으나 A5 머지 단계에서 미구현
+            # (A5 가 외부 vLLM 서비스 PR #2 로 분리되어 backend 통합 본문 부재).
+            # admin/router.py 의 `/admin/topic-linkage/errors` 는 NotImplementedError 상태.
+            # A5 backend 통합 머지 후 또는 A7 leaf-lifecycle 의 LLM 호출 실패 경로에서 본 INSERT 활성.
             db.add(TopicLinkageError(document_id=d.id, error_message="clickbait_classifier_unavailable"))
             continue
         db.add(ClickbaitResult(

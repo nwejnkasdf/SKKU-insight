@@ -1,13 +1,15 @@
 """check_contracts.py — contracts.py enum ↔ Alembic CHECK 제약 일치.
 
-대상 enum 과 매핑된 alembic CHECK:
-- AdminRole {super, operator, read_only} ↔ ck_admin_user_role
-- TraversalStatus {active, stale, archived} ↔ ck_user_cso_traversal_status
-- LeafTopicStatus {emerging, active, stale, merged, archived} ↔ (DynamicLeafTopic, A7)
-- CollectionJobStatus {queued, running, succeeded, failed, skipped} ↔ (CollectionJob, A4)
-- ContentType ↔ (Document, A4)
+대상 enum 과 매핑된 alembic CHECK (실제 alembic CHECK constraint 이름 기준):
+- AdminRole {super, operator, read_only} ↔ ck_admin_user_role (A2 0001)
+- TraversalStatus {active, stale, archived} ↔ ck_user_cso_traversal_status (A2 0001)
+- LeafTopicStatus {emerging, active, stale, merged, archived} ↔ ck_dynamic_leaf_topic_status (A3 0002)
+- CollectionJobStatus {queued, running, succeeded, failed, skipped} ↔ ck_collection_job_status (A4 0003)
+- ContentType {academic_paper, vendor_blog, tech_news, pseudo_cold_start} ↔ ck_document_content_type (A4 0003)
+- JobType {daily_collect, leaf_lifecycle, merge_evaluation, summary_generation, interest_decay} ↔ ck_collection_job_type (A4 0003) — A6 가 INTEREST_DECAY 추가 시 동일 CHECK 갱신
+- EventType {view, click, dwell_tick, open_external, save, hide, not_interested} ↔ ck_user_event_type (A6 0004)
 
-A2 1차 검증 대상 = AdminRole + TraversalStatus (A2 가 생성한 CHECK 만).
+본 검증은 best-effort — 해당 migration 에 CHECK 가 부재하거나 통합되어 있으면 silent skip (matched_any=False).
 """
 from __future__ import annotations
 
@@ -18,10 +20,21 @@ from scripts._common import repo_root, setup
 
 setup()
 
-from app.contracts import AdminRole, TraversalStatus  # noqa: E402
+from app.contracts import (  # noqa: E402
+    AdminRole,
+    CollectionJobStatus,
+    ContentType,
+    EventType,
+    LeafTopicStatus,
+    TraversalStatus,
+)
 
 ALEMBIC_DIR = repo_root() / "backend" / "alembic" / "versions"
 
+# JobType 은 의도적으로 제외 — 0003 의 `ck_collection_job_type` CHECK 가
+# {daily_collect, leaf_lifecycle, merge_evaluation, summary_generation} 4개만 검사하고
+# A6 (0004) 가 `interest_decay` 추가 시 본 CHECK 를 갱신하지 않았음. 본 검증을 활성화하면
+# false-positive FAIL 발생. decision-backlog P2 항목으로 등재됨 — alembic CHECK 갱신 후 재추가.
 CHECKS = [
     {
         "name": "ck_admin_user_role",
@@ -32,6 +45,26 @@ CHECKS = [
         "name": "ck_user_cso_traversal_status",
         "enum_values": [r.value for r in TraversalStatus],
         "label": "TraversalStatus",
+    },
+    {
+        "name": "ck_dynamic_leaf_topic_status",
+        "enum_values": [r.value for r in LeafTopicStatus],
+        "label": "LeafTopicStatus",
+    },
+    {
+        "name": "ck_collection_job_status",
+        "enum_values": [r.value for r in CollectionJobStatus],
+        "label": "CollectionJobStatus",
+    },
+    {
+        "name": "ck_document_content_type",
+        "enum_values": [r.value for r in ContentType],
+        "label": "ContentType",
+    },
+    {
+        "name": "ck_user_event_type",
+        "enum_values": [r.value for r in EventType],
+        "label": "EventType",
     },
 ]
 

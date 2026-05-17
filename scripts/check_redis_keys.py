@@ -38,6 +38,9 @@ REDIS_KEY_PREFIXES = [
     "lock:interest_decay:",     # A6 daily cron lock (18 UTC = 03 KST)
     "event:dup:",               # A6 payload-hash idempotency (200 match / 409 mismatch)
     "cso:clusters:",            # A3 12 cluster cache (cso_topic 임포트 후 SETEX)
+    "lock:leaf_lifecycle:",     # A7 daily emerging 식별 cron lock (collection 직후 hook)
+    "lock:merge_evaluation:",   # A7 weekly leaf 병합 cron lock (월 03 UTC)
+    "lock:trace_merge:",        # A7 daily trace merge cron lock (18 UTC, decay 와 같은 시각)
 ]
 
 # A2 가 의도적으로 contracts.py 외에서 사용하는 키 (Plan §4 account-deletion lock,

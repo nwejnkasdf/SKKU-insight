@@ -113,11 +113,12 @@ class CollectionJobStatus(str, Enum):
 class JobType(str, Enum):
     """CollectionJob.job_type + scheduler 등록 잡 종류.
 
-    decisions.md §10 v13 round + decision-backlog C-33·C-34·C-38.
+    decisions.md §10 v13 round + §12 A7 round + decision-backlog C-33·C-34·C-38·C-39.
     DAILY_COLLECT/SUMMARY_GENERATION 은 A4 가 사용. INTEREST_DECAY 는 A6 daily cron
     (`app/worker/jobs/interest_decay.py`) 이 사용 — 베이지안 사후 시간 감쇠 +
-    14-day onboarding boost 만료 일괄 차감. LEAF_LIFECYCLE / MERGE_EVALUATION 은
-    후속 phase (A7).
+    14-day onboarding boost 만료 일괄 차감. LEAF_LIFECYCLE / MERGE_EVALUATION /
+    TRACE_MERGE 는 A7 가 사용 — leaf 신규 식별 (collection 직후 hook), 주간 leaf
+    병합 (월 03 UTC), 일일 trace merge 평가 (18 UTC = 03 KST, decay 와 같은 시각).
     """
 
     DAILY_COLLECT = "daily_collect"
@@ -125,6 +126,7 @@ class JobType(str, Enum):
     MERGE_EVALUATION = "merge_evaluation"
     SUMMARY_GENERATION = "summary_generation"
     INTEREST_DECAY = "interest_decay"
+    TRACE_MERGE = "trace_merge"
 
 
 class AdminRole(str, Enum):
@@ -225,6 +227,14 @@ class ErrorCode(str, Enum):
     TOPIC_UNAUTHORIZED_LEAF = "topic.unauthorized_leaf"
     TOPIC_LINKAGE_ERROR = "topic.linkage_error"
 
+    # --- leaf-lifecycle / traversal (A7) ---
+    # TOPIC_LINKAGE_ERROR 는 LLM JSON parse 실패에도 재사용 (의미 동일).
+    LEAF_TOPIC_NOT_FOUND = "leaf.topic_not_found"
+    LEAF_TRAVERSAL_DEPTH_EXCEEDED = "traversal.path_depth_exceeded"
+    LEAF_TRAVERSAL_ACTIVE_CAP_EXCEEDED = "traversal.active_cap_exceeded"
+    LEAF_LLM_ANCHOR_VIOLATION = "leaf.llm_anchor_violation"
+    TRACE_MERGE_CONFLICT = "traversal.merge_conflict"
+
     # --- collection ---
     COLLECTION_ALREADY_RUNNING = "collection.already_running"
     COLLECTION_JOB_NOT_FOUND = "collection.job_not_found"
@@ -284,6 +294,35 @@ class RedisKey:
     def traversal_lock(user_id: UUID) -> str:
         """trace mutation user-level mutex. 10s TTL. concurrency.md §3."""
         return f"lock:traversal:{user_id}"
+
+    @staticmethod
+    def leaf_lifecycle_lock(user_id: UUID) -> str:
+        """A7 daily emerging 식별 cron 의 per-user mutex. 60s TTL (LLM 호출 대기 포함).
+
+        collection cron 직후 hook 으로 enqueue 되어 LLM identify_emerging 호출.
+        같은 사용자 동시 진행 차단. decision-backlog C-39 (A7 round 1).
+        """
+        return f"lock:leaf_lifecycle:{user_id}"
+
+    @staticmethod
+    def merge_evaluation_lock(user_id: UUID) -> str:
+        """A7 주간 leaf 병합 cron 의 per-user mutex. 120s TTL (LLM 호출 + UPDATE 일괄).
+
+        weekly cron `MERGE_EVALUATION_CRON` (월 03 UTC) 가 사용자별 1회 호출.
+        decision-backlog C-39 (A7 round 1).
+        """
+        return f"lock:merge_evaluation:{user_id}"
+
+    @staticmethod
+    def trace_merge_lock(user_id: UUID) -> str:
+        """A7 daily trace merge cron 의 per-user mutex. 120s TTL.
+
+        18 UTC = 03 KST cron 이 룰 trigger (path overlap ≥3) 후 LLM 검증 호출.
+        interest_decay_lock 과 별도 분리: 두 cron 이 같은 시각이라도 trace merge 는
+        LLM 호출 동반이라 lock 보유 시간 길고, decay 는 read-mostly UPDATE 만.
+        decision-backlog C-39 (A7 round 1).
+        """
+        return f"lock:trace_merge:{user_id}"
 
     @staticmethod
     def collection_lock(user_id: UUID) -> str:

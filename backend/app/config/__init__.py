@@ -145,6 +145,77 @@ class Settings(BaseSettings):
     # false → WARN + endpoint fallback (테스트 환경 / 의도적 비활성).
     SYSTEM_CONFIG_REQUIRED: bool = True
 
+    # === A7 Leaf Lifecycle + Traversal (algorithms/leaf-topic-lifecycle.md + cso-topic-traversal.md) ===
+    # decision-backlog C-39 (A7 round 1). 결정 매트릭스 23건은 decisions.md §12.
+    #
+    # --- leaf 식별 (emerging) ---
+    # max_new_leaves_per_day. LLM 응답에서 confidence 내림차순 상위 N 만 채택.
+    LEAF_EMERGING_MAX_PER_DAY: int = 3
+    # Strict 검증: confidence ≥ 0.6 미만 candidate 자동 거부.
+    LEAF_EMERGING_CONFIDENCE_MIN: float = 0.6
+    # Strict 검증: supporting_documents ≥ 3 미만 candidate 자동 거부.
+    LEAF_EMERGING_SUPPORTING_DOCUMENTS_MIN: int = 3
+    # Strict 검증: 기존 active leaf 라벨 의미유사도 ≥ 임계 시 dedup (신규 거부).
+    # 1차 시연은 Levenshtein 정규화 사용 (임베딩 미사용, decisions.md §3).
+    LEAF_EMERGING_LABEL_SIMILARITY_DEDUP: float = 0.75
+    # LLM input 시간 window. A4 collection 결과 (DocumentTopic.leaf_topic_id IN
+    # user_leaves OR ...) union UserEvent click/save Document. 결정 매트릭스 #18 옵션 D.
+    LEAF_EMERGING_INPUT_WINDOW_HOURS: int = 24
+    # trace_anchor_required 위반 시 LLM 재호출 cap. retry 후에도 모두 위반이면
+    # 빈 응답 fallback + warning log.
+    LEAF_LLM_ANCHOR_RETRY_CAP: int = 1
+    # daily emerging 식별 cron lock TTL.
+    LEAF_LIFECYCLE_LOCK_TTL_SECONDS: int = 60
+
+    # --- leaf 룰 기반 전이 ---
+    # emerging → active 승격 (window 내 문서/관심신호 임계).
+    LEAF_ACTIVE_WINDOW_DAYS: int = 7
+    LEAF_ACTIVE_MIN_DOCUMENTS: int = 5
+    LEAF_ACTIVE_MIN_INTEREST_SIGNALS: int = 2
+    # active → stale 강등 (idle active days).
+    LEAF_STALE_IDLE_DAYS: int = 21
+    # stale → archived 폐기 (idle active days).
+    LEAF_ARCHIVED_IDLE_DAYS: int = 90
+    # emerging → archived 폐기 (승격 전 idle 만료).
+    LEAF_EMERGING_ARCHIVED_IDLE_DAYS: int = 14
+    # stale → active 재활성화 (window 내 문서/관심신호 임계).
+    LEAF_REACTIVATION_WINDOW_DAYS: int = 7
+    LEAF_REACTIVATION_MIN_DOCUMENTS: int = 3
+    LEAF_REACTIVATION_MIN_INTEREST_SIGNALS: int = 1
+
+    # --- leaf 병합 (LLM 주 1회) ---
+    LEAF_MERGE_JACCARD_MIN: float = 0.6
+    LEAF_MERGE_LABEL_SIMILARITY_MIN: float = 0.75
+    LEAF_MERGE_MAX_PER_USER: int = 50
+    MERGE_EVALUATION_LOCK_TTL_SECONDS: int = 120
+
+    # --- trace operation (extend/retract/split/archive/merge) ---
+    # cso-topic-traversal.md §11 cap. archive auto 임계.
+    TRACE_ACTIVE_CAP: int = 10
+    TRACE_PATH_DEPTH_CAP: int = 8
+    # 1단계 stale 마킹 (ingest 직후 즉시, no LLM). path 말단 score_tail ≤ 임계
+    # AND idle ≥ N active days.
+    TRACE_STALE_IDLE_DAYS: int = 21
+    TRACE_STALE_THRESHOLD_SCORE: float = 0.30
+    # 2단계 retract (stale 누적 추가 14 days → daily cron 시 LLM 재배치 + path.pop).
+    TRACE_RETRACT_AFTER_STALE_DAYS: int = 14
+    # 3단계 archive (stale 누적 90 days → status='archived', no LLM).
+    TRACE_ARCHIVE_AFTER_STALE_DAYS: int = 90
+    # extend operation 트리거 — 자식 노드 인터랙션 ≥ 5건.
+    TRACE_EXTEND_MIN_INTERACTIONS: int = 5
+    # split operation window — 두 자식 동시 extend 임계 도달 (active days).
+    TRACE_SPLIT_WINDOW_DAYS: int = 7
+    # merge operation 룰 trigger — path overlap ≥ N cso_topic_id (A7 신규).
+    TRACE_MERGE_PATH_OVERLAP_MIN: int = 3
+    # daily trace merge cron — 18 UTC (decay 와 같은 시각, 03 KST).
+    TRACE_MERGE_CRON: str = "0 18 * * *"
+    TRACE_MERGE_LOCK_TTL_SECONDS: int = 120
+
+    # --- propagation (cso-topic-traversal.md §4) ---
+    # A6 propagation.py 가 사용. A7 본문 PR-3 와 함께 INTEREST_PROPAGATION_ENABLED 토글.
+    PROPAGATION_HOP_DECAY: float = 0.5
+    PROPAGATION_MAX_HOPS: int = 4
+
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.
     # 향후 어댑터 재도입 가능성 위해 보존만.

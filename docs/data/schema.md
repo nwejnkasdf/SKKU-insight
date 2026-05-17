@@ -170,13 +170,20 @@ class UserCSOTraversal(Base):
     started_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
     last_activity_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
     score_tail: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)   # path 끝 노드 베이지안 사후 평균 캐시
+    # A7 신규 (alembic 0005, 2026-05-17). trace merge operation 의 audit/recovery 컬럼.
+    # winner trace 로 merge 된 loser trace 가 status='archived' + 본 컬럼 = winner_id.
+    # ondelete='SET NULL' — winner 가 archive/삭제되어도 loser row 보존.
+    merged_into_trace_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_cso_traversal.trace_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 ```
 
-CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용). path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
+CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용), **`merged_into_trace_id` partial index (A7 0005, WHERE NOT NULL)** — merge audit 빠른 lookup. path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
 
-> **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3.
+> **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split/**merge**)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. merge 의 경우 loser.status='archived' + loser.merged_into_trace_id=winner_id 동시. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3 (operation 5 종 — A7 가 merge 신규 도입).
 
 ### DynamicLeafTopicCSOTopic
 

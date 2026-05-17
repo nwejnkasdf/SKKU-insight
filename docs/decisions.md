@@ -258,3 +258,59 @@
 | `prompts/03-A4-collection.md` | LLM provider lifespan 가드 `{mock, openai}` 명시 + Anthropic `NotImplementedError` |
 | `scripts/check_contracts.py` + `check_redis_keys.py` | A6 신규 `JobType` / Redis prefix 5 종 추가 |
 | `AGENTS.md` / `decision-backlog.md` | C-급 카운트 32→38 + A6 fix 12 |
+
+## 12. A7 라운드 — Leaf Lifecycle + Traversal (2026-05-17)
+
+본 라운드는 A7 leaf-lifecycle + traversal Phase 2 본문 구현과 Codex R1 audit fix 를 SOR 에 박는다. PR-1 ~ PR-5 (6-commit PR-stack). trace operation 4 → 5 확장 (merge 신규 도입). docs/decision-backlog.md C-39 신규.
+
+### 결정 매트릭스 23건
+
+| # | 결정 영역 | 값 |
+|---|---|---|
+| 1 | PR 분할 방식 | A6형 6-commit PR-stack |
+| 2 | Codex audit 라운드 수 | 3 라운드 (R1 본문 + R2 재감사 + R3 통합 시뮬레이션) |
+| 3 | 통합 시연 LLM | 실 OpenAI GPT-5.5 호출 (수동 fixture, ~$0.5~1) |
+| 4 | self-review | 미포함 — Codex audit 만 |
+| 5 | INTEREST_PROPAGATION_ENABLED 토글 | 본문 PR-3 와 함께 default true |
+| 6 | trace 생성 hook | A6 ingest_event_atomic hook (A8 진입 시 완성, plan TBD) |
+| 7 | trace 3단계 강등 평가 | 하이브리드 — 1단계 ingest 즉시 / 2-3단계 daily 18 UTC cron |
+| 8 | LLM 일 cap 정책 | Cap 폐지 (시연 단계, 운영 P2 backlog) |
+| 9 | alembic 0005 | 필요 — UserCSOTraversal.merged_into_trace_id 컬럼 + ck_collection_job_type 갱신 |
+| 10 | 실 OpenAI 시연 | 수동 fixture 시나리오 (3 LLM 실 호출) |
+| 11 | ErrorCode 정의 위치 | contracts.py ErrorCode enum |
+| 12 | A8 의존 TraversalEngine 설계 | 단일 protocol (write + read 통합, A8 재확인) |
+| 13 | leaf 라이프사이클 전이 | 하이브리드 — 활성 신호 즉시 / 강등 daily cron |
+| 14 | emerging 식별 trigger | collection daily cron 직후 hook (LEAF_LIFECYCLE_CRON="30 3 * * *") |
+| 15 | trace_anchor 위반 처리 | 자동 거부 + 즉시 재호출 (retry cap=1, 빈 응답 fallback) |
+| 16 | merged leaf 추천 노출 | 모든 추천 후보에서 제외 |
+| 17 | trace merge operation | 신규 도입 (4 → 5 operation) |
+| 18 | emerging input 범위 | 옵션 D — A4 collection union UserEvent click/save (24h) |
+| 19 | emerging 검증 룰 | Strict — confidence ≥0.6 + supporting ≥3 + anchor + label dedup 0.75 |
+| 20 | trace split path | T 단축 + T'=분기점+B |
+| 21 | trace merge trigger | 룰 + LLM 결합 (path overlap ≥3 또는 proper subset) |
+| 22 | trace merge winner | max(last_activity_active_day), tie 시 trace_id 작은 쪽 |
+| 23 | trace merge LLM 호출 | Daily 18 UTC cron (A6 decay 와 동시각, user-mutex 분리) |
+
+### 본 라운드가 만들거나 갱신하는 docs
+
+| 파일 | 갱신 내용 |
+|---|---|
+| 본 파일 §12 | 본 절 (결정 매트릭스 23건) |
+| `decision-backlog.md` | C-39 (A7 본문 + R1 fix 11건) 신규 + 카운트 38→39 + 다음 진입 = A8 |
+| `sdd/contracts.md` | JobType.TRACE_MERGE + ErrorCode 5 + RedisKey 3 추가 |
+| `ops/env-vars.md` | A7 Settings 33+ 항목 표 신규 (Leaf 식별/전이/병합 + Trace operation 5종 + propagation) |
+| `api/topics.md` | A7 신규 ErrorCode 5건 오류 표 추가 (LLM parse 재사용 명시) |
+| `algorithms/cso-topic-traversal.md §3` | trace operation 4 → 5 (+ merge) 표 갱신 |
+| `algorithms/cso-topic-traversal.md §3.3` | split path 처리 — T 단축 + T'=분기점+B 로 갱신 |
+| `algorithms/leaf-topic-lifecycle.md` | LLM 5 프롬프트 (identify_emerging / evaluate_merges / retract_reposition / split_dispatch / trace_merge_verify) |
+| `data/schema.md UserCSOTraversal` | merged_into_trace_id 컬럼 명시 |
+| `data/erd.mmd` | UserCSOTraversal self-FK 시각화 |
+| `sdd/module-boundaries.md` | TraversalEngine 5 read API + LifecycleEvaluator + merge 메서드 |
+| `prompts/06-A7-leaf-traversal.md` | A7 구현 prompt (계획 시점) |
+| `AGENTS.md` / `README.md` | A7 완료 표기 + 마지막 갱신 일자 갱신 |
+
+### 폐기 또는 의미 변경 항목
+
+- §4 Trace operation 정의: extend/retract/split/archive 4 → **extend/retract/split/archive/merge 5** (룰 기반, merge 만 룰+LLM)
+- §11 propagation feature flag: "default false (A7 도래 후 true)" → "default true (A7 PR-3 머지)"
+

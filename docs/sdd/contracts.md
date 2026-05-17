@@ -91,6 +91,7 @@ class JobType(str, Enum):
     MERGE_EVALUATION = "merge_evaluation"
     SUMMARY_GENERATION = "summary_generation"
     INTEREST_DECAY = "interest_decay"   # A6 daily decay + 14-day boost 만료 (2026-05-17 추가)
+    TRACE_MERGE = "trace_merge"          # A7 daily trace merge (18 UTC, 2026-05-17 추가)
 
 
 class AdminRole(str, Enum):
@@ -169,7 +170,13 @@ class ErrorCode(str, Enum):
     # topic
     TOPIC_NOT_FOUND = "topic.not_found"
     TOPIC_UNAUTHORIZED_LEAF = "topic.unauthorized_leaf"
-    TOPIC_LINKAGE_ERROR = "topic.linkage_error"
+    TOPIC_LINKAGE_ERROR = "topic.linkage_error"   # LLM JSON parse 실패 시 재사용 (A7)
+    # leaf-lifecycle / traversal (A7, 2026-05-17 추가)
+    LEAF_TOPIC_NOT_FOUND = "leaf.topic_not_found"
+    LEAF_TRAVERSAL_DEPTH_EXCEEDED = "traversal.path_depth_exceeded"
+    LEAF_TRAVERSAL_ACTIVE_CAP_EXCEEDED = "traversal.active_cap_exceeded"
+    LEAF_LLM_ANCHOR_VIOLATION = "leaf.llm_anchor_violation"
+    TRACE_MERGE_CONFLICT = "traversal.merge_conflict"
     # collection (사용자 영역 + 관리자 영역 공유)
     COLLECTION_ALREADY_RUNNING = "collection.already_running"
     COLLECTION_JOB_NOT_FOUND = "collection.job_not_found"
@@ -217,6 +224,22 @@ class RedisKey:
     @staticmethod
     def traversal_lock(user_id: UUID) -> str:
         return f"lock:traversal:{user_id}"
+
+    @staticmethod
+    def leaf_lifecycle_lock(user_id: UUID) -> str:
+        # A7 daily emerging 식별 cron mutex (collection 직후 hook). TTL 60s.
+        return f"lock:leaf_lifecycle:{user_id}"
+
+    @staticmethod
+    def merge_evaluation_lock(user_id: UUID) -> str:
+        # A7 주간 leaf 병합 cron mutex (월 03 UTC). TTL 120s.
+        return f"lock:merge_evaluation:{user_id}"
+
+    @staticmethod
+    def trace_merge_lock(user_id: UUID) -> str:
+        # A7 daily trace merge cron mutex (18 UTC = 03 KST). TTL 120s.
+        # interest_decay_lock 과 별도: trace merge 는 LLM 호출 동반, decay 는 UPDATE only.
+        return f"lock:trace_merge:{user_id}"
 
     @staticmethod
     def collection_lock(user_id: UUID) -> str:

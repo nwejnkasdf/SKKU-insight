@@ -57,6 +57,7 @@ erDiagram
         int active_day_counter
         date last_active_calendar_date
     }
+    USER_CSO_TRAVERSAL ||--o{ USER_CSO_TRAVERSAL : "merged_into"
     USER_CSO_TRAVERSAL {
         uuid trace_id PK
         uuid user_id FK
@@ -65,6 +66,7 @@ erDiagram
         int started_active_day
         int last_activity_active_day
         float score_tail
+        uuid merged_into_trace_id FK "A7 0005 — self-FK ondelete=SET NULL"
     }
     ADMIN_USER {
         uuid admin_id PK

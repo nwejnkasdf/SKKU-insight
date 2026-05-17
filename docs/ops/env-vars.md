@@ -112,13 +112,78 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `INTEREST_PROPAGATION_ENABLED` | `false` | A7 (leaf-lifecycle + traversal) 도입 후 `true`. false 일 때 ingest_event 는 직접 토픽 + 부모 cso_topic_id 만 갱신, trace path 조상 propagation skip. |
+| `INTEREST_PROPAGATION_ENABLED` | `true` | **(A7, 2026-05-17 머지로 default true)** trace path 조상 1-hop 0.5 propagation 활성. false 로 명시 토글 시 ingest_event 는 직접 토픽 + 부모 cso_topic_id 만 갱신. |
 | `INTEREST_BOOST_EXPIRY_ACTIVE_DAYS` | `14` | onboarding boost (cluster +1.0 / 1-hop child +0.5) 가 자연 만료되는 active day. decay cron 이 `user.active_day_counter - boost_applied_at_active_day >= N` row 의 alpha 에서 boost 분 차감 + 컬럼 NULL 화. |
 | `INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS` | `10` | EventBuffer flush 시 per-user mutex TTL (초). flush 후 즉시 release. traversal_lock 과 별도. |
 | `DWELL_TICK_CAP_TTL_SECONDS` | `3600` | dwell_tick Redis 카운터 TTL (초). 문서당 cap 4회 도달 후 1시간 자연 소멸. |
 | `DWELL_TICK_CAP_PER_DOCUMENT` | `4` | dwell_tick 문서당 베이지안 갱신 cap (30s×4=2분). cap 초과 시 베이지안 skip, active_day 와 UserEvent INSERT 는 그대로. SRS 체류 ≥2분 기준 정렬. |
 | `EVENT_DUPLICATE_CACHE_TTL_SECONDS` | `86400` | event idempotency payload-hash Redis 캐시 TTL (초). DB UNIQUE(user_id, client_request_id) 가 1차 SOR — 본 캐시는 응답 RTT 단축용. |
 | `SYSTEM_CONFIG_REQUIRED` | `true` | **(Codex S-05 fix)** lifespan startup 시 system_config seed (interest_params, event_weights) 누락 동작. `true` (default 운영) → RuntimeError 로 startup 차단 (fail-fast). `false` (테스트 / 의도적 비활성) → WARN + endpoint fallback. |
+
+## A7 Leaf Lifecycle + Traversal (2026-05-17 추가)
+
+본 33개 env 는 [`../algorithms/leaf-topic-lifecycle.md`](../algorithms/leaf-topic-lifecycle.md) + [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) 의 동작 파라미터. `app/config/topic_lifecycle.toml` 가 동시에 같은 임계를 보유 — env 가 TOML 을 override 한다 (운영 시 hot toggle 용). PR-1 contracts 추가 결정 매트릭스 23건 ([`../decisions.md §12`](../decisions.md)).
+
+### Leaf 식별 (emerging)
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `LEAF_LIFECYCLE_CRON` | `30 3 * * *` | A7 신규 (결정 #14). collection cron 직후 ~30분 시점에 사용자별 `identify_emerging` LLM 호출 cron. COLLECTION_CRON 변경 시 본 cron 도 +30분 으로 동기화. |
+| `LEAF_EMERGING_MAX_PER_DAY` | `3` | LLM `identify_emerging` 가 일일 사용자별 채택하는 최대 emerging 후보 수. confidence 내림차순 상위 N. |
+| `LEAF_EMERGING_CONFIDENCE_MIN` | `0.6` | Strict 검증 — candidate confidence 미달 자동 거부. |
+| `LEAF_EMERGING_SUPPORTING_DOCUMENTS_MIN` | `3` | Strict 검증 — supporting_document_ids 길이 미달 자동 거부. |
+| `LEAF_EMERGING_LABEL_SIMILARITY_DEDUP` | `0.75` | 기존 active leaf 라벨 의미유사도 ≥ 임계 시 dedup (신규 거부). Levenshtein 정규화 사용 (임베딩 미사용). |
+| `LEAF_EMERGING_INPUT_WINDOW_HOURS` | `24` | LLM input 시간 window. A4 collection 결과 + UserEvent click/save Document 의 union (결정 매트릭스 #18 옵션 D). |
+| `LEAF_LLM_ANCHOR_RETRY_CAP` | `1` | trace_anchor_required 위반 candidate 모두 거부 시 보강된 prompt 로 재호출 cap. 2차도 위반 시 빈 응답 fallback + warning log. |
+| `LEAF_LIFECYCLE_LOCK_TTL_SECONDS` | `60` | daily emerging 식별 cron 의 per-user mutex TTL (`RedisKey.leaf_lifecycle_lock`). |
+
+### Leaf 룰 기반 전이
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `LEAF_ACTIVE_WINDOW_DAYS` | `7` | emerging → active 승격 window (active days). |
+| `LEAF_ACTIVE_MIN_DOCUMENTS` | `5` | 승격 임계 — window 내 매핑 Document ≥ N. |
+| `LEAF_ACTIVE_MIN_INTEREST_SIGNALS` | `2` | 승격 임계 — window 내 click/save ≥ N. |
+| `LEAF_STALE_IDLE_DAYS` | `21` | active → stale 강등 임계 (idle active days). |
+| `LEAF_ARCHIVED_IDLE_DAYS` | `90` | stale → archived 폐기 임계 (idle active days). |
+| `LEAF_EMERGING_ARCHIVED_IDLE_DAYS` | `14` | emerging → archived 폐기 (승격 전 idle 만료). |
+| `LEAF_REACTIVATION_WINDOW_DAYS` | `7` | stale → active 재활성화 window. |
+| `LEAF_REACTIVATION_MIN_DOCUMENTS` | `3` | 재활성화 임계 — window 내 매핑 Document ≥ N. |
+| `LEAF_REACTIVATION_MIN_INTEREST_SIGNALS` | `1` | 재활성화 임계 — window 내 click/save ≥ N. |
+
+### Leaf 병합 (LLM 주 1회)
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `LEAF_MERGE_JACCARD_MIN` | `0.6` | 두 leaf 의 문서 Jaccard ≥ 임계 시 merge 후보. |
+| `LEAF_MERGE_LABEL_SIMILARITY_MIN` | `0.75` | 두 leaf 의 라벨 의미유사도 ≥ 임계 시 merge 후보. |
+| `LEAF_MERGE_MAX_PER_USER` | `50` | 주간 평가 시 사용자당 evaluate 최대 leaf 수 (LLM context 보호). |
+| `MERGE_EVALUATION_LOCK_TTL_SECONDS` | `120` | 주간 leaf 병합 cron 의 per-user mutex TTL (`RedisKey.merge_evaluation_lock`). |
+
+### Trace operation (extend / retract / split / archive / **merge**)
+
+trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결정 #17).
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `TRACE_ACTIVE_CAP` | `10` | 사용자당 active trace 최대 수. 초과 시 새 trace 생성 거부. |
+| `TRACE_PATH_DEPTH_CAP` | `8` | trace.path 최대 깊이. extend 시 cap 초과 차단. |
+| `TRACE_STALE_IDLE_DAYS` | `21` | 1단계 stale 마킹 — path 말단 score_tail ≤ 임계 AND idle ≥ N active days (ingest 직후 즉시, no LLM). |
+| `TRACE_STALE_THRESHOLD_SCORE` | `0.30` | stale 마킹 score 임계. |
+| `TRACE_RETRACT_AFTER_STALE_DAYS` | `14` | 2단계 retract — stale 누적 추가 N active days → daily cron 시 LLM 재배치 + path.pop. |
+| `TRACE_ARCHIVE_AFTER_STALE_DAYS` | `90` | 3단계 archive — stale 누적 N active days → status='archived' (no LLM). |
+| `TRACE_EXTEND_MIN_INTERACTIONS` | `5` | extend operation 트리거 — 자식 노드 인터랙션 ≥ N. |
+| `TRACE_SPLIT_WINDOW_DAYS` | `7` | split operation window — 두 자식 동시 extend 임계 도달 (active days). split 후 T 단축 + T'=분기점+B (결정 매트릭스 #20). |
+| `TRACE_MERGE_PATH_OVERLAP_MIN` | `3` | **(A7 신규)** trace merge 룰 trigger — 두 active trace path 가 같은 cso_topic_id ≥ N 공유 OR 한 path 가 다른 path 의 proper subset → LLM 검증 후 merge. |
+| `TRACE_MERGE_CRON` | `0 18 * * *` | **(A7 신규)** daily trace merge cron. 18 UTC = 03 KST (A6 INTEREST_DECAY_CRON 과 같은 시각 — user-mutex 공유). |
+| `TRACE_MERGE_LOCK_TTL_SECONDS` | `120` | trace merge cron 의 per-user mutex TTL (`RedisKey.trace_merge_lock`). LLM 호출 동반이라 decay 보다 길게. |
+
+### Propagation (cso-topic-traversal.md §4)
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `PROPAGATION_HOP_DECAY` | `0.5` | path 위 조상 노드로 N-hop 감쇠 factor. |
+| `PROPAGATION_MAX_HOPS` | `4` | propagation 최대 hop 깊이. |
 
 ## 외부 소스 키 (있을 때만 채움)
 
@@ -248,13 +313,48 @@ TRAVERSAL_USER_LOCK_TTL_SECONDS=10
 CONSENT_CACHE_TTL_SECONDS=60
 
 # === A6 Interest Bayesian (2026-05-17) ===
-INTEREST_PROPAGATION_ENABLED=false
+INTEREST_PROPAGATION_ENABLED=true
 INTEREST_BOOST_EXPIRY_ACTIVE_DAYS=14
 INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS=10
 DWELL_TICK_CAP_TTL_SECONDS=3600
 DWELL_TICK_CAP_PER_DOCUMENT=4
 EVENT_DUPLICATE_CACHE_TTL_SECONDS=86400
 SYSTEM_CONFIG_REQUIRED=true
+
+# === A7 Leaf Lifecycle + Traversal (2026-05-17) ===
+LEAF_EMERGING_MAX_PER_DAY=3
+LEAF_EMERGING_CONFIDENCE_MIN=0.6
+LEAF_EMERGING_SUPPORTING_DOCUMENTS_MIN=3
+LEAF_EMERGING_LABEL_SIMILARITY_DEDUP=0.75
+LEAF_EMERGING_INPUT_WINDOW_HOURS=24
+LEAF_LLM_ANCHOR_RETRY_CAP=1
+LEAF_LIFECYCLE_LOCK_TTL_SECONDS=60
+LEAF_ACTIVE_WINDOW_DAYS=7
+LEAF_ACTIVE_MIN_DOCUMENTS=5
+LEAF_ACTIVE_MIN_INTEREST_SIGNALS=2
+LEAF_STALE_IDLE_DAYS=21
+LEAF_ARCHIVED_IDLE_DAYS=90
+LEAF_EMERGING_ARCHIVED_IDLE_DAYS=14
+LEAF_REACTIVATION_WINDOW_DAYS=7
+LEAF_REACTIVATION_MIN_DOCUMENTS=3
+LEAF_REACTIVATION_MIN_INTEREST_SIGNALS=1
+LEAF_MERGE_JACCARD_MIN=0.6
+LEAF_MERGE_LABEL_SIMILARITY_MIN=0.75
+LEAF_MERGE_MAX_PER_USER=50
+MERGE_EVALUATION_LOCK_TTL_SECONDS=120
+TRACE_ACTIVE_CAP=10
+TRACE_PATH_DEPTH_CAP=8
+TRACE_STALE_IDLE_DAYS=21
+TRACE_STALE_THRESHOLD_SCORE=0.30
+TRACE_RETRACT_AFTER_STALE_DAYS=14
+TRACE_ARCHIVE_AFTER_STALE_DAYS=90
+TRACE_EXTEND_MIN_INTERACTIONS=5
+TRACE_SPLIT_WINDOW_DAYS=7
+TRACE_MERGE_PATH_OVERLAP_MIN=3
+TRACE_MERGE_CRON=0 18 * * *
+TRACE_MERGE_LOCK_TTL_SECONDS=120
+PROPAGATION_HOP_DECAY=0.5
+PROPAGATION_MAX_HOPS=4
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

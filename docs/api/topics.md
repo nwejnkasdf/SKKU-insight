@@ -102,4 +102,9 @@ class TraversalTraceDetail(BaseModel):
 |---|---|---|
 | `topic.not_found` | 404 | UUID 없음 |
 | `topic.unauthorized_leaf` | 403 | 다른 사용자 리프 토픽 접근 |
-| `topic.linkage_error` | 503 | 토픽 연결 오류 (FR-64, NFR-08) — `/topics/cso/clusters` 가 12 cluster 보장 실패 시 (CSO 미임포트·시드 부분 누락). 관리자 콘솔에 표시. |
+| `topic.linkage_error` | 503 | 토픽 연결 오류 (FR-64, NFR-08) — `/topics/cso/clusters` 가 12 cluster 보장 실패 시 (CSO 미임포트·시드 부분 누락). **(A7 추가)** LLM JSON parse 실패 시 재사용 — `identify_emerging` / `evaluate_merges` / `retract_reposition` / `split_dispatch` / `trace_merge_verify` 응답이 JSON 파싱 실패 또는 schema 위반 시 본 코드 반환 후 빈 응답 fallback. |
+| `leaf.topic_not_found` | 404 | **(A7)** DynamicLeafTopic UUID 조회 실패 (예: `/topics/leaves/{leaf_id}` 가 다른 사용자 또는 archived/merged leaf 접근 시 일반화 응답). `topic.not_found` 와 분리되어 leaf 영역 디버깅 용이. |
+| `leaf.llm_anchor_violation` | 503 | **(A7)** `identify_emerging` LLM 응답이 `trace_anchor_required=true` 위반 (active trace path 외 노드 산하에 emerging 제안) 후 retry (cap=1) 도 실패. 그날 식별 skip, 다음 day cron 재시도. user-facing 응답에는 보통 노출되지 않음 (worker 로그 전용). |
+| `traversal.path_depth_exceeded` | 422 | **(A7)** trace.path 깊이가 `TRACE_PATH_DEPTH_CAP=8` 도달 후 extend 시도. user-facing 가능 (관리자 콘솔에서 trace 상태 확인 시). |
+| `traversal.active_cap_exceeded` | 422 | **(A7)** 사용자당 active trace 가 `TRACE_ACTIVE_CAP=10` 도달 후 새 trace 생성 시도 (cold-start 또는 split). 가장 idle stale trace 자동 archive 후 진행. user-facing 가능. |
+| `traversal.merge_conflict` | 409 | **(A7)** trace merge 룰 trigger 후 LLM 검증 거부 또는 동시 mutation race. daily cron 다음 회차 재평가. user-facing 일반적으로 미노출. |

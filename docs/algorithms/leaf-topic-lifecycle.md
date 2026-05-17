@@ -160,14 +160,15 @@ def evaluate_transitions(user, leaves, signals, params) -> list[StateTransition]
 
 ## Trace operation 시 leaf 처리
 
-[`cso-topic-traversal.md §3`](cso-topic-traversal.md)의 trace operation에서 LLM이 leaf의 cso_topic_id 매핑을 재배치한다. **trace operation 자체는 룰**이지만 그 결과로 leaf의 종속이 변할 수 있다.
+[`cso-topic-traversal.md §3`](cso-topic-traversal.md)의 trace operation에서 LLM이 leaf의 cso_topic_id 매핑을 재배치한다. **trace operation 자체는 룰**이지만 그 결과로 leaf의 종속이 변할 수 있다. **A7 (2026-05-17) 가 merge 신규 도입** — operation 4 → 5 확장.
 
 | Trace op | Leaf 영향 | LLM 호출 |
 |---|---|---|
 | extend | 변경 없음 (leaf는 graph anchored 그대로) | ❌ |
-| retract | retract된 노드에 매핑된 leaf만 LLM이 path 위 다른 노드로 재매핑 또는 archive | ✅ |
-| split | 분기점 노드의 leaf를 두 자식 path에 LLM 분배 (양쪽 모두 가능) | ✅ |
+| retract | retract된 노드에 매핑된 leaf만 LLM이 path 위 다른 노드로 재매핑 또는 archive | ✅ `retract_reposition` |
+| split | 분기점 노드의 leaf를 두 자식 path에 LLM 분배 (양쪽 모두 가능) | ✅ `split_dispatch` |
 | archive | 해당 trace path 위 모든 노드 매핑 leaf도 함께 archive | ❌ |
+| **merge (A7 신규)** | loser trace 산하 leaf 의 cso_topic 매핑을 winner trace path 위 노드로 재매핑 (이미 매핑된 leaf 는 skip — composite PK 충돌 회피) | ✅ `trace_merge_verify` |
 
 ### Retract 시 LLM 프롬프트 (요약)
 
@@ -190,6 +191,38 @@ path: [AI, NLP]
 JSON 응답:
 { "remap": [...], "archive": [...] }
 ```
+
+### Trace Merge Verify (A7 신규, model_slot="high", daily 18 UTC cron)
+
+```
+[trace_a]
+path_len: 3
+last_active_day: 142
+산하 active leaf: [RAG, Multi-modal LLM, Chain-of-Thought]
+
+[trace_b]
+path_len: 4
+last_active_day: 138
+산하 active leaf: [Retrieval-Augmented Generation, Vision-Language Model]
+
+[지시]
+두 trace 가 의미상 동일한 관심 영역을 다루는지 판단하라.
+같은 영역이면 merge 권장, 아니면 reject.
+- path overlap ≥ TRACE_MERGE_PATH_OVERLAP_MIN (=3) 또는 proper subset 인 후보만 호출됨
+- merge 후 winner = max(last_activity_active_day), tie 시 trace_id 작은 쪽
+
+JSON 응답:
+{
+  "decision": "merge" | "reject",
+  "rationale": "<한국어 한 문장>"
+}
+```
+
+**호출 위치**: `app/traversal/merge_evaluator.py:_llm_verify_merge` (`evaluate_and_execute_merges` 가 worker `trace_merge_job` 에서 사용자별 1회 호출).
+
+### Split Dispatch / Identify Emerging / Evaluate Merges (leaf)
+
+위 3 prompt 는 본 문서 상단 §LLM 프롬프트 골격 (Identify Emerging / Evaluate Merges) + cso-topic-traversal.md §3.3 (Split Dispatch) 참조. A7 본문 구현 시점에 `app/leaf_lifecycle/llm_identifier.py` + `leaf_merge_evaluator.py` + `app/traversal/default.py` 가 사용.
 
 ## 추상화 — B 배치 평가로 갈아끼우기
 

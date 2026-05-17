@@ -31,9 +31,17 @@ from app.contracts import RedisKey
 from app.llm_provider.protocol import LLMBudgetExceeded
 from app.redis import get_redis
 
-# crash 시 자연 해소 위한 counter TTL (acquire 후 release 안 되도 60s 후 0 으로 복귀).
-# 단일 LLM 호출이 60s 안에 끝난다고 가정 (LLM_REQUEST_TIMEOUT_SECONDS=60 과 정합).
-_COUNTER_TTL_SECONDS = 60
+
+# crash 시 자연 해소 위한 counter TTL (acquire 후 release 안 되도 자연 0 으로 복귀).
+# (Codex R3-NEW-C1 fix) LLM_REQUEST_TIMEOUT_SECONDS 변경에 동적 대응 — 60s 가 LLM
+# 단일 호출 시간 (web_search 등) 보다 짧으면 counter 가 호출 도중 EXPIRE 되어 cap 깨짐.
+# `_counter_ttl_seconds()` 가 호출 시점 settings 기반 계산 (caching X — env 변경 즉시 반영).
+def _counter_ttl_seconds() -> int:
+    """LLM_REQUEST_TIMEOUT_SECONDS + 30s 여유. floor 60s."""
+    settings = get_settings()
+    return max(60, settings.LLM_REQUEST_TIMEOUT_SECONDS + 30)
+
+
 _RETRY_BACKOFF_SECONDS = 0.05  # acquire 재시도 간격
 _RETRY_BACKOFF_MAX_SECONDS = 0.5
 
@@ -96,6 +104,7 @@ async def _acquire_slot_distributed(
     )
     deadline = time.monotonic() + settings.LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS
     backoff = _RETRY_BACKOFF_SECONDS
+    counter_ttl = _counter_ttl_seconds()
     while True:
         acquired = await redis.eval(  # type: ignore[misc]
             _LUA_ACQUIRE,
@@ -104,7 +113,7 @@ async def _acquire_slot_distributed(
             user_key,
             str(settings.LLM_MAX_CONCURRENT),
             str(settings.LLM_MAX_CONCURRENT_PER_USER) if user_id else "",
-            str(_COUNTER_TTL_SECONDS),
+            str(counter_ttl),
         )
         if int(acquired) == 1:
             return

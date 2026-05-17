@@ -257,27 +257,35 @@ async def _fetch_topic_chips(
     )
     rows = (await db.execute(stmt)).all()
     chips: dict[UUID, list[TopicChip]] = {}
+    # (self-review R1 fix) 같은 (topic_id, type) chip 중복 차단 — 같은 doc 가 같은 leaf
+    # 에 여러 confidence 로 매핑되거나, partial UNIQUE 3종이 동일 (cso, leaf) 행 보유 시.
+    seen_per_doc: dict[UUID, set[tuple[UUID, str]]] = {}
     for r in rows:
         doc_id: UUID = r.document_id
         bucket = chips.setdefault(doc_id, [])
+        seen = seen_per_doc.setdefault(doc_id, set())
         if len(bucket) >= 5:
             continue
+        chip: TopicChip | None = None
         if r.leaf_topic_id is not None and r.leaf_label:
-            bucket.append(
-                TopicChip(
-                    topic_id=r.leaf_topic_id,
-                    label=str(r.leaf_label),
-                    type="leaf",
-                )
+            chip = TopicChip(
+                topic_id=r.leaf_topic_id,
+                label=str(r.leaf_label),
+                type="leaf",
             )
         elif r.cso_topic_id is not None and r.cso_label:
-            bucket.append(
-                TopicChip(
-                    topic_id=r.cso_topic_id,
-                    label=str(r.cso_label),
-                    type="cso",
-                )
+            chip = TopicChip(
+                topic_id=r.cso_topic_id,
+                label=str(r.cso_label),
+                type="cso",
             )
+        if chip is None:
+            continue
+        key = (chip.topic_id, chip.type)
+        if key in seen:
+            continue
+        seen.add(key)
+        bucket.append(chip)
     return chips
 
 

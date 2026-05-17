@@ -106,6 +106,22 @@
 | `TRAVERSAL_USER_LOCK_TTL_SECONDS` | `10` | trace mutation user-level mutex TTL |
 | `CONSENT_CACHE_TTL_SECONDS` | `60` | consent active 상태 Redis 캐시 |
 
+## A8 Recommendation Engine (2026-05-17 추가)
+
+본 9개 env 는 [`../algorithms/recommendation-ranking.md`](../algorithms/recommendation-ranking.md) + [`../algorithms/cold-start.md`](../algorithms/cold-start.md) 의 운영 토글. 알고리즘 임계 (점수 weight, slot target, fallback 단계) 자체는 `backend/app/config/recommendation.toml` 가 SOR — env 와 TOML 책임 분리 (env: runtime tuning / TOML: 알고리즘 임계). 결정 매트릭스 [`../decisions.md §13`](../decisions.md), decision-backlog C-40.
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `RECOMMENDATION_BUILD_POLL_TIMEOUT_SECONDS` | `8` | single-flight 폴링 timeout. lock 보유 시 0.2s 폴링 8s 내 cache 결과 대기. 초과 시 직접 build fallback ([`../sdd/concurrency.md §2`](../sdd/concurrency.md)). |
+| `RECOMMENDATION_BUILD_POLL_INTERVAL_SECONDS` | `0.2` | polling 주기. |
+| `COLD_START_MAX_PER_DAY` | `100` | 전역 일일 cold-start LLM 호출 cap. Redis INCR + EXPIRE 86400. ([`../algorithms/cold-start.md §비용 가드`](../algorithms/cold-start.md)) |
+| `COLD_START_MAX_PER_USER_LIFETIME` | `3` | 사용자 lifetime cap (cold-start.md §비용 가드). pseudo_cold_start Document 수 기준 — 초과 시 trust=high 트렌드 fallback. |
+| `COLD_START_LLM_TIMEOUT_SECONDS` | `180` | cold-start LLM `complete(high, json)` 호출 timeout. NFR-12 (cache hit 3s) 예외 — 8s SLA 목표지만 cap 180s. 일반 `LLM_REQUEST_TIMEOUT_SECONDS=180` 과 정합. |
+| `COLD_START_DEDUP_WINDOW_DAYS` | `30` | cold-start orchestrator 가 pseudo Document 생성 시 기존 Document 매칭 dedup window (A4 `_DEDUP_WINDOW_DAYS` 와 동일). |
+| `RATE_LIMIT_DASHBOARD_REFRESH` | `1/minute` | `POST /recommendations/dashboard/refresh` slowapi rate limit. 사용자당 1회/분. |
+| `DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS` | `60` | `GET /documents/{id}/summary` LLM medium 호출 timeout. DB `DocumentSummaryCache` 가 1차 SOR — 본 timeout 은 miss 시 LLM 한계만. |
+| `DOCUMENT_SUMMARY_SOURCE_ABSTRACT_MAX_CHARS` | `500` | LLM 실패 시 generator=`source_abstract` fallback 의 Document.summary 최대 문자 수. |
+
 ## A6 Interest Bayesian (2026-05-17 추가)
 
 본 7개 env 는 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) 의 동작 파라미터 — TOML config 가 아닌 env 로 노출되는 운영 토글만 본 표. 베이지안 파라미터 자체 (alpha_prior, half_life 등) 는 system_config 테이블 의 `interest_params` JSONB 행에서 관리 (A10 admin-console 가 UI 제공).
@@ -311,6 +327,17 @@ RECOMMENDATION_CACHE_TTL_SECONDS=3600
 RECOMMENDATION_BUILD_LOCK_TTL_SECONDS=30
 TRAVERSAL_USER_LOCK_TTL_SECONDS=10
 CONSENT_CACHE_TTL_SECONDS=60
+
+# === A8 Recommendation Engine (2026-05-17) ===
+RECOMMENDATION_BUILD_POLL_TIMEOUT_SECONDS=8
+RECOMMENDATION_BUILD_POLL_INTERVAL_SECONDS=0.2
+COLD_START_MAX_PER_DAY=100
+COLD_START_MAX_PER_USER_LIFETIME=3
+COLD_START_LLM_TIMEOUT_SECONDS=180
+COLD_START_DEDUP_WINDOW_DAYS=30
+RATE_LIMIT_DASHBOARD_REFRESH=1/minute
+DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS=60
+DOCUMENT_SUMMARY_SOURCE_ABSTRACT_MAX_CHARS=500
 
 # === A6 Interest Bayesian (2026-05-17) ===
 INTEREST_PROPAGATION_ENABLED=true

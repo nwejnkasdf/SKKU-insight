@@ -36,7 +36,7 @@ Phase 0b (2 세션 병렬): A3 CSO 임포트 ✅ (PR #?), A2 인증·동의·온
    ↓ 사용자 검수 30분
 Phase 1 (3 세션 병렬): A4 collection ✅ (PR #16), A5 clickbait ✅ (외부 PR #2), A6 interest-bayesian ✅ (PR #18 + #19)
    ↓ 사용자 검수 + OpenAPI 갱신 확인 60분
-Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ⬜
+Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ✅ 시연 검증 완료 (2026-05-17, 7-commit PR-stack + Codex 3 라운드 audit + 실 GPT-5.5 통합 시연)
    ↓ 사용자 검수 + 시드 페르소나로 end-to-end 90분
 Phase 3 (2 세션 병렬): A9 electron-client ⬜ (codegen api.ts import), A10 admin-console ⬜
    ↓ 사용자 검수 + 시연 리허설 60분
@@ -44,7 +44,7 @@ Phase 4 (2 세션 병렬): A11 test-ci ⬜, A12 demo-seed ⬜
    ↓ 최종 검수 + 발표 자료
 ```
 
-**현재 위치**: Phase 2 A7 완료 (2026-05-17). 다음 진입 Phase 2 후반 — **A8 recommendation** (core/adjacent/discovery 3 슬롯 + Cold-start LLM + first trace 생성 + emerging quota).
+**현재 위치**: Phase 2 A8 시연 검증 완료 (2026-05-17, 실 GPT-5.5 통합 시연 통과). 다음 진입 — **A9 electron-client** (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts).
 
 총 ~12 에이전트 세션 + 사용자 검수 시간 ~5시간.
 
@@ -88,7 +88,7 @@ A5 clickbait ✅ (외부 서비스) — DoRA wrap. **(v13 라운드)** 1차 defa
 A6 interest-bayesian ✅ — atomic UPSERT, propagation (env flag default false), active day daily decay, 14-day boost 만료
 
 A7 leaf-lifecycle + traversal ✅ (2026-05-17) — A6 (state) + A3 (graph) 의존. trace operation 4 → 5 (merge 신규) + `INTEREST_PROPAGATION_ENABLED=true` 토글 완료. 7-commit PR-stack + Codex 3 라운드 23 fix
-A8 recommendation ⬜ — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존
+A8 recommendation ✅ 시연 검증 (2026-05-17) — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존. 7-commit PR-stack + Codex 3 라운드 audit fix + 실 GPT-5.5 통합 시연. cold_start orchestrator + 첫 trace 생성 hook (A7 #6 plan TBD 완성). P2-23 functional index PostgreSQL 16 검증 해소
 
 A9 electron-client ⬜ — client/src/generated/api.ts (A2 OpenAPI codegen)
 A10 admin-console ⬜ — admin-console/src/generated/api.ts (A2 OpenAPI codegen). `system_config` UI 갱신 책임 (A6 read-only loader 와 분담)
@@ -140,7 +140,7 @@ CI에서 PR마다 실행:
 | job | cron env | A2 stub 등록 | 본문 구현 책임 |
 |---|---|---|---|
 | `account_deletion_job` | (event-driven, enqueue) | A2 본문 구현 | A2 |
-| `cold_start_job` | (event-driven, enqueue) | A2 stub | **A8** |
+| `cold_start_job` | (event-driven, enqueue) | A2 stub | A8 ✅ (2026-05-17) — `app/worker/jobs/cold_start.py` 본문 + `app/recommendation/cold_start.run_cold_start` orchestrator 위임 |
 | ~~`naver_cleanup_job`~~ | ~~`NAVER_CLEANUP_CRON`~~ | A2 stub + scheduler 등록 | **(v13 라운드 폐기, 2026-05-11)** decision-backlog P1-6 무효 마킹. NaverBS4 어댑터 폐기로 cleanup 대상 0건. A4 는 등록 제거 또는 비활성. |
 | `collection_job` | `COLLECTION_CRON` | A2 stub + scheduler 등록 | **A4** |
 | `interest_decay_job` | `INTEREST_DECAY_CRON` | A2 stub + scheduler 등록 | **A6** |

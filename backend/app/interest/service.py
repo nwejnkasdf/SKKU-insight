@@ -32,6 +32,7 @@ from app.config import Settings, get_settings
 from app.contracts import EventType, RedisKey
 from app.db.models import (
     BroadInterest,
+    DocumentTopic,
     HiddenDocument,
     NotInterestedTopic,
     SavedDocument,
@@ -133,6 +134,10 @@ async def _atomic_upsert_interest_state(
             "WHERE cso_topic_id IS NULL AND leaf_topic_id IS NOT NULL"
         )
 
+    # (A8 R3 시연 fix, 2026-05-17) asyncpg `unknown + unknown` 회피 — bind parameter
+    # 끼리 산술 연산 시 PostgreSQL 이 type 추론 못 함 (operator is not unique).
+    # SQLAlchemy text() 의 named bind `:x` 가 PostgreSQL `::` cast 와 충돌 →
+    # `CAST(:x AS float8)` 패턴 사용. 모든 float bind 에 명시 cast.
     upsert_sql = text(
         f"""
         INSERT INTO user_interest_state (
@@ -143,28 +148,32 @@ async def _atomic_upsert_interest_state(
             boost_applied_at_active_day, updated_at
         ) VALUES (
             gen_random_uuid(), :user_id, :cso_id, :leaf_id,
-            :alpha_prior + :da_l, :beta_prior + :db_l,
-            :alpha_prior + :da_s, :beta_prior + :db_s,
-            (:alpha_prior + :da_l) /
-                NULLIF(:alpha_prior + :da_l + :beta_prior + :db_l, 0),
-            (:alpha_prior + :da_s) /
-                NULLIF(:alpha_prior + :da_s + :beta_prior + :db_s, 0),
+            CAST(:alpha_prior AS float8) + CAST(:da_l AS float8),
+            CAST(:beta_prior AS float8) + CAST(:db_l AS float8),
+            CAST(:alpha_prior AS float8) + CAST(:da_s AS float8),
+            CAST(:beta_prior AS float8) + CAST(:db_s AS float8),
+            (CAST(:alpha_prior AS float8) + CAST(:da_l AS float8)) /
+                NULLIF(CAST(:alpha_prior AS float8) + CAST(:da_l AS float8)
+                       + CAST(:beta_prior AS float8) + CAST(:db_l AS float8), 0),
+            (CAST(:alpha_prior AS float8) + CAST(:da_s AS float8)) /
+                NULLIF(CAST(:alpha_prior AS float8) + CAST(:da_s AS float8)
+                       + CAST(:beta_prior AS float8) + CAST(:db_s AS float8), 0),
             :active_day, :active_day, NULL, NOW()
         )
         ON CONFLICT {conflict_cols} {conflict_where} DO UPDATE SET
-            short_alpha = user_interest_state.short_alpha + :da_s,
-            short_beta  = user_interest_state.short_beta  + :db_s,
-            long_alpha  = user_interest_state.long_alpha  + :da_l,
-            long_beta   = user_interest_state.long_beta   + :db_l,
-            short_score = (user_interest_state.short_alpha + :da_s) /
+            short_alpha = user_interest_state.short_alpha + CAST(:da_s AS float8),
+            short_beta  = user_interest_state.short_beta  + CAST(:db_s AS float8),
+            long_alpha  = user_interest_state.long_alpha  + CAST(:da_l AS float8),
+            long_beta   = user_interest_state.long_beta   + CAST(:db_l AS float8),
+            short_score = (user_interest_state.short_alpha + CAST(:da_s AS float8)) /
                 NULLIF(
-                    user_interest_state.short_alpha + :da_s +
-                    user_interest_state.short_beta + :db_s, 0
+                    user_interest_state.short_alpha + CAST(:da_s AS float8) +
+                    user_interest_state.short_beta + CAST(:db_s AS float8), 0
                 ),
-            long_score  = (user_interest_state.long_alpha + :da_l) /
+            long_score  = (user_interest_state.long_alpha + CAST(:da_l AS float8)) /
                 NULLIF(
-                    user_interest_state.long_alpha + :da_l +
-                    user_interest_state.long_beta + :db_l, 0
+                    user_interest_state.long_alpha + CAST(:da_l AS float8) +
+                    user_interest_state.long_beta + CAST(:db_l AS float8), 0
                 ),
             last_event_active_day = :active_day,
             updated_at = NOW()
@@ -383,6 +392,26 @@ async def _invalidate_recommendation_cache(
     await redis.delete(RedisKey.recommendation_cache(user_id))
 
 
+async def _document_topic_cso_ids(
+    db: AsyncSession, document_id: UUID
+) -> list[UUID]:
+    """A8 trace creation hook 용 — DocumentTopic.cso_topic_id list (confidence DESC).
+
+    NULL cso_topic_id 자동 제외. confidence DESC 순으로 정렬 → 첫 번째가 가장 confident.
+    빈 list 시 hook 가 trace 생성 skip.
+    """
+    stmt = (
+        select(DocumentTopic.cso_topic_id)
+        .where(
+            DocumentTopic.document_id == document_id,
+            DocumentTopic.cso_topic_id.is_not(None),
+        )
+        .order_by(DocumentTopic.confidence.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [r for r in rows if r is not None]
+
+
 async def ingest_event_atomic(
     db: AsyncSession,
     redis: aioredis.Redis,
@@ -535,11 +564,12 @@ async def ingest_event_atomic(
     if cache_invalidate:
         await _invalidate_recommendation_cache(redis, user.user_id)
 
-    # 9) A7 협업 (Codex R2-DEF-S5 fix + R3-RG-C1, plan #6 결정):
-    # ingest 직후 1단계 stale 마킹 — score_tail ≤ TRACE_STALE_THRESHOLD_SCORE AND
-    # idle ≥ TRACE_STALE_IDLE_DAYS 인 active trace 를 stale 로 즉시 전이 (no LLM).
-    # cold-start trace 생성 hook (TraversalEngine.ingest_event) 은 A8 진입 시 본문 완성
-    # (plan TBD — A8 cold-start orchestrator 가 사용자 첫 카드 클릭 시점에 호출).
+    # 9) A7/A8 협업 (R2-DEF-S5 + R3-RG-C1 + A8 plan #3 결정):
+    # ingest 직후 traversal_lock 보유 후:
+    #   (a) [A7] 1단계 stale 마킹 — score_tail ≤ THRESHOLD AND idle ≥ N 인 active trace
+    #       를 stale 로 즉시 전이 (no LLM).
+    #   (b) [A8] cold-start 후 첫 click 시 trace 생성 hook — TraversalEngine.ingest_event
+    #       가 매칭 trace 있으면 last_activity 갱신, 없으면 새 trace.
     #
     # (R3-RG-C1 fix) trace mutation 은 traversal_lock 보유 후 실행 — trace_merge_job /
     # daily_lifecycle_evaluation 과의 race 차단. lock 미보유 시 (다른 job 보유 중) skip —
@@ -560,7 +590,33 @@ async def ingest_event_atomic(
         )
         if acquired:
             try:
+                # (a) A7 stale 마킹.
                 await mark_stale_if_idle(db, user.user_id, active_day)
+                # (b) A8 trace creation hook — click 이벤트만 trigger.
+                if event_type == EventType.CLICK and document_id is not None:
+                    try:
+                        from app.llm_provider import get_provider
+                        from app.traversal.default import DefaultTraversalEngine
+
+                        cso_ids = await _document_topic_cso_ids(db, document_id)
+                        if cso_ids:
+                            engine = DefaultTraversalEngine(
+                                db,
+                                get_provider(settings.LLM_PROVIDER),
+                                cso_graph,
+                            )
+                            # ingest_event: 매칭 trace 있으면 last_activity 갱신,
+                            # 없으면 새 trace (default.create_new_trace 호출).
+                            # active_cap 초과 시 RuntimeError — 흡수.
+                            await engine.ingest_event(
+                                user.user_id, active_day, cso_ids
+                            )
+                    except (RuntimeError, ValueError) as hook_exc:
+                        logger.warning(
+                            "trace creation hook failed user=%s err=%s",
+                            user.user_id,
+                            hook_exc,
+                        )
             finally:
                 # Lua atomic CAS — 자기 token 일치 시만 DEL.
                 release_lua = (
@@ -571,9 +627,9 @@ async def ingest_event_atomic(
                     await redis.eval(release_lua, 1, lock_key, lock_token)  # type: ignore[misc]
                 except Exception:
                     pass
-        # lock 미보유 시 stale 마킹 skip (다음 ingest 또는 daily cron 에서 평가).
+        # lock 미보유 시 stale 마킹 + trace 생성 모두 skip (다음 ingest 또는 daily cron 에서 평가).
     except Exception:
-        # A7 module import 실패는 무시 (A6 단독 운영도 가능해야 함).
+        # A7/A8 module import 실패는 무시 (A6 단독 운영도 가능해야 함).
         pass
 
     return IngestResult(

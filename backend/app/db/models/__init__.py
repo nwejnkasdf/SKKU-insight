@@ -10,6 +10,8 @@
 - 0002: A3 — CSOTopicParent, DynamicLeafTopic, DynamicLeafTopicCSOTopic
 - 0003: A4 — Document, DocumentTopic, CollectionJob, ClickbaitResult
 - 0004: A6 — UserEvent, UserInterestState, SavedDocument, HiddenDocument, NotInterestedTopic, SystemConfig
+- 0005: A7 — UserCSOTraversal.merged_into_trace_id 컬럼 (테이블 자체는 0001)
+- 0006: A8 — Recommendation, RecommendationSlot, DocumentSummaryCache
 """
 from __future__ import annotations
 
@@ -20,11 +22,14 @@ from app.db.models.collection_job import CollectionJob
 from app.db.models.cso_topic import CSOTopic
 from app.db.models.cso_topic_parent import CSOTopicParent
 from app.db.models.document import Document
+from app.db.models.document_summary_cache import DocumentSummaryCache
 from app.db.models.document_topic import DocumentTopic
 from app.db.models.dynamic_leaf_topic import DynamicLeafTopic
 from app.db.models.dynamic_leaf_topic_cso_topic import DynamicLeafTopicCSOTopic
 from app.db.models.hidden_document import HiddenDocument
 from app.db.models.not_interested_topic import NotInterestedTopic
+from app.db.models.recommendation import Recommendation
+from app.db.models.recommendation_slot import RecommendationSlot
 from app.db.models.saved_document import SavedDocument
 from app.db.models.source import Source
 from app.db.models.source_policy import SourcePolicy
@@ -43,11 +48,14 @@ __all__ = [
     "ClickbaitResult",
     "CollectionJob",
     "Document",
+    "DocumentSummaryCache",
     "DocumentTopic",
     "DynamicLeafTopic",
     "DynamicLeafTopicCSOTopic",
     "HiddenDocument",
     "NotInterestedTopic",
+    "Recommendation",
+    "RecommendationSlot",
     "SavedDocument",
     "Source",
     "SourcePolicy",

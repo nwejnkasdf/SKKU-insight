@@ -65,10 +65,18 @@ class OpenAIAPIProvider:
         payload: dict[str, Any] = {
             "model": model_name,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "temperature": temperature,
         }
+        # GPT-5 series (gpt-5, gpt-5.x, gpt-5-mini, gpt-5-nano) 는 chat/completions 에서
+        # `temperature` 미지원 — only default (1) 허용. 400 Unsupported value 차단.
+        # 다른 모델 (gpt-4o 등) 만 temperature 전달. (R3 시연 발견 결함, 2026-05-17)
+        if not model_name.lower().startswith("gpt-5"):
+            payload["temperature"] = temperature
         if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+            # GPT-5 series 는 `max_tokens` 대신 `max_completion_tokens`.
+            if model_name.lower().startswith("gpt-5"):
+                payload["max_completion_tokens"] = max_tokens
+            else:
+                payload["max_tokens"] = max_tokens
         if response_format == "json":
             payload["response_format"] = {"type": "json_object"}
 

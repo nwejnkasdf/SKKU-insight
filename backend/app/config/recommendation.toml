@@ -1,0 +1,65 @@
+# Recommendation engine 설정 (A8).
+#
+# 본 파일은 algorithms/recommendation-ranking.md §신뢰도 임계 + §다양성 룰 + §core_slot_quota
+# 의 SOR. lifespan 부팅 시 1회 로드되어 `app/recommendation/config_loader.py:RecommendationConfig`
+# dataclass 로 박혀 endpoint 호출마다 재사용. 운영 시점 갱신은 backend 재시작 (A10
+# admin-console 가 system_config DB 갱신 후 backend reload 트리거 방식은 backlog).
+
+[slot_targets]
+core = 5
+adjacent = 3
+discovery = 2
+total = 10
+
+[confidence_thresholds]
+# 슬롯에 들어갈 자격 — 이 이하 후보는 강제 보충 대상이 아니라 다른 슬롯으로 대체 (FR-42).
+core_min_topic_match = 0.75      # bucket_score × topic_confidence
+adjacent_min_topic_match = 0.55
+discovery_min_topic_match = 0.30
+discovery_required_trust_level = "high"   # discovery 는 trust=high 만
+
+[freshness]
+# Document.published_at 기준 wallclock(달력) 일수 — 사용자 active day 무관.
+# 24시간 이내 1.0, 7일 이상 0.5 로 선형 감쇠.
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 7
+fresh_floor_value = 0.5
+
+[trust_level_weights]
+high = 1.0
+medium = 0.85
+low = 0.6
+
+[ranking_weights]
+# 최종 점수 = topic_match * w_match + freshness * w_fresh + trust * w_trust
+# NFR-06 — topic_match 1순위 정렬 기준.
+w_match = 0.7
+w_fresh = 0.2
+w_trust = 0.1
+
+[diversification]
+# 동일 source 슬롯당 최대.
+max_per_source_in_slot = 2
+# 동일 leaf_topic 슬롯당 최대 (leaf=None 후보는 cap 면제).
+max_per_leaf_in_slot = 3
+
+[core_slot_quota]
+# C-4 해소 (cso-topic-traversal.md §6.2): core 5 중 1 emerging 우선.
+# emerging 후보 부재 시 active leaf 로 자동 회수.
+emerging_leaf_quota_in_core = 1
+
+[bucket_score]
+# interest-bayesian.md §3 bucket 값 → ranking 의 bucket_score 가중치.
+high = 1.0
+medium = 0.7
+low = 0.4
+neutral = 0.2
+
+[fallback]
+# FR-43 단계 임계.
+# 1단계: 인접 토픽 hops=2 (current 영역의 그래프 2-hop) trust=high 트렌드.
+adjacent_hops_2 = 2
+# 2단계: 신뢰 소스 전체 트렌드 (사용자 토픽 무관) 최근 7 wallclock days.
+trend_window_days = 7
+# 3단계: 신뢰 소스 archive (최근 30 wallclock days).
+archive_window_days = 30

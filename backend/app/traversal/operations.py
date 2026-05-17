@@ -96,18 +96,23 @@ async def execute_retract(
         "new_cso_topic_id": UUID | None}].
 
     1. trace.path 의 retracted_cso_topic_id 제거 (array_remove). last_activity 갱신.
+       (Codex R1 Critical 1) status == stale 필터 + cardinality > 1 (path 비우기 차단) +
+       returning rowcount 확인. UPDATE rowcount=0 시 leaf 변경 skip — trace mutation
+       성공 확인 후에만 leaf 변경 (false positive retract 차단).
     2. leaf_remap_decisions 적용:
        - "remap": DynamicLeafTopicCSOTopic 갱신 (기존 cso=retracted → new).
        - "archive": DynamicLeafTopic.status='archived'.
 
-    return: 재매핑된 leaf 수.
+    return: 재매핑된 leaf 수 (path UPDATE 실패 시 0).
     """
     # 1. atomic path.pop (array_remove). path=[a,b,c] retract c → [a,b].
+    # (Codex R1 Critical 1) status=stale 필터 + path 길이 검증 + RETURNING rowcount 확인.
     path_stmt = (
         update(UserCSOTraversal)
         .where(
             UserCSOTraversal.trace_id == plan.trace_id,
-            UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+            UserCSOTraversal.status == TraversalStatus.STALE.value,
+            sa_func.cardinality(UserCSOTraversal.path) > 1,
         )
         .values(
             path=sa_func.array_remove(
@@ -116,8 +121,16 @@ async def execute_retract(
             last_activity_active_day=active_day_counter,
             updated_at=datetime.now(UTC),
         )
+        .returning(UserCSOTraversal.trace_id)
     )
-    await db.execute(path_stmt)
+    updated = (await db.execute(path_stmt)).scalar_one_or_none()
+    if updated is None:
+        # trace 가 stale 가 아니거나 path 길이 1 → retract 부적합. leaf 변경 skip.
+        logger.info(
+            "retract skipped: trace=%s reason=not_stale_or_single_node",
+            plan.trace_id,
+        )
+        return 0
 
     # 2. leaf decisions 적용.
     remapped = 0

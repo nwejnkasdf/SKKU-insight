@@ -185,23 +185,33 @@ async def execute_merges(
 ) -> int:
     """proposals 적용 — primary 갱신 + merged status='merged' + merged_into 마킹.
 
-    return: 변경된 leaf 수.
+    (Codex R1 Suggested 4) primary/merged 모두 status='active' 필터 + RETURNING rowcount
+    확인. 다른 lifecycle job 이 그 사이 leaf 를 stale/archive/merge 했으면 stale proposal
+    적용 skip (정합성 보장).
+
+    return: 실제 변경된 leaf 수.
     """
     changed = 0
     now = datetime.now(UTC)
     for prop in proposals:
-        # primary 갱신.
-        await db.execute(
+        # primary 갱신 — active leaf 만 (stale/archive/merge 된 row 는 skip).
+        primary_stmt = (
             update(DynamicLeafTopic)
             .where(
                 DynamicLeafTopic.leaf_topic_id == prop.primary_leaf_id,
                 DynamicLeafTopic.user_id == user_id,
+                DynamicLeafTopic.status == LeafTopicStatus.ACTIVE.value,
             )
             .values(
                 label=prop.label_after_merge_ko,
                 label_en=prop.label_after_merge_en,
             )
+            .returning(DynamicLeafTopic.leaf_topic_id)
         )
+        primary_result = await db.execute(primary_stmt)
+        if primary_result.scalar_one_or_none() is None:
+            # primary 가 이미 stale/archive/merge — 본 proposal 폐기.
+            continue
         changed += 1
         for merged_id in prop.merged_leaf_ids:
             stmt = (
@@ -209,6 +219,7 @@ async def execute_merges(
                 .where(
                     DynamicLeafTopic.leaf_topic_id == merged_id,
                     DynamicLeafTopic.user_id == user_id,
+                    DynamicLeafTopic.status == LeafTopicStatus.ACTIVE.value,
                 )
                 .values(
                     status=LeafTopicStatus.MERGED.value,

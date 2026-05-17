@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.contracts import LeafTopicStatus, TraversalStatus
+from app.contracts import LeafTopicStatus, RedisKey, TraversalStatus
 from app.db.models import (
     DynamicLeafTopic,
     User,
@@ -33,6 +33,7 @@ from app.leaf_lifecycle.rule_evaluator import (
     apply_transitions,
     evaluate_rule_transitions,
 )
+from app.redis import get_redis
 from app.traversal.default import DefaultTraversalEngine
 
 logger = logging.getLogger("daily_lifecycle_evaluation_job")
@@ -62,14 +63,22 @@ async def _evaluate_trace_demotion_for_user(
     )
     retracted = 0
     archived = 0
+    # (Codex R1 Suggested 1) archive 임계는 stale 진입 후 누적 — stale_idle + archive_after_stale.
+    # 결정 #7 표: stale 21일 + 추가 + 누적 archive 90일 의미.
+    archive_threshold = (
+        settings.TRACE_STALE_IDLE_DAYS + settings.TRACE_ARCHIVE_AFTER_STALE_DAYS
+    )
+    retract_threshold = (
+        settings.TRACE_STALE_IDLE_DAYS + settings.TRACE_RETRACT_AFTER_STALE_DAYS
+    )
     for trace in stale_traces:
         idle = (user.active_day_counter or 0) - trace.last_activity_active_day
-        if idle >= settings.TRACE_ARCHIVE_AFTER_STALE_DAYS:
+        if idle >= archive_threshold:
             ok = await engine.archive_if_eligible(trace.trace_id)
             if ok:
                 archived += 1
             continue
-        if idle >= settings.TRACE_STALE_IDLE_DAYS + settings.TRACE_RETRACT_AFTER_STALE_DAYS:
+        if idle >= retract_threshold:
             plan = await engine.evaluate_retract(trace.trace_id)
             if plan is not None:
                 retracted += 1
@@ -142,26 +151,49 @@ async def _run() -> int:
     db_engine = get_engine()
     graph = await build_cso_graph(db_engine)
     provider = get_provider(get_settings().LLM_PROVIDER)
+    redis = get_redis("default")
+    settings = get_settings()
     total_retracted = 0
     total_archived = 0
     total_leaf_demoted = 0
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
+            # (Codex R1 Suggested 3) user-mutex (traversal_lock) — 동일 사용자의 trace
+            # mutation 이 ingest 또는 trace_merge_job 과 동시 실행 차단.
+            mutation_key = RedisKey.traversal_lock(user.user_id)
+            acquired = await redis.set(
+                mutation_key,
+                "1",
+                nx=True,
+                ex=settings.TRAVERSAL_USER_LOCK_TTL_SECONDS,
+            )
+            if not acquired:
+                logger.info(
+                    "daily_lifecycle_evaluation skip user=%s (lock held)",
+                    user.user_id,
+                )
+                continue
             try:
                 engine_inst = DefaultTraversalEngine(db, provider, graph)
                 r, a = await _evaluate_trace_demotion_for_user(engine_inst, user)
                 total_retracted += r
                 total_archived += a
-                total_leaf_demoted += await _evaluate_leaf_demotion_for_user(
-                    db, user
-                )
+                leaf_demoted = await _evaluate_leaf_demotion_for_user(db, user)
+                total_leaf_demoted += leaf_demoted
                 await db.commit()
+                # (Codex R1 Suggested 6) trace/leaf 변경 후 추천 캐시 invalidate.
+                if r or a or leaf_demoted:
+                    await redis.delete(
+                        RedisKey.recommendation_cache(user.user_id)
+                    )
             except Exception:
                 logger.exception(
                     "daily_lifecycle_evaluation user=%s failed", user.user_id
                 )
                 await db.rollback()
+            finally:
+                await redis.delete(mutation_key)
     logger.info(
         "daily_lifecycle_evaluation_job retracted=%d archived=%d leaf_demoted=%d",
         total_retracted,

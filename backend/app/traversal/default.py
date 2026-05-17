@@ -118,8 +118,17 @@ class DefaultTraversalEngine:
         """말단 노드 stale 누적 14 days 시 retract.
 
         본 메서드는 plan 생성 + LLM 호출 + execute 까지 수행. 1차 시연에서는 LLM
-        호출은 stub (fixture 미존재 시 archive 결정으로 fallback).
+        호출은 stub — remap 결정 (new_path 의 끝 노드로 재매핑) 으로 fallback.
+
+        (Codex R1 Critical 2) leaves_to_remap 은 retracted_cso 매핑 leaf 만 한정 — 다른
+        path 위 노드 매핑 leaf 는 영향 없음. path 가 길이 1 (root only) 인 경우 retract
+        대신 archive 로 전이 (path 빈 trace 불가).
         """
+        from sqlalchemy import select
+
+        from app.contracts import LeafTopicStatus
+        from app.db.models import DynamicLeafTopic, DynamicLeafTopicCSOTopic
+
         trace_row = await self.db.get(UserCSOTraversal, trace_id)
         if trace_row is None or not trace_row.path:
             return None
@@ -127,24 +136,48 @@ class DefaultTraversalEngine:
             return None
         retracted_cso = trace_row.path[-1]
         new_path = list(trace_row.path[:-1])
-        # 산하 leaf 매핑 lookup — retracted_cso 매핑 leaf list.
-        leaves = await queries.get_descendant_leaves(
-            self.db, trace_row.user_id, trace=trace_row
+        # path 길이 1 → retract 무의미. 대신 archive 로 전이.
+        if not new_path:
+            await operations.execute_archive(self.db, trace_id, trace_row.user_id)
+            return None
+
+        # retracted_cso 매핑 leaf 만 한정 (Codex R1 Critical 2).
+        leaves_stmt = (
+            select(DynamicLeafTopicCSOTopic.leaf_topic_id)
+            .join(
+                DynamicLeafTopic,
+                DynamicLeafTopic.leaf_topic_id
+                == DynamicLeafTopicCSOTopic.leaf_topic_id,
+            )
+            .where(
+                DynamicLeafTopic.user_id == trace_row.user_id,
+                DynamicLeafTopic.status.in_(
+                    [
+                        LeafTopicStatus.ACTIVE.value,
+                        LeafTopicStatus.EMERGING.value,
+                    ]
+                ),
+                DynamicLeafTopicCSOTopic.cso_topic_id == retracted_cso,
+            )
+            .distinct()
         )
-        leaves_to_remap = [
-            lf.leaf_topic_id
-            for lf in leaves
-            # retracted_cso 매핑 leaf 만 — 단순화: 모든 leaf 대상.
-        ]
+        leaves_to_remap = list(
+            (await self.db.execute(leaves_stmt)).scalars().all()
+        )
         plan = RetractPlan(
             trace_id=trace_id,
             retracted_cso_topic_id=retracted_cso,
             new_path=new_path,
             leaves_to_remap=leaves_to_remap,
         )
-        # LLM 호출 (1차 시연: 모두 archive 로 fallback).
+        # LLM 호출 (1차 시연: 모두 new_path 의 새 말단 노드로 remap fallback).
+        remap_target = new_path[-1]
         decisions: list[dict[str, Any]] = [
-            {"leaf_id": lid, "decision": "archive"}
+            {
+                "leaf_id": lid,
+                "decision": "remap",
+                "new_cso_topic_id": remap_target,
+            }
             for lid in leaves_to_remap
         ]
         await operations.execute_retract(

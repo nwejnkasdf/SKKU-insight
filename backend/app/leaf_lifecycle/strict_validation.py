@@ -21,7 +21,7 @@ import networkx as nx
 from app.config import get_settings
 from app.db.models import DynamicLeafTopic, UserCSOTraversal
 from app.leaf_lifecycle.protocol import NewLeafCandidate
-from app.topic.graph import find_descendants
+from app.topic.graph import get_children
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,8 +55,11 @@ def _build_anchor_cso_set(
 ) -> set[UUID]:
     """trace_anchor_required 검증용 허용 cso_topic_id 집합.
 
-    각 active trace 의 path 위 노드 + path 끝 노드의 그래프 1-hop 자손 (산하).
-    "산하" = path 위 노드 OR 그 자손 (1-hop descendant). leaf-topic-lifecycle.md L60.
+    각 active trace 의 path 위 노드 + path 끝 노드의 그래프 1-hop 자식 (산하).
+    "산하" = path 위 노드 OR 그 1-hop 직접 자식. leaf-topic-lifecycle.md L60.
+
+    (Codex R1 Suggested 2) `find_descendants` (transitive) → `get_children` (1-hop only).
+    transitive 자손까지 허용하면 깊은 하위 토픽도 anchor 통과 — 룰 의도와 다름.
     """
     allowed: set[UUID] = set()
     for trace in active_traces:
@@ -65,10 +68,10 @@ def _build_anchor_cso_set(
         if trace.path:
             tail = trace.path[-1]
             try:
-                descendants = find_descendants(graph, tail)
+                children = list(get_children(graph, tail))
             except Exception:
-                descendants = []
-            allowed.update(descendants)
+                children = []
+            allowed.update(children)
     return allowed
 
 

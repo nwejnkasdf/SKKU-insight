@@ -21,17 +21,19 @@ from uuid import UUID
 
 import networkx as nx
 import redis.asyncio as aioredis
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.contracts import EventType, LeafTopicStatus, RedisKey
+from app.contracts import EventType, LeafTopicStatus, RedisKey, TraversalStatus
 from app.db.models import (
+    Document,
     DocumentTopic,
     DynamicLeafTopic,
     DynamicLeafTopicCSOTopic,
     User,
+    UserCSOTraversal,
     UserEvent,
 )
 from app.db.session import AsyncSessionLocal
@@ -50,17 +52,39 @@ async def _collect_input_documents(
 ) -> list[UUID]:
     """A7 결정 #18 (옵션 D): A4 collection user own Document union UserEvent click/save Document.
 
-    최근 LEAF_EMERGING_INPUT_WINDOW_HOURS (24h) window.
+    최근 LEAF_EMERGING_INPUT_WINDOW_HOURS (24h) window 양 branch 모두 적용.
+
+    (Codex R1 Critical 3) A branch 가 leaf_topic_id 매핑 + cso_topic_id IN trace.path
+    매핑 (leaf_topic_id IS NULL fallback) 두 경로 모두 포함. 신규 emerging 식별 직전
+    상태 (leaf 가 아직 없음) 에서도 trace path 매핑 Document 가 input 으로 사용됨.
+    24h cutoff 양쪽 다 적용 (이전엔 A branch 누락).
     """
     settings = get_settings()
     cutoff = datetime.now(UTC) - timedelta(
         hours=settings.LEAF_EMERGING_INPUT_WINDOW_HOURS
     )
-    # A: user own collection 결과 Document (leaf_topic_id IN user_leaves OR
-    #    (cso_topic_id IN user_path AND leaf_topic_id IS NULL))
-    # 단순화 1차 시연: user 의 모든 매핑 Document (DocumentTopic.leaf_topic_id 가 user own leaf).
-    a_stmt = (
+    # 사용자 active trace path 들 — A branch 의 cso_topic 매핑 lookup 용.
+    trace_rows = list(
+        (
+            await db.execute(
+                select(UserCSOTraversal.path).where(
+                    UserCSOTraversal.user_id == user_id,
+                    UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+                )
+            )
+        ).all()
+    )
+    path_cso_ids: set[UUID] = set()
+    for row in trace_rows:
+        for pid in (row.path or []):
+            path_cso_ids.add(pid)
+
+    # A branch: user own collection 결과 Document.
+    # (a1) DocumentTopic.leaf_topic_id IN user_leaves
+    # (a2) DocumentTopic.cso_topic_id IN trace.path AND leaf_topic_id IS NULL
+    a_leaf_stmt = (
         select(DocumentTopic.document_id)
+        .join(Document, Document.document_id == DocumentTopic.document_id)
         .join(
             DynamicLeafTopic,
             DynamicLeafTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
@@ -70,26 +94,44 @@ async def _collect_input_documents(
             DynamicLeafTopic.status.in_(
                 [LeafTopicStatus.ACTIVE.value, LeafTopicStatus.EMERGING.value]
             ),
+            Document.created_at >= cutoff,
         )
         .distinct()
     )
-    rows_a = (await db.execute(a_stmt)).scalars().all()
-    # C: UserEvent click/save 의 document_id.
+    rows_a = list((await db.execute(a_leaf_stmt)).scalars().all())
+    if path_cso_ids:
+        a_cso_stmt = (
+            select(DocumentTopic.document_id)
+            .join(Document, Document.document_id == DocumentTopic.document_id)
+            .where(
+                DocumentTopic.cso_topic_id.in_(path_cso_ids),
+                DocumentTopic.leaf_topic_id.is_(None),
+                Document.created_at >= cutoff,
+            )
+            .distinct()
+        )
+        rows_a.extend((await db.execute(a_cso_stmt)).scalars().all())
+
+    # C branch: UserEvent click/save 의 document_id (이미 cutoff 적용).
     c_stmt = (
         select(UserEvent.document_id)
         .where(
             UserEvent.user_id == user_id,
-            UserEvent.event_type.in_([EventType.CLICK.value, EventType.SAVE.value]),
+            UserEvent.event_type.in_(
+                [EventType.CLICK.value, EventType.SAVE.value]
+            ),
             UserEvent.document_id.isnot(None),
             UserEvent.created_at >= cutoff,
         )
         .distinct()
     )
     rows_c = (await db.execute(c_stmt)).scalars().all()
+
     # union — set 으로.
     union: set[UUID] = set()
     union.update(rows_a)
     union.update(d for d in rows_c if d is not None)
+    _ = or_  # type checker (or_ import 는 향후 단일 query 통합 시 사용)
     return sorted(union)
 
 
@@ -194,6 +236,9 @@ async def _run_for_user(
             candidates[: settings.LEAF_EMERGING_MAX_PER_DAY],
         )
         await db.commit()
+        # (Codex R1 Suggested 6) 신규 leaf INSERT 후 추천 캐시 invalidate.
+        if inserted:
+            await redis.delete(RedisKey.recommendation_cache(user.user_id))
         return inserted
     finally:
         await redis.delete(lock_key)

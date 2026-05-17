@@ -55,6 +55,10 @@ async def _run() -> int:
                 total_merged += len(plans)
                 if plans:
                     await db.commit()
+                    # (Codex R1 Suggested 6) trace 변경 후 추천 캐시 invalidate.
+                    await redis.delete(
+                        RedisKey.recommendation_cache(user.user_id)
+                    )
             except Exception:
                 logger.exception(
                     "trace_merge_job user=%s failed", user.user_id

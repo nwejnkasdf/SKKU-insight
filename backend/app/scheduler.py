@@ -92,7 +92,11 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
 
 
 def register_cron_jobs() -> None:
-    """3 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록."""
+    """6 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록.
+
+    (Codex R1 Nit 1) A7 신규 (leaf_lifecycle / trace_merge / daily_lifecycle_evaluation)
+    포함 총 6 job.
+    """
     settings = get_settings()
     conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)
     scheduler = Scheduler(queue_name="default", connection=conn)

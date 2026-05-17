@@ -53,6 +53,11 @@ async def _run() -> int:
                     changed = await execute_merges(db, user.user_id, proposals)
                     total_changed += changed
                     await db.commit()
+                    # (Codex R1 Suggested 6) leaf 변경 후 추천 캐시 invalidate.
+                    if changed:
+                        await redis.delete(
+                            RedisKey.recommendation_cache(user.user_id)
+                        )
             except Exception:
                 logger.exception(
                     "merge_evaluation user=%s failed", user.user_id

@@ -3,7 +3,9 @@
 cron = `TRACE_MERGE_CRON` (default `0 18 * * *` UTC = 03:00 KST, A6 INTEREST_DECAY 와 동시각).
 
 흐름 (사용자별):
-1. lock 획득 (trace_merge_lock(user_id), TTL 120s).
+1. lock 획득 (traversal_lock(user_id), TTL=TRACE_MERGE_LOCK_TTL_SECONDS=120s).
+   (R2-RG-1 + R3-RG-S2) trace_merge_lock 별도 키 사용하지 않음 — daily_lifecycle_evaluation 와
+   같은 traversal_lock 으로 사용자 trace mutation 직렬화.
 2. DefaultTraversalEngine.evaluate_merge_candidates(user_id) 호출.
    → 룰 trigger (path overlap ≥ 3 또는 proper subset) + LLM 검증 + execute_merge.
 

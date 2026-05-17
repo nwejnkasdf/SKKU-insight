@@ -107,7 +107,7 @@ trace 자체의 operation은 **룰 기반**. LLM은 operation에 수반되는 dy
 
 ### 3.3 split (분기)
 
-**트리거**: path 위 어느 노드든 그 그래프 자식 2개가 split window 내(default 7 active days) 모두 extend 임계 도달.
+**트리거**: trace 의 **현재 path 말단 (tail) 노드** 그래프 자식 2개가 split window 내(default 7 active days) 모두 extend 임계 도달. (Codex R3-NEW-S3 fix) 본문 구현 (`default.py:evaluate_split`) 은 tail-only fork — path 중간 노드의 자식 부상은 retract 후 별도 trace 처리.
 
 ```
 1. T 단축 + T'=분기점+B (A7 결정 #20, 2026-05-17):

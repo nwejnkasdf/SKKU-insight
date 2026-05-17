@@ -72,26 +72,46 @@ class OpenAIAPIProvider:
         if response_format == "json":
             payload["response_format"] = {"type": "json_object"}
 
+        # (Codex R3-NEW-C2 fix) httpx/JSON 오류를 ProviderError 로 wrap — A7 caller 들이
+        # ProviderError 기준 fallback 처리 (search.py / leaf_lifecycle 등). raw exception
+        # 누출 시 daily cron 전체 unhandled rollback 위험.
         async with acquire_slot(user_id):
-            async with httpx.AsyncClient(
-                timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS
-            ) as client:
-                response = await client.post(
-                    OPENAI_CHAT_URL,
-                    headers={
-                        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-                response.raise_for_status()
-                data: dict[str, Any] = response.json()
-        choice = data["choices"][0]
-        message = choice["message"]
-        text = str(message.get("content", ""))
-        usage = data.get("usage", {})
-        prompt_tokens = int(usage.get("prompt_tokens", 0))
-        completion_tokens = int(usage.get("completion_tokens", 0))
+            try:
+                async with httpx.AsyncClient(
+                    timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS
+                ) as client:
+                    response = await client.post(
+                        OPENAI_CHAT_URL,
+                        headers={
+                            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    try:
+                        data: dict[str, Any] = response.json()
+                    except ValueError as exc:
+                        raise ProviderError(
+                            f"openai_response_json_decode: {exc}"
+                        ) from exc
+            except httpx.HTTPStatusError as exc:
+                # 4xx/5xx — rate limit (429), unauthorized (401), server error (5xx).
+                raise ProviderError(
+                    f"openai_http_status: {exc.response.status_code} {exc}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                # timeout, connect error, read error 등.
+                raise ProviderError(f"openai_http_error: {exc}") from exc
+        try:
+            choice = data["choices"][0]
+            message = choice["message"]
+            text = str(message.get("content", ""))
+            usage = data.get("usage", {})
+            prompt_tokens = int(usage.get("prompt_tokens", 0))
+            completion_tokens = int(usage.get("completion_tokens", 0))
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderError(f"openai_response_schema: {exc}") from exc
         await record_token_usage(prompt_tokens + completion_tokens, redis)
 
         parsed_json = None

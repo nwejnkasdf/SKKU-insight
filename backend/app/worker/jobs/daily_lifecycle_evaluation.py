@@ -175,16 +175,22 @@ async def _run() -> int:
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
-            # (Codex R1 Suggested 3 + R2-RG-3) user-mutex (traversal_lock) — 동일 사용자의 trace
-            # mutation 이 ingest 또는 trace_merge_job 과 동시 실행 차단. lock value 가
-            # 고유 token (uuid4) — release 시 자기 토큰만 DEL (Lua atomic GET+DEL CAS).
+            # (Codex R1 Suggested 3 + R2-RG-3 + R3-RG-S1) user-mutex (traversal_lock) —
+            # 동일 사용자의 trace mutation 이 ingest 또는 trace_merge_job 과 동시 실행 차단.
+            # lock value 가 고유 token (uuid4) — release 시 자기 토큰만 DEL (Lua atomic).
+            # (R3-RG-S1) daily lifecycle 의 retract LLM 호출 + leaf 다중 UPDATE 가 ingest
+            # 의 10s 보다 길 수 있음 — max(traversal_ttl, trace_merge_ttl) 사용.
             mutation_key = RedisKey.traversal_lock(user.user_id)
             lock_token = str(uuid.uuid4())
+            lock_ttl = max(
+                settings.TRAVERSAL_USER_LOCK_TTL_SECONDS,
+                settings.TRACE_MERGE_LOCK_TTL_SECONDS,
+            )
             acquired = await redis.set(
                 mutation_key,
                 lock_token,
                 nx=True,
-                ex=settings.TRAVERSAL_USER_LOCK_TTL_SECONDS,
+                ex=lock_ttl,
             )
             if not acquired:
                 logger.info(

@@ -81,7 +81,8 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
     },
     {
         # daily_lifecycle_evaluation 도 TRACE_MERGE_CRON 와 같은 시각 (18 UTC).
-        # user-mutex 가 분리되어 동시 안전 (trace_merge_lock vs leaf level locks).
+        # user-mutex (traversal_lock) 가 trace_merge_job 과 동일 — 같은 시점 사용자 trace
+        # mutation 직렬화. (R2-RG-1 fix) leaf-level lock (merge_evaluation_lock) 과는 별개.
         "id": "daily_lifecycle_evaluation_job",
         "cron_attr": "TRACE_MERGE_CRON",
         "func": "app.worker.jobs.daily_lifecycle_evaluation.daily_lifecycle_evaluation_job",

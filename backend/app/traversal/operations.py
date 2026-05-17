@@ -280,28 +280,31 @@ async def execute_archive(
 
     no LLM 호출. cso-topic-traversal.md §3.4 (3단계 강등 마지막 단계).
     return: 동반 archive 된 leaf 수.
-    """
-    # 1. trace archive (path lookup 위해 먼저 SELECT — atomic SQL 어렵음).
-    trace_row = (
-        await db.execute(
-            select(UserCSOTraversal).where(
-                UserCSOTraversal.trace_id == trace_id,
-                UserCSOTraversal.status != TraversalStatus.ARCHIVED.value,
-            )
-        )
-    ).scalar_one_or_none()
-    if trace_row is None:
-        return 0
-    path_ids = list(trace_row.path)
 
-    await db.execute(
+    (Codex R3-NEW-S2 fix) 1 atomic UPDATE ... RETURNING path 로 SELECT+UPDATE race 차단.
+    이전 구현은 SELECT 후 UPDATE 사이에 다른 worker (lock 없이) 가 status 변경하면
+    stale path 기준 archive 가능 — caller 가 traversal_lock 보유해도 SQL transaction
+    boundary 안 다른 row 영향. RETURNING path 가 archive 직전 SQL snapshot 보장.
+    """
+    # 1. atomic UPDATE — status=archived AND status != archived (idempotent), RETURNING path.
+    update_stmt = (
         update(UserCSOTraversal)
-        .where(UserCSOTraversal.trace_id == trace_id)
+        .where(
+            UserCSOTraversal.trace_id == trace_id,
+            UserCSOTraversal.status != TraversalStatus.ARCHIVED.value,
+        )
         .values(
             status=TraversalStatus.ARCHIVED.value,
             updated_at=datetime.now(UTC),
         )
+        .returning(UserCSOTraversal.path)
     )
+    result = await db.execute(update_stmt)
+    path_row = result.scalar_one_or_none()
+    if path_row is None:
+        # 이미 archived 또는 trace 부재.
+        return 0
+    path_ids = list(path_row)
 
     # 2. 산하 active+emerging leaf 도 archive.
     if not path_ids:

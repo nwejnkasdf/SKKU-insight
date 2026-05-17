@@ -535,16 +535,43 @@ async def ingest_event_atomic(
     if cache_invalidate:
         await _invalidate_recommendation_cache(redis, user.user_id)
 
-    # 9) A7 협업 (Codex R2-DEF-S5 fix, plan #6 결정):
+    # 9) A7 협업 (Codex R2-DEF-S5 fix + R3-RG-C1, plan #6 결정):
     # ingest 직후 1단계 stale 마킹 — score_tail ≤ TRACE_STALE_THRESHOLD_SCORE AND
     # idle ≥ TRACE_STALE_IDLE_DAYS 인 active trace 를 stale 로 즉시 전이 (no LLM).
     # cold-start trace 생성 hook (TraversalEngine.ingest_event) 은 A8 진입 시 본문 완성
     # (plan TBD — A8 cold-start orchestrator 가 사용자 첫 카드 클릭 시점에 호출).
-    # 본 hook 은 단일 SQL UPDATE 1회로 비용 최소화.
+    #
+    # (R3-RG-C1 fix) trace mutation 은 traversal_lock 보유 후 실행 — trace_merge_job /
+    # daily_lifecycle_evaluation 과의 race 차단. lock 미보유 시 (다른 job 보유 중) skip —
+    # daily cron 다음 회차에서 평가됨 (자연 자체 복구).
     try:
+        import uuid as _uuid_lock
+
+        from app.contracts import RedisKey
         from app.traversal.operations import mark_stale_if_idle
 
-        await mark_stale_if_idle(db, user.user_id, active_day)
+        lock_key = RedisKey.traversal_lock(user.user_id)
+        lock_token = str(_uuid_lock.uuid4())
+        acquired = await redis.set(
+            lock_key,
+            lock_token,
+            nx=True,
+            ex=settings.TRAVERSAL_USER_LOCK_TTL_SECONDS,
+        )
+        if acquired:
+            try:
+                await mark_stale_if_idle(db, user.user_id, active_day)
+            finally:
+                # Lua atomic CAS — 자기 token 일치 시만 DEL.
+                release_lua = (
+                    "if redis.call('GET', KEYS[1]) == ARGV[1] "
+                    "then return redis.call('DEL', KEYS[1]) end return 0"
+                )
+                try:
+                    await redis.eval(release_lua, 1, lock_key, lock_token)  # type: ignore[misc]
+                except Exception:
+                    pass
+        # lock 미보유 시 stale 마킹 skip (다음 ingest 또는 daily cron 에서 평가).
     except Exception:
         # A7 module import 실패는 무시 (A6 단독 운영도 가능해야 함).
         pass

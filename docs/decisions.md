@@ -346,10 +346,47 @@ A2/A4/A6/A7 Codex 감사 누적 lesson 에서 A8 재발 가능 anti-pattern 을 
 
 - **TopicChip dedup by (topic_id, type)** — `engine._fetch_topic_chips` 가 같은 doc 의 (cso, leaf) 매핑이 여러 confidence 행으로 존재 시 같은 chip 중복 추가 위험. `seen_per_doc: dict[UUID, set[tuple[UUID, str]]]` 추가 — chip append 전 (topic_id, type) tuple key 로 dedup.
 
-### R2/R3 후속 (별도 세션)
+### R2 Codex 외부 감사 결과 + fix (commit 099f837)
 
-- **R2 Codex 재감사** — Codex CLI 또는 `/ultrareview` 로 본문 11 파일 + tests 9 파일 독립 감사. self-review 가 catch 못 한 결함 발견 가능.
-- **R3 통합 시연** — 사용자 OPENAI_API_KEY 설정 후 `docker compose up -d` + signup → consent → onboarding 3 cluster → cold-start 8s SLA 폴링 → `GET /recommendations/dashboard` → 10 카드 + 5/3/2 slot + 한국어 reason ≤80자 + NFR-04 score 미노출 + cold_start=true → 2회 호출 cache hit → 첫 click 이벤트 → UserCSOTraversal trace 1 row 자동 생성 검증.
+R2 Codex 독립 감사 — Critical 2 / Suggested 1 / Discussion 2 / Acknowledged 6.
+
+**Critical #2 fix (engine.py)**: cold-start 완료 후 UTC 일자가 바뀌면 `_select_today_recommendations` 가 0 row → dashboard 빈 cards. 신규 `_select_latest_recommendations()` fallback — 가장 최근 생성일의 row 들 복원 (day_start~day_end 범위).
+
+**Suggested #1 fix (cold_start.py)**: `_check_global_daily_cap` 의 INCR + EXPIRE 분리 → Lua atomic 단일 스크립트 (`_DAILY_CAP_INCR_LUA`). A6 dwell_tick Lua 패턴 동일. TTL 없는 영구 key 잔존 race 차단.
+
+**P2 backlog 등재 (3건)**:
+- **P2-22** cold_start_orchestrator concurrent race (Critical #1) — onboarding_lock TTL 만료 후 multi-worker race. UVICORN_WORKERS=1 1차 시연 영향 X. 운영 단계 inline Redis lock 또는 PG advisory_xact_lock.
+- **P2-23** daily UNIQUE functional index volatility (Discussion #1) — **R3 시연 검증으로 해소** (PostgreSQL 16-alpine `((created_at AT TIME ZONE 'UTC')::date)` index 정상 통과).
+- **P2-24** `_is_cold_start` 재진입 정책 (Discussion #2) — 14-day boost 만료 후 행동 신호 미발생 시 재진입 가능. cold-start.md §재활성화 정합 — 의도된 동작으로 결정. 운영 단계 marker 도입.
+
+**⚪ Acknowledged 6건**: untargeted `on_conflict_do_nothing()` (A4 R3 lesson) / `_RELEASE_LOCK_LUA` CAS (A7 R2-RG-3 lesson) / `db.commit() → redis.setex()` 순서 (A4/A6 C-02 lesson) / RecommendationCard score 부재 (NFR-04) / candidates SQL `leaf_status` 단일 fetch (emerging quota race 방어) / interest hook traversal_lock + CAS (A7 R3 lesson) — 모두 의도된 사전 방어 패턴.
+
+### R3 통합 시연 검증 + fix (commit ee627a2)
+
+**환경**: docker compose (WSL2 docker, postgres:16-alpine + redis:7-alpine), `.env` LLM_PROVIDER=openai + OPENAI_API_KEY=실 키 + LLM_MODEL_HIGH=gpt-5.5.
+
+**시연 흐름**: signup → login → consent (`{"consent_type":"personalization","agreed":true}`) → onboarding (AI/Systems/Theory 3 cluster) → polling `cold-start-status` → dashboard.
+
+**시연 발견 결함 1건 fix** (`backend/app/llm_provider/openai.py`):
+
+OpenAI 응답: `"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported."` GPT-5 series 가 chat/completions 에서 `temperature` parameter 미지원 (default 1.0 만 허용) + `max_tokens` → `max_completion_tokens` 변경.
+
+fix: `model_name.lower().startswith("gpt-5")` 분기 — temperature payload omit (OpenAI default 1.0 자동) + max_tokens 키 변경. 다른 모델 (gpt-4o 등) 영향 없음. 사용자 결정 (재현성 미요구) 로 1.0 default 진행.
+
+**검증 결과** (전 항목 통과):
+
+| 항목 | 결과 |
+|---|---|
+| alembic 0001→0006 migrate | ✅ P2-23 functional index 통과 |
+| 실 GPT-5.5 chat/completions 호출 | ✅ HTTP 200, 61s |
+| 10 카드 응답 (실 논문/뉴스) | ✅ core 5 (Learning to Reason with LLMs / Transformers are SSMs / Llama 3.1 / NVIDIA Blackwell / IMO AI silver) / adjacent 3 (Model Context Protocol / Apple Intelligence / AI Scientist) / discovery 2 (AlphaFold 3 / Willow quantum chip) |
+| 5/3/2 slot 분배 | ✅ target=actual, fallback_reason=null |
+| Korean reason_short ≤80자 | ✅ 실측 23~31자 (prompt 60자 가이드 잘 따름) |
+| NFR-04 score 마스킹 | ✅ 응답 'score' 키 0건 |
+| 2회차 cache hit | ✅ cache=hit, cards=10 |
+| cold_start=true 표시 | ✅ |
+| sentinel `cold_start_pseudo` source 활용 | ✅ source_name="cold_start_pseudo" |
+| R2 fix #2 UTC 경계 fallback 활성 | ✅ cold-start path 정상 로딩 |
 
 ### 본 라운드가 만들거나 갱신하는 docs
 

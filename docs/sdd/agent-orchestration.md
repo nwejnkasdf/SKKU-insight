@@ -36,7 +36,7 @@ Phase 0b (2 세션 병렬): A3 CSO 임포트 ✅ (PR #?), A2 인증·동의·온
    ↓ 사용자 검수 30분
 Phase 1 (3 세션 병렬): A4 collection ✅ (PR #16), A5 clickbait ✅ (외부 PR #2), A6 interest-bayesian ✅ (PR #18 + #19)
    ↓ 사용자 검수 + OpenAPI 갱신 확인 60분
-Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ✅ 본문 완료 (2026-05-17, 4-commit local + R1 self-review, R2/R3 별도 세션)
+Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ✅ 시연 검증 완료 (2026-05-17, 7-commit PR-stack + Codex 3 라운드 audit + 실 GPT-5.5 통합 시연)
    ↓ 사용자 검수 + 시드 페르소나로 end-to-end 90분
 Phase 3 (2 세션 병렬): A9 electron-client ⬜ (codegen api.ts import), A10 admin-console ⬜
    ↓ 사용자 검수 + 시연 리허설 60분
@@ -44,7 +44,7 @@ Phase 4 (2 세션 병렬): A11 test-ci ⬜, A12 demo-seed ⬜
    ↓ 최종 검수 + 발표 자료
 ```
 
-**현재 위치**: Phase 2 A8 본문 완료 (2026-05-17). R2 Codex 재감사 + R3 통합 시연 (실 OpenAI GPT-5.5 cold-start 1회) 은 별도 세션. 다음 진입 — **A9 electron-client** (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts) 또는 A8 R2/R3 후속.
+**현재 위치**: Phase 2 A8 시연 검증 완료 (2026-05-17, 실 GPT-5.5 통합 시연 통과). 다음 진입 — **A9 electron-client** (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts).
 
 총 ~12 에이전트 세션 + 사용자 검수 시간 ~5시간.
 
@@ -88,7 +88,7 @@ A5 clickbait ✅ (외부 서비스) — DoRA wrap. **(v13 라운드)** 1차 defa
 A6 interest-bayesian ✅ — atomic UPSERT, propagation (env flag default false), active day daily decay, 14-day boost 만료
 
 A7 leaf-lifecycle + traversal ✅ (2026-05-17) — A6 (state) + A3 (graph) 의존. trace operation 4 → 5 (merge 신규) + `INTEREST_PROPAGATION_ENABLED=true` 토글 완료. 7-commit PR-stack + Codex 3 라운드 23 fix
-A8 recommendation ✅ 본문 (2026-05-17) — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존. 4-commit local PR-stack + R1 self-review fix. cold_start orchestrator + 첫 trace 생성 hook (A7 #6 plan TBD 완성). R2 Codex 재감사 + R3 통합 시연 별도 세션
+A8 recommendation ✅ 시연 검증 (2026-05-17) — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존. 7-commit PR-stack + Codex 3 라운드 audit fix + 실 GPT-5.5 통합 시연. cold_start orchestrator + 첫 trace 생성 hook (A7 #6 plan TBD 완성). P2-23 functional index PostgreSQL 16 검증 해소
 
 A9 electron-client ⬜ — client/src/generated/api.ts (A2 OpenAPI codegen)
 A10 admin-console ⬜ — admin-console/src/generated/api.ts (A2 OpenAPI codegen). `system_config` UI 갱신 책임 (A6 read-only loader 와 분담)

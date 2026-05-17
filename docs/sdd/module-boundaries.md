@@ -27,49 +27,84 @@
 
 ### TraversalEngine
 
-`UserCSOTraversal` trace의 운영 (extend/retract/split/archive). 자세히는 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md).
+`UserCSOTraversal` trace의 5 operation (extend/retract/split/archive/**merge**). A7 (2026-05-17, decisions.md §12) 가 merge 신규 도입. 자세히는 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md).
+
+**구현체**: `DefaultTraversalEngine` (`backend/app/traversal/default.py`). 단일 Protocol (write + read 통합) — plan §12 결정 #12 옵션 A.
 
 ```python
 # app/traversal/protocol.py
 class TraversalEngine(Protocol):
+    # --- write (mutation) ---
+
     async def ingest_event(
         self,
-        user: User,
-        event: UserEvent,
+        user_id: UUID,
+        active_day_counter: int,
+        cso_topic_ids: list[UUID],
     ) -> TraversalDelta:
-        """이벤트 1건을 받아 매칭되는 trace 업데이트 또는 새 trace 생성.
-        반환: 어떤 operation(extend/retract/split/none)이 일어났는지의 델타.
+        """A6 ingest_event_atomic hook. 매칭 trace 발견 시 last_activity 갱신,
+        없으면 cold-start 새 trace 생성. TraversalDelta = noop/extend/new_trace/...
         """
         ...
 
     async def evaluate_extend(
-        self,
-        trace: UserCSOTraversal,
-        candidate_child_cso_id: UUID,
+        self, trace_id: UUID, candidate_child_cso_id: UUID
     ) -> bool:
         """자식 노드 인터랙션 임계 충족 시 LLM 검증으로 extend 결정."""
         ...
 
-    async def evaluate_retract(
-        self,
-        trace: UserCSOTraversal,
-    ) -> RetractPlan | None:
+    async def evaluate_retract(self, trace_id: UUID) -> RetractPlan | None:
         """말단 노드 점수 미달 + idle 임계 시 retract 계획 (leaf 재매핑 포함)."""
         ...
 
     async def evaluate_split(
-        self,
-        trace: UserCSOTraversal,
-        diverging_children: list[UUID],
+        self, trace_id: UUID, diverging_children: list[UUID]
     ) -> SplitPlan | None:
-        """동일 부모 산하 두 자식 동시 부상 시 split 계획 (leaf 분배 포함)."""
+        """path 말단(tail) 자식 2개 동시 부상 시 split. T 단축 + T'=분기점+B."""
         ...
 
-    async def archive_if_eligible(
-        self,
-        trace: UserCSOTraversal,
-    ) -> bool:
-        """stale 누적 90 active days 초과 시 archive."""
+    async def archive_if_eligible(self, trace_id: UUID) -> bool:
+        """stale 누적 90 active days 초과 시 archive (산하 leaf 동반)."""
+        ...
+
+    async def evaluate_merge_candidates(
+        self, user_id: UUID
+    ) -> list[MergePlan]:
+        """**(A7 신규)** Daily 18 UTC cron — 룰 trigger (path overlap ≥3 또는 proper
+        subset) + LLM trace_merge_verify + winner/loser 결정 + execute_merge."""
+        ...
+
+    async def create_new_trace(
+        self, user_id: UUID, active_day_counter: int, root_cso_topic_id: UUID
+    ) -> UUID:
+        """cold-start trace 생성 (A8 cold-start orchestrator 호출, plan TBD).
+        active_cap=10 초과 시 가장 idle stale archive 후 진행."""
+        ...
+
+    # --- read (A6 propagation + A8 추천 의존) ---
+
+    async def get_active_traces(self, user_id: UUID) -> list[UserCSOTraversal]:
+        """사용자의 모든 active trace. A6 propagation 이 path 위 조상 결정 시 호출."""
+        ...
+
+    async def get_current_topics(self, user_id: UUID) -> list[UUID]:
+        """모든 active trace 의 path 끝 노드 (current 카테고리, A8 core 슬롯 후보)."""
+        ...
+
+    async def get_adjacent_topics(self, user_id: UUID) -> list[UUID]:
+        """path 끝 노드의 1-hop 그래프 이웃 (adjacent 카테고리, A8 adjacent 슬롯 후보)."""
+        ...
+
+    async def get_descendant_leaves(
+        self, trace_id: UUID
+    ) -> list[DynamicLeafTopic]:
+        """trace.path 산하 cso_topic 매핑 leaf (active+emerging, merged/archived 제외)."""
+        ...
+
+    async def get_emerging_leaves(
+        self, user_id: UUID
+    ) -> list[DynamicLeafTopic]:
+        """사용자의 모든 emerging leaf (A8 core 5 중 1 emerging quota 후보)."""
         ...
 ```
 

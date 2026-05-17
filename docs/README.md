@@ -34,9 +34,9 @@
 - **A5. clickbait** ✅ — 사용자 제공 DoRA 모듈 wrap, ClickbaitResult 저장 (FR-30~34). **(v13 라운드)** 1차 시연 default 비활성 — 사용자가 News 소스 명시 활성화 시만 호출
 - **A6. interest-bayesian** ✅ — 행동 로그 API, Beta-Bernoulli atomic UPSERT (INSERT ON CONFLICT DO UPDATE, partial UNIQUE 3종), active day 기반 시간 감쇠 (GREATEST floor), `system_config` DB 시드 (interest_params + event_weights JSONB, A6 read-only + A10 admin UI 분담), 9 endpoint + 6 신규 테이블 + alembic 0004 + decay daily cron 18 UTC + EventBuffer 5초 batch flush + Lua atomic dwell cap + 14-day boost 만료 + payload-hash idempotency 200/409 + not-interested 하이브리드 정렬 2 + 207 Multi-Status batch (FR-12~20). [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) — Codex 2 라운드 audit fix 12건 + 통합 시연 검증
 
-### Phase 2 — 추천 핵심 (Phase 1 후) — **다음 작업**
-- **A7. leaf-lifecycle** — `LifecycleEvaluator` 추상 + D 하이브리드 구현, LLM 프롬프트, `topic_lifecycle.toml` (FR-14~16). A6 의 INTEREST_PROPAGATION_ENABLED toggle 활성
-- **A8. recommendation** — core/adjacent/discovery 후보 생성, fallback, Cold-start LLM, 랭킹 (FR-35~45, FR-26)
+### Phase 2 — 추천 핵심 (Phase 1 후)
+- **A7. leaf-lifecycle + traversal** ✅ — `LifecycleEvaluator` D 하이브리드 + `TraversalEngine` 5 operation (extend/retract/split/archive/**merge** 신규) + 3단계 강등 (active→stale→retract→archive) + Strict 검증 (confidence ≥0.6 + supporting ≥3 + trace_anchor + label dedup) + LLM 5 프롬프트 (identify_emerging/evaluate_merges/retract_reposition/split_dispatch/trace_merge_verify) + `topic_lifecycle.toml` + INTEREST_PROPAGATION_ENABLED=true 토글 (FR-14~16). alembic 0005 (UserCSOTraversal.merged_into_trace_id + ck_collection_job_type P2-21 해소) + 47 unit test + Codex 3 라운드 audit 23건 fix. 7-commit PR-stack (2026-05-17)
+- **A8. recommendation** — core/adjacent/discovery 후보 생성, fallback, Cold-start LLM, 랭킹 (FR-35~45, FR-26) — **다음 작업**
 
 ### Phase 3 — UI (Phase 2 후 병렬)
 - **A9. electron-client** — UI-01~05, API 연동, safeStorage 토큰 관리, 한국어 i18n

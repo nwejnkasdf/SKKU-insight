@@ -36,7 +36,7 @@ Phase 0b (2 세션 병렬): A3 CSO 임포트 ✅ (PR #?), A2 인증·동의·온
    ↓ 사용자 검수 30분
 Phase 1 (3 세션 병렬): A4 collection ✅ (PR #16), A5 clickbait ✅ (외부 PR #2), A6 interest-bayesian ✅ (PR #18 + #19)
    ↓ 사용자 검수 + OpenAPI 갱신 확인 60분
-Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ⬜ → A8 recommendation ⬜
+Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ⬜
    ↓ 사용자 검수 + 시드 페르소나로 end-to-end 90분
 Phase 3 (2 세션 병렬): A9 electron-client ⬜ (codegen api.ts import), A10 admin-console ⬜
    ↓ 사용자 검수 + 시연 리허설 60분
@@ -44,7 +44,7 @@ Phase 4 (2 세션 병렬): A11 test-ci ⬜, A12 demo-seed ⬜
    ↓ 최종 검수 + 발표 자료
 ```
 
-**현재 위치**: Phase 1 완료 (2026-05-17). 다음 진입 Phase 2 — **A7 leaf-lifecycle + traversal** (D 하이브리드 + `extend/retract/split/archive` + 3단계 강등 + `INTEREST_PROPAGATION_ENABLED=true` 토글).
+**현재 위치**: Phase 2 A7 완료 (2026-05-17). 다음 진입 Phase 2 후반 — **A8 recommendation** (core/adjacent/discovery 3 슬롯 + Cold-start LLM + first trace 생성 + emerging quota).
 
 총 ~12 에이전트 세션 + 사용자 검수 시간 ~5시간.
 
@@ -87,7 +87,7 @@ A4 collection ✅ — **(v13 라운드)** LLMProvider.search_with_tools + Docume
 A5 clickbait ✅ (외부 서비스) — DoRA wrap. **(v13 라운드)** 1차 default 비활성, 사용자 News 활성화 시만 호출
 A6 interest-bayesian ✅ — atomic UPSERT, propagation (env flag default false), active day daily decay, 14-day boost 만료
 
-A7 leaf-lifecycle + traversal ⬜ — A6 (state) + A3 (graph) 의존. `INTEREST_PROPAGATION_ENABLED=true` 토글 작업 포함
+A7 leaf-lifecycle + traversal ✅ (2026-05-17) — A6 (state) + A3 (graph) 의존. trace operation 4 → 5 (merge 신규) + `INTEREST_PROPAGATION_ENABLED=true` 토글 완료. 7-commit PR-stack + Codex 3 라운드 23 fix
 A8 recommendation ⬜ — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존
 
 A9 electron-client ⬜ — client/src/generated/api.ts (A2 OpenAPI codegen)
@@ -144,7 +144,10 @@ CI에서 PR마다 실행:
 | ~~`naver_cleanup_job`~~ | ~~`NAVER_CLEANUP_CRON`~~ | A2 stub + scheduler 등록 | **(v13 라운드 폐기, 2026-05-11)** decision-backlog P1-6 무효 마킹. NaverBS4 어댑터 폐기로 cleanup 대상 0건. A4 는 등록 제거 또는 비활성. |
 | `collection_job` | `COLLECTION_CRON` | A2 stub + scheduler 등록 | **A4** |
 | `interest_decay_job` | `INTEREST_DECAY_CRON` | A2 stub + scheduler 등록 | **A6** |
-| `merge_evaluation_job` | `MERGE_EVALUATION_CRON` | A2 stub + scheduler 등록 | **A7** |
+| `merge_evaluation_job` | `MERGE_EVALUATION_CRON` | A2 stub + scheduler 등록 | A7 ✅ |
+| `leaf_lifecycle_job` (A7 신규) | `LEAF_LIFECYCLE_CRON="30 3 * * *"` | A7 collection 직후 hook | A7 ✅ |
+| `trace_merge_job` (A7 신규) | `TRACE_MERGE_CRON="0 18 * * *"` | A7 daily trace merge LLM | A7 ✅ |
+| `daily_lifecycle_evaluation_job` (A7 신규) | `TRACE_MERGE_CRON` (decay 와 동시각) | A7 trace 2/3단계 강등 + leaf 룰 강등 통합 | A7 ✅ |
 
 사유: 본 결정의 5겹 방어 §4(strict type)와 정합. 단일 진입점 `backend/app/scheduler.py`이 모든 cron 등록을 통합 관리. 후속 에이전트는 자기 job의 함수 본문만 채움 → cron 등록·env 소비 보일러플레이트 중복 0.
 

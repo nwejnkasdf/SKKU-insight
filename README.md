@@ -52,7 +52,8 @@
 | **v13 라운드 — A4 Topic-driven Pivot** | ✅ docs 정합 (2026-05-11) + 코드 구현 + Codex 3-라운드 audit fix 26건 + 통합 시연 검증 ([PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16), 2026-05-17). 6 source 어댑터 폐기 → LLM tool-use 검색 단일 경로 (GPT-5.5 + Responses API web_search). 26 documents inserted, NFR-25 self-summary 100% 준수. [`docs/decisions.md §10`](docs/decisions.md) |
 | **Phase 1 — A6 interest-bayesian** | ✅ 완료 ([PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18), 2026-05-17) — alembic 0004 (6 신규 테이블 + 12 partial UNIQUE + system_config 2 row seed) + 9 endpoint + decay daily cron + onboarding bootstrap 협업 + Codex 2 라운드 감사 12건 fix + 통합 시연 검증 (idempotency 200/409, batch 207, C-03 batch race fix 정합) |
 | Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian ✅ | 🟢 Phase 1 완료 |
-| Phase 2 — A7 leaf-traversal / A8 recommendation | 🟡 A7 대기 |
+| **Phase 2 — A7 leaf-lifecycle + traversal** | ✅ 완료 (2026-05-17) — 7-commit PR-stack + Codex 3 라운드 23건 fix. trace operation 4 → 5 (merge 신규) + D 하이브리드 LifecycleEvaluator + Strict 검증 + INTEREST_PROPAGATION_ENABLED=true. alembic 0005 (UserCSOTraversal.merged_into_trace_id + ck_collection_job_type 갱신 P2-21 해소) + app/traversal 5 + app/leaf_lifecycle 6 + worker/jobs 3 신규 + 47 unit test |
+| Phase 2 — A8 recommendation | 🟡 A8 대기 |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
 | 시연 리허설 + 발표 자료 | ⬜ |
@@ -173,4 +174,4 @@ docs/
 
 ---
 
-**다음 액션**: A7 leaf-lifecycle + traversal 본문 구현 ([`prompts/06-A7-leaf-lifecycle.md`](prompts/06-A7-leaf-lifecycle.md), 신규 작성 필요) — D 하이브리드 LifecycleEvaluator + TraversalEngine (extend/retract/split/archive) + 3단계 강등 (active→stale→retract→archive) + leaf 재배치 LLM + INTEREST_PROPAGATION_ENABLED=true 토글. A6 (UserInterestState + UserCSOTraversal) 의존 만족돼 진입 가능. A7 완료 후 A8 (recommendation: core/adjacent/discovery + cold-start + first trace 생성) 순. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.
+**다음 액션**: A8 recommendation 본문 구현 ([`prompts/07-A8-recommendation.md`](prompts/07-A8-recommendation.md)) — core/adjacent/discovery 3 슬롯 (5/3/2) + Cold-start LLM + first trace 생성 (A6 ingest_event_atomic hook 완성) + emerging quota (core 5 중 1 emerging leaf). A7 완료로 `TraversalEngine.get_active_traces/get_current_topics/get_adjacent_topics/get_descendant_leaves/get_emerging_leaves` 5 read API 안정 — A8 가 직접 호출. INTEREST_PROPAGATION_ENABLED=true 활성, 1-hop 0.5 trace 조상 propagation 동작. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.

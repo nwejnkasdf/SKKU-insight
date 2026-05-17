@@ -1,4 +1,4 @@
-"""rq-scheduler 부트스트랩 — 3 cron job 등록.
+"""rq-scheduler 부트스트랩 — 6 cron job 등록.
 
 본 모듈은 `python -m app.scheduler` 로 one-shot 실행 (docker-compose worker 컨테이너의
 entrypoint 직전 또는 Makefile `register-cron` 타깃에서). 이미 등록된 cron 은 skip
@@ -7,7 +7,10 @@ entrypoint 직전 또는 Makefile `register-cron` 타깃에서). 이미 등록�
 cron 등록 ownership (docs/sdd/agent-orchestration.md §5):
 - collection_job: A2 stub → A4 본문 (v13 라운드 — LLM tool-use)
 - interest_decay_job: A2 stub → A6 본문
-- merge_evaluation_job: A2 stub → A7 본문
+- merge_evaluation_job: A2 stub → A7 본문 (주 1회 leaf 병합 LLM)
+- leaf_lifecycle_job (A7 신규): collection 직후 30분 (decision #14) — emerging 식별 LLM
+- trace_merge_job (A7 신규): daily 18 UTC (decision #23) — trace 병합 LLM
+- daily_lifecycle_evaluation_job (A7 신규): daily 18 UTC (decision #7/#13) — trace 강등 + leaf 강등 통합
 
 cold_start_job 과 account_deletion_job 은 event-driven (cron 아님) → enqueue 만, 등록 X.
 
@@ -60,6 +63,30 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
         "func": "app.worker.jobs.merge_evaluation.merge_evaluation_job",
         "queue": "merge_evaluation",
         "timeout": 3600,
+    },
+    # === A7 신규 (2026-05-17) ===
+    {
+        "id": "leaf_lifecycle_job",
+        "cron_attr": "LEAF_LIFECYCLE_CRON",
+        "func": "app.worker.jobs.leaf_lifecycle.leaf_lifecycle_job",
+        "queue": "default",
+        "timeout": 3600,
+    },
+    {
+        "id": "trace_merge_job",
+        "cron_attr": "TRACE_MERGE_CRON",
+        "func": "app.worker.jobs.trace_merge.trace_merge_job",
+        "queue": "default",
+        "timeout": 3600,
+    },
+    {
+        # daily_lifecycle_evaluation 도 TRACE_MERGE_CRON 와 같은 시각 (18 UTC).
+        # user-mutex 가 분리되어 동시 안전 (trace_merge_lock vs leaf level locks).
+        "id": "daily_lifecycle_evaluation_job",
+        "cron_attr": "TRACE_MERGE_CRON",
+        "func": "app.worker.jobs.daily_lifecycle_evaluation.daily_lifecycle_evaluation_job",
+        "queue": "default",
+        "timeout": 1800,
     },
 ]
 

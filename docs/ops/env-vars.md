@@ -112,7 +112,7 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `INTEREST_PROPAGATION_ENABLED` | `false` | A7 (leaf-lifecycle + traversal) 도입 후 `true`. false 일 때 ingest_event 는 직접 토픽 + 부모 cso_topic_id 만 갱신, trace path 조상 propagation skip. |
+| `INTEREST_PROPAGATION_ENABLED` | `true` | **(A7, 2026-05-17 머지로 default true)** trace path 조상 1-hop 0.5 propagation 활성. false 로 명시 토글 시 ingest_event 는 직접 토픽 + 부모 cso_topic_id 만 갱신. |
 | `INTEREST_BOOST_EXPIRY_ACTIVE_DAYS` | `14` | onboarding boost (cluster +1.0 / 1-hop child +0.5) 가 자연 만료되는 active day. decay cron 이 `user.active_day_counter - boost_applied_at_active_day >= N` row 의 alpha 에서 boost 분 차감 + 컬럼 NULL 화. |
 | `INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS` | `10` | EventBuffer flush 시 per-user mutex TTL (초). flush 후 즉시 release. traversal_lock 과 별도. |
 | `DWELL_TICK_CAP_TTL_SECONDS` | `3600` | dwell_tick Redis 카운터 TTL (초). 문서당 cap 4회 도달 후 1시간 자연 소멸. |
@@ -128,6 +128,7 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
+| `LEAF_LIFECYCLE_CRON` | `30 3 * * *` | A7 신규 (결정 #14). collection cron 직후 ~30분 시점에 사용자별 `identify_emerging` LLM 호출 cron. COLLECTION_CRON 변경 시 본 cron 도 +30분 으로 동기화. |
 | `LEAF_EMERGING_MAX_PER_DAY` | `3` | LLM `identify_emerging` 가 일일 사용자별 채택하는 최대 emerging 후보 수. confidence 내림차순 상위 N. |
 | `LEAF_EMERGING_CONFIDENCE_MIN` | `0.6` | Strict 검증 — candidate confidence 미달 자동 거부. |
 | `LEAF_EMERGING_SUPPORTING_DOCUMENTS_MIN` | `3` | Strict 검증 — supporting_document_ids 길이 미달 자동 거부. |
@@ -312,7 +313,7 @@ TRAVERSAL_USER_LOCK_TTL_SECONDS=10
 CONSENT_CACHE_TTL_SECONDS=60
 
 # === A6 Interest Bayesian (2026-05-17) ===
-INTEREST_PROPAGATION_ENABLED=false
+INTEREST_PROPAGATION_ENABLED=true
 INTEREST_BOOST_EXPIRY_ACTIVE_DAYS=14
 INTEREST_BATCH_FLUSH_USER_LOCK_TTL_SECONDS=10
 DWELL_TICK_CAP_TTL_SECONDS=3600

@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     # A6 daily decay (interest-bayesian.md §2 + decision: lazy 미사용, cron only).
     # 18:00 UTC = 03:00 KST — 사용자 활동 적은 시간대.
     INTEREST_DECAY_CRON: str = "0 18 * * *"
+    # A7 신규 (decisions.md §12 결정 #14): collection cron 직후 30분 시점에 emerging
+    # 식별 LLM 호출 (사용자별). COLLECTION_CRON=0 3 * * * 면 본 cron = 30 3 * * *.
+    LEAF_LIFECYCLE_CRON: str = "30 3 * * *"
     NAVER_CLEANUP_CRON: str = "0 17 * * *"  # (v13 라운드 폐기, 2026-05-11) decision-backlog P1-6 무효 — NaverBS4 어댑터 폐기. env 보존만, scheduler 등록 제거.
 
     # === Concurrency guards (sdd/concurrency.md) ===
@@ -123,9 +126,9 @@ class Settings(BaseSettings):
     CONSENT_CACHE_TTL_SECONDS: int = 60
 
     # === A6 Interest Bayesian (algorithms/interest-bayesian.md) ===
-    # 1-hop trace path 조상 propagation. A7 (leaf-lifecycle + traversal) 도입 후 true.
-    # false 일 때 ingest_event 는 단일 노드 (부모 cso_topic_id) + 직접 지정 토픽만 갱신.
-    INTEREST_PROPAGATION_ENABLED: bool = False
+    # 1-hop trace path 조상 propagation. A7 본문 PR-3 (2026-05-17) 머지로 default true.
+    # false 로 명시 토글 시 ingest_event 는 단일 노드 (부모 cso_topic_id) + 직접 지정 토픽만 갱신.
+    INTEREST_PROPAGATION_ENABLED: bool = True
     # Onboarding 직후 boost (alpha_prior 추가) 가 만료되는 active_day 한도.
     # decay daily cron 이 `user.active_day_counter - boost_applied_at_active_day >= N` row
     # 의 boost 분 (cluster +1.0, 1-hop child +0.5) 을 alpha 에서 차감 + 컬럼 NULL 화.

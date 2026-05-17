@@ -4,7 +4,13 @@
 
 > **Active day 기반 시간 단위**: 본 문서의 모든 시간 감쇠는 wallclock 일수가 아니라 **active day**(사용자 인터랙션 1+건 있는 날의 단조증가 카운터)를 단위로 한다. 사용자가 시험기간 등으로 잠수한 동안에는 감쇠가 적용되지 않아 자연스러운 reactivation이 가능하다. 자세히는 [`cso-topic-traversal.md §5`](cso-topic-traversal.md).
 
-> **Trace propagation**: leaf에 대한 인터랙션은 leaf의 부모 cso_topic_id에 직접 가산되고, 동시에 [`cso-topic-traversal.md §4`](cso-topic-traversal.md)의 propagation 룰에 따라 trace 활성 path 위 조상 노드 점수에도 1-hop 0.5 감쇠로 가산된다.
+> **Trace propagation (A6, 2026-05-17)**: leaf에 대한 인터랙션은 leaf의 부모 cso_topic_id에 직접 가산되고, 동시에 [`cso-topic-traversal.md §4`](cso-topic-traversal.md)의 propagation 룰에 따라 trace 활성 path 위 조상 노드 점수에도 1-hop 0.5 감쇠로 가산된다. **단 본 propagation 은 `INTEREST_PROPAGATION_ENABLED` env 토글로 default false** — A6 머지 단계에서 A7 (traversal trace) 가 아직 미완이라 활성 path 정의 불가. A7 머지 후 env true 로 토글. flag false 시 self-only (leaf + 부모 cso_topic_id) 만 갱신. A6 결정 매트릭스 #5 (decisions.md §11).
+
+> **Atomic UPSERT (A6 round 1 C-01 fix)**: 사후 업데이트는 **단일 SQL `INSERT ... ON CONFLICT (cols) WHERE pred DO UPDATE`** 로 구현. UPDATE→INSERT 2-step 시 동시 INSERT race 가 한쪽 손실을 일으키므로. `user_interest_state` 의 12 partial UNIQUE 별 `ON CONFLICT (user_id, cso_topic_id) WHERE leaf_topic_id IS NULL` 식 명시.
+
+> **Decay alpha floor (A6 round 1 S-03 fix)**: decay 결과가 alpha_prior 아래로 떨어지지 않도록 `GREATEST(:alpha_prior, computed)` 적용. child row (+0.5 propagation boost) 가 음수가 되어 베이지안 prior 무효화하는 케이스 차단.
+
+> **Dwell tick cap (A6 round 1 S-02 fix)**: per-document day 단위 cap 은 **Redis Lua atomic `INCR + EXPIRE`** (`RedisKey.dwell_tick_count`). SQL UPSERT 보다 가볍고 race-free. TTL 자연 만료.
 
 ## 개요
 
@@ -161,19 +167,12 @@ async def ingest_event_atomic(event: UserEvent, weights: Weights, params: Intere
     # cap에 걸려 베이지안 갱신이 무시되더라도 active_day는 이미 카운트되어 있음.
 
     if event.event_type == "dwell_tick":
-        # atomic check-and-increment with cap
-        ok = await session.execute(
-            text("""
-                INSERT INTO dwell_tick_count (user_id, document_id, count)
-                VALUES (:user_id, :doc_id, 1)
-                ON CONFLICT (user_id, document_id)
-                DO UPDATE SET count = dwell_tick_count.count + 1
-                WHERE dwell_tick_count.count < :cap
-                RETURNING count
-            """),
-            {"user_id": event.user_id, "doc_id": event.document_id, "cap": weights.caps.dwell_tick_max_per_document},
-        )
-        if ok.first() is None:
+        # A6 round 1 S-02 fix: Redis Lua atomic INCR + EXPIRE (RedisKey.dwell_tick_count).
+        # SQL dwell_tick_count 테이블 의사 코드는 폐기 — TTL 자연 만료가 더 가볍고 race-free.
+        # Lua script: `local v = redis.call('INCR', KEYS[1]); redis.call('EXPIRE', KEYS[1], ARGV[1]); return v`
+        key = RedisKey.dwell_tick_count(event.user_id, event.document_id, today_yyyymmdd)
+        cur = int(await redis.eval(_DWELL_INCR_LUA, 1, key, settings.DWELL_TICK_CAP_TTL_SECONDS))
+        if cur > weights.caps.dwell_tick_max_per_document:
             return  # cap 도달, 베이지안 갱신 skip (단 active_day는 이미 +1 됨)
 
     topic_distribution = await resolve_topic_distribution(event)  # sum to 1
@@ -229,8 +228,11 @@ def daily_decay(params: InterestParams, state_store: StateStore) -> None:
 
 
 def bucket_for(state: UserInterestState, params: InterestParams) -> Bucket:
-    long_score = state.long_alpha / (state.long_alpha + state.long_beta)
-    short_score = state.short_alpha / (state.short_alpha + state.short_beta)
+    # A6: alpha + beta == 0 race 방어 — atomic upsert 의 SCORE 산식은 NULLIF 사용, 본 helper 도 동일.
+    long_denom = state.long_alpha + state.long_beta
+    short_denom = state.short_alpha + state.short_beta
+    long_score = state.long_alpha / long_denom if long_denom > 0 else 0.0
+    short_score = state.short_alpha / short_denom if short_denom > 0 else 0.0
     if long_score >= params.bucket_high_long and short_score >= params.bucket_high_short:
         return Bucket.HIGH
     if long_score >= params.bucket_medium or short_score >= params.bucket_medium:
@@ -240,4 +242,4 @@ def bucket_for(state: UserInterestState, params: InterestParams) -> Bucket:
     return Bucket.NEUTRAL
 ```
 
-<!-- TODO: A6가 토픽 분배 시 leaf_topic이 없는 이벤트 처리 정책 확정 -->
+> **P1-4 해소 (A6, 2026-05-17)**: 이전 TODO ("leaf_topic 없는 이벤트 토픽 분배 정책") 는 [`decision-backlog.md` P1-4](../decision-backlog.md) default 로 확정 — 이벤트가 가리키는 Document 의 모든 `(cso_topic, leaf_topic)` 매핑 confidence 정규화 분배 + 명시 이벤트 (`not_interested` 등) 는 단일 100% 분배. 구현 = `app/interest/topic_distribution.py:resolve_topic_distribution`.

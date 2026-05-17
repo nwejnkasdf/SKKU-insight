@@ -30,7 +30,7 @@
 | 결정 | 값 |
 |---|---|
 | **수집 모델** | `LLMProvider.search_with_tools()` 단일 경로. user trace JSON 입력 → LLM 자율 query 결정 → web 검색 도구 호출 |
-| **LLM provider** | `LLM_PROVIDER` env toggle (MockProvider default + OpenAI/Anthropic 정식) |
+| **LLM provider** | `LLM_PROVIDER` env toggle. **v13 round 2 (2026-05-16) 결정**: `MockProvider` (default, CI/시연 fixture) + **`OpenAIAPIProvider` (정식, GPT-5.5 + Responses API + `web_search` tool)** 만 지원. Anthropic/OpenRouter/CodexOAuth 는 `search_with_tools` → `NotImplementedError`. lifespan `_validate_llm_provider` 가드 (`_SUPPORTED_A4_PROVIDERS = {"mock", "openai"}`) 가 boot 시 미지원 provider 차단 (S-08 fix) |
 | **Query 구성** | LLM 이 trace JSON 통째 받아 스스로 query 결정 (agent-driven, prompt instruction 만) |
 | **Source 테이블** | sentinel 1행 `llm_search` 추가 + 기존 `cold_start_pseudo`. publisher 정보는 `Document.raw` JSONB |
 | **CollectionJob 단위** | (user × source) — source 가 sentinel `llm_search` 단일이라 실효 user 별 1건/회 |
@@ -75,9 +75,9 @@
       user_id: str | None = None,
   ) -> list[SearchResult]: ...
   ```
-- `mock.py` — fixture 기반 deterministic 응답 (기존 `prompt_hash → fixture.json` 패턴 확장)
-- `openai.py` — Responses API tool-use 패턴
-- `anthropic.py` — Messages API web_search tool
+- `mock.py` — fixture 기반 deterministic 응답 (기존 `prompt_hash → fixture.json` 패턴 확장). `hash_prompt_search()` 가 `SYSTEM_PROMPT_VERSION` + `SYSTEM_PROMPT_TEMPLATE` 본문 SHA256 둘 다 포함 → 본문 1자 변경 시 fixture 자동 invalidate (R2-N01 fix)
+- `openai.py` — Responses API + `web_search` tool. GPT-5.5 (reasoning 파라미터 OpenAI default 위임). 12 output items chain (5 reasoning + 5 web_search_call + 1 message). `response.json()` ValueError 도 `ProviderError` wrap (R2-S03 fix)
+- ~~`anthropic.py` — Messages API web_search tool~~ — **v13 round 2 폐기**. `search_with_tools` 미구현, `NotImplementedError` 만. boot 시 lifespan 가드가 `LLM_PROVIDER=anthropic` 차단
 
 ### 4. Collection 모듈 신규 (`backend/app/collection/`)
 - `llm_search.py` — LLM tool-use wrapper. trace+leaf 입력 → SearchResult list

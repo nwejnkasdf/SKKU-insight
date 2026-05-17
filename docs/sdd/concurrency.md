@@ -343,9 +343,14 @@ A2/A6/A7/A8 에이전트가 자기 모듈 코드 작성 시 본 표를 통과해
 |---|---|
 | `GET /recommendations/dashboard` | single-flight (§2) + consent cache (§7) |
 | `POST /events` | event batch buffer (§6) — save/hide/not_interested 제외 즉시 |
-| `POST /events` (저장/숨김/관심없음) | atomic SQL update (§4.1) + recommendation cache invalidate |
+| `POST /events` (저장/숨김/관심없음) | atomic SQL UPSERT 단일 SQL (§4.1) + recommendation cache invalidate `recommendation:{user_id}` |
+| `POST /events` (idempotency, A6) | payload-hash + `client_request_id` (200 match + 기존 row / 409 mismatch `EVENT_DUPLICATE`). Redis `event_duplicate_cache` (`RedisKey.event_duplicate_cache`) + DB UserEvent ON CONFLICT DO NOTHING returning event_id 패턴 (caller None-check) |
+| `POST /events` (dwell_tick cap, A6) | Redis Lua atomic `INCR + EXPIRE` per-document day (`RedisKey.dwell_tick_count`, cap=4). TTL 자연 만료 |
+| `POST /events/batch` (A6) | 207 Multi-Status (entry 단위 부분 성공 허용). max 50 entries. `pg_insert(UserEvent).on_conflict_do_nothing(...)` 패턴으로 batch 안 앞선 entry 보존 (round 2 C-03 fix) |
 | `TraversalEngine.ingest_event` | user-level mutex (§3) |
-| `interest-bayesian` posterior update | atomic SQL (§4.1) |
+| `interest-bayesian` posterior update | atomic SQL UPSERT 단일 SQL `INSERT ... ON CONFLICT (cols) WHERE pred DO UPDATE` (§4.1) — A6 round 1 C-01 fix |
+| `interest_decay_job` daily cron (A6) | Redis lock `RedisKey.interest_decay_lock` (`lock:interest_decay:{date}`, 18 UTC = 03 KST). GREATEST(:alpha_prior, computed) floor (round 1 S-03 fix). 14-day boost 만료 daily 차감 + `boost_applied_at_active_day` NULL 원복 |
+| `system_config` 부팅 (A6) | lifespan 1회 로드 + Redis `RedisKey.system_config_cache` (TTL 300s). A6 read-only — 갱신 책임 A10 admin UI |
 | Active day counter 갱신 | atomic SQL (§4.2) |
 | 모든 LLM 호출 | semaphore (§5), `user_id` 전달 필수 |
 | 일일 수집 잡 트리거 | jitter (§8) + user-level lock `RedisKey.collection_lock(user_id)` (동일 사용자 동시 1건 강제) |

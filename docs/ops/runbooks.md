@@ -163,9 +163,11 @@ docker compose up -d postgres redis
 make migrate
 make import-cso              # CSO 임포트
 make create-admin            # admin 1
-make seed                    # 5+ 페르소나 + 14일 인터랙션
-docker compose up -d         # api/worker/clickbait/admin-console 모두 기동
-cd client && npm start       # Electron 앱
+# make seed                  # A12 ⬜ 미구현 — Makefile 타깃 없음, backend/scripts/seed_personas.py 도 부재.
+                             # 1차 시연 (~A6 단계) 은 수동 데이터 삽입 또는 signup → onboarding → /events 호출로 대체.
+                             # A12 머지 후 본 명령 활성 예정 — 5+ 페르소나 + 14일 인터랙션.
+docker compose up -d         # api/worker/admin-console 기동 (clickbait-detector 는 default 비활성)
+cd client && npm start       # Electron 앱 (A9 ⬜ 미구현 — A9 머지 후)
 ```
 
 소요: 약 5–10분 (CSO 임포트가 가장 길다 — 1차 다운로드 1분 + insert ~3분).

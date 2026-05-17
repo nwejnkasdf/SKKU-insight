@@ -154,16 +154,17 @@ class ErrorResponse(BaseModel):
 
 | 상태 | 사용 |
 |---|---|
-| 200 | 정상 |
+| 200 | 정상 (A6 idempotency match — 기존 row 반환 포함) |
 | 201 | 자원 생성 (signup, INSERT 후) |
 | 202 | 비동기 처리 시작 (cold-start, reprocess) |
 | 204 | 본문 없는 성공 (DELETE) |
+| 207 | **Multi-Status** — batch 부분 성공 (A6: `POST /events/batch` 응답. 본문 `{items: [{event_id, accepted, error_code}], total_accepted}`. entry 단위 consent gate / idempotency mismatch 등 부분 실패 허용) |
 | 400 | 잘못된 요청 형식 |
 | 401 | 인증 실패 (토큰 없음/만료/위조) |
 | 403 | 권한 부족 (admin role, 동의 비활성) |
 | 404 | 자원 없음 |
-| 409 | 충돌 (중복 가입, 이미 진행 중) |
-| 422 | 의미 검증 실패 (Pydantic validation) |
+| 409 | 충돌 (중복 가입, 이미 진행 중, A6 idempotency mismatch `EVENT_DUPLICATE`) |
+| 422 | 의미 검증 실패 (Pydantic validation, A6 `/events/batch` max 50 entries 초과) |
 | 429 | rate limit (Retry-After 헤더) |
 | 503 | 외부 의존(LLM, clickbait) 일시 실패 |
 

@@ -8,22 +8,22 @@
 
 ## 베이스
 
-- 기본 경로: `/interest` 및 `/events`
-- 인증: 모두 access_token + 동의 활성
+- 기본 경로: 3 prefix 병용 — `/interest`, `/events`, `/feedback`. (라우터는 baseless 등록, full path 가 권위 표기)
+- 인증: 모두 access_token + 동의 활성 (`DELETE /feedback/saved/{document_id}` 만 동의 비활성에도 허용 — 본인 데이터 정리 권한)
 
-## 엔드포인트 표
+## 엔드포인트 표 (A6 9 endpoint)
 
-| Method | Path | 설명 | 비고 |
+| Method | Full path | 설명 | 비고 |
 |---|---|---|---|
-| GET | `/interest/state` | 자기 관심 상태 조회 | **NFR-04: 일반 사용자는 점수 노출 X. 응답에서 long_score/short_score는 마스킹** |
-| POST | `/events` | 행동 로그 1건 기록 | click/dwell/save/hide/not_interested/...|
-| POST | `/events/batch` | 여러 이벤트 한 번에 | dwell tick 등 |
-| POST | `/feedback/save` | 저장 (UI 명시 액션) | SavedDocument 생성 + UserEvent + Bayesian 갱신 |
+| GET | `/interest/state` | 자기 관심 상태 조회 (max 50 leaf + bucket-sorted) | **NFR-04: 일반 사용자는 점수 노출 X. `long_score`/`short_score` 마스킹 (`score_tail=null`)** |
+| POST | `/events` | 행동 로그 1건 기록 | view/click/dwell_tick/open_external/save/hide/not_interested. payload-hash idempotency (match 200 + 기존 row, mismatch 409 `EVENT_DUPLICATE`) |
+| POST | `/events/batch` | 여러 이벤트 한 번에 (dwell tick 등) | **HTTP 207 Multi-Status**. max 50 entries. 부분 성공 허용 — entry 단위 `error_code` |
+| POST | `/feedback/save` | 저장 (UI 명시 액션) | SavedDocument 생성 + UserEvent + Bayesian 갱신 (즉시 atomic UPSERT) |
 | POST | `/feedback/hide` | 숨김 | HiddenDocument 생성 + Bayesian 갱신 |
-| POST | `/feedback/not-interested` | 관심 없음 | NotInterestedTopic 생성 + Bayesian 갱신 |
-| GET | `/feedback/saved` | 저장 목록 (UI-05) | |
-| GET | `/feedback/hidden` | 숨김 목록 (UI-05) | |
-| DELETE | `/feedback/saved/{document_id}` | 저장 해제 | |
+| POST | `/feedback/not-interested` | 관심 없음 | 하이브리드: Bayesian P1-4 분배 (`UserInterestState`) + `NotInterestedTopic` 최고 confidence 1건 INSERT |
+| GET | `/feedback/saved` | 저장 목록 (UI-05) | cursor pagination |
+| GET | `/feedback/hidden` | 숨김 목록 (UI-05) | cursor pagination |
+| DELETE | `/feedback/saved/{document_id}` | 저장 해제 | 동의 비활성에도 허용 |
 
 ## 스키마
 
@@ -48,12 +48,25 @@ class EventRequest(BaseModel):
     client_request_id: str        # idempotency
 
 class EventBatchRequest(BaseModel):
-    events: list[EventRequest]    # 최대 50
+    events: list[EventRequest] = Field(min_length=1, max_length=50)    # max 50 entries — 초과 시 422
 
 class EventResponse(BaseModel):
-    event_id: UUID
+    """POST /events 단건 응답 + POST /events/batch 의 entry 단위 응답.
+
+    207 batch 의 실패 entry 는 event_id=None + accepted=False + error_code 채움.
+    """
+    event_id: UUID | None         # 207 batch 실패 entry 에선 None
     accepted: bool
+    error_code: str | None = None # ErrorCode (예: EVENT_CONSENT_REQUIRED / EVENT_DUPLICATE / EVENT_INVALID_TARGET / EVENT_BUFFER_FULL). 성공 시 None
     server_received_at: datetime
+
+class BatchResponse(BaseModel):
+    """POST /events/batch 응답. HTTP 207 Multi-Status — entry 단위 부분 성공 허용.
+
+    예) 4건 중 3 accepted + 1 duplicate 시: total_accepted=3, items[3].error_code='EVENT_DUPLICATE'.
+    """
+    items: list[EventResponse]
+    total_accepted: int
 
 class InterestStateResponse(BaseModel):
     user_id: UUID

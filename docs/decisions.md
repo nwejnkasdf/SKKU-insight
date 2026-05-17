@@ -186,3 +186,75 @@
 | `api/collection.md` | 비즈니스 룰 갱신 |
 | `prompts/03-A4-collection.md` | 재작성 (pivot 명세) |
 | `AGENTS.md` / `README.md` / `docs/README.md` / `prompts/README.md` | A4 라인 동기화 |
+
+## 11. A6 라운드 — Interest-Bayesian (2026-05-17)
+
+본 라운드는 A6 interest-bayesian Phase 1 본문 구현과 Codex 2 라운드 감사 fix 를 SOR 에 박는다. [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) (merge `a0a3fbf`) + [PR #19](https://github.com/nwejnkasdf/SKKU-insight/pull/19) docs drift fix (`a2930cf`).
+
+### 결정 매트릭스 17건
+
+| 영역 | 결정 | 한 줄 근거 |
+|---|---|---|
+| Decay schedule | **daily cron only (18 UTC = 03 KST)**. on-demand decay 미사용 | atomic UPSERT 부담 최소화. 시간 단위가 active day 라 일 단위 충분 |
+| Dwell tick cap | **Redis Lua atomic INCR + EXPIRE** (`RedisKey.dwell_tick_count`). per-document day 단위 cap=4 | TTL 자연 만료. SQL UPSERT 보다 가볍고 race-free |
+| 14-day boost 만료 | **daily cron 차감** + `boost_applied_at_active_day: Integer NULL` 컬럼. 만료 시 prior 원복 | onboarding prior boost 가 영구화되지 않도록 |
+| Propagation 대상 | **cluster + 1-hop child (predecessor)**. trace 활성 path 위 조상 노드로 0.5 hop_decay | 1-hop 룰 일관. sibling 광역 오염 차단 |
+| Propagation feature flag | **`INTEREST_PROPAGATION_ENABLED` env, default false**. A7 trace 활성화 후 true 로 토글 | A7 미완 단계에서 활성 path 정의 불가. 일단 self-only |
+| Idempotency 정책 | **payload-hash + client_request_id**. match 시 200 + 기존 row, mismatch 시 409 `EVENT_DUPLICATE` | client retry safe. payload tamper 방어 |
+| Not-interested 정렬 | **하이브리드 2 source** — (a) Bayesian P1-4 분배 (`UserInterestState`) + (b) `NotInterestedTopic` 최고 confidence 1건 INSERT | 명시 + 암묵 신호 동시 활용 |
+| Cache invalidate | **`recommendation:{user_id}` 단일 키**. 토픽별 fanout 미사용 | A8 미완 단계. 단순 |
+| Active_day 갱신 | **5 endpoint** (POST `/events`, POST `/events/batch`, POST `/feedback/save`, POST `/feedback/hide`, POST `/feedback/not-interested`). GET 은 무 영향 | NFR-12 latency + active day 의미 보존 |
+| system_config 소유 | **A6 read-only loader + A10 admin UI**. A6 는 lifespan 부팅 시 1회 로드, 갱신 책임은 A10 | 운영 변경 흐름과 코드 모듈 책임 분리 |
+| Batch 응답 | **207 Multi-Status** + `{items: [{event_id, accepted, error_code}], total_accepted}`. 부분 성공 허용 | client 가 entry 단위 실패 가능 (consent gate, idempotency mismatch 등) |
+| Max events | **`/events/batch` max=50 entries per request**. 초과 시 422 | 단일 트랜잭션 안전. batch flush 5초 buffer 와 균형 |
+| `/interest/state` | **max 50 leaf + bucket-sorted**. NFR-04 마스킹 (`score_tail=null`) | client display 양 + privacy |
+| Atomic UPSERT | **단일 SQL `INSERT ... ON CONFLICT (cols) WHERE pred DO UPDATE`** (round 1 C-01 fix). UPDATE→INSERT 2-step lost update race 제거 | 12 partial UNIQUE 별 명시 |
+| UserEvent ON CONFLICT | **`pg_insert(UserEvent).on_conflict_do_nothing(...).returning(event_id)`** + caller None-check (round 2 C-03 fix). batch race 시 앞선 entry 보존 | 전체 트랜잭션 rollback 회피 |
+| Decay alpha floor | **GREATEST(:alpha_prior, computed)** (round 1 S-03 fix). child row +0.5 boost row 음수 차단 | 베이지안 prior 무효화 차단 |
+| EventBuffer stop | **lock 안 `_stopped` 검사 + True 시 즉시 callback fallback** (round 1 S-04 fix) | lifespan shutdown race 차단 |
+
+### 사용자 결정 (직접 합의)
+
+| 결정 | 값 |
+|---|---|
+| Decay 빈도 | daily cron only (on-demand 거부) |
+| Dwell cap 위치 | Redis Lua atomic (SQL UPSERT 거부) |
+| 14-day boost 처리 | daily 차감 + `boost_applied_at_active_day` 컬럼 |
+| Propagation 활성 | A7 도래 전까지 env false |
+| Idempotency match 응답 | 200 + 기존 row (409 미사용) |
+| Idempotency mismatch 응답 | 409 (`EVENT_DUPLICATE`) |
+| Not-interested 추가 저장 | `NotInterestedTopic` 1 row 별도 (UserInterestState 분배만으론 부족) |
+| Batch 최대 | 50 events |
+| Batch HTTP 상태 | 207 (부분 성공 허용, 200 거부) |
+| system_config 갱신 권한 | A10 admin UI 전담 (A6 는 read-only) |
+
+### 폐기 또는 의미 변경 항목
+
+- (없음 — v13 라운드 pivot 이후 A6 는 호환 확장만 수행)
+
+### 본 라운드가 만들거나 갱신하는 docs
+
+| 파일 | 갱신 내용 |
+|---|---|
+| 본 파일 §11 | 본 절 |
+| `decision-backlog.md` | C-37 (round 1 8 fix) + C-38 (round 2 4 fix) 신규 + 카운트 36→38 + "다음 진입 모듈 A7" |
+| `sdd/contracts.md` | `JobType.INTEREST_DECAY` + `ErrorCode` 2 + `RedisKey` 5 + Pydantic A6 schema 추가 |
+| `sdd/architecture.md` | `### events (A6)` 섹션 + 외부 인터페이스 표에서 6 source 어댑터 행 제거 |
+| `sdd/module-boundaries.md` | `app/events/` 행 + `app/interest/` 9 파일 분담 갱신 |
+| `sdd/concurrency.md` §10 | `dwell_tick` Lua + `interest_decay_lock` + `system_config_cache` + `event_duplicate_cache` + 14-day boost daily 차감 5 행 추가 |
+| `sdd/deployment.md` | 5 서비스 표 정렬 (clickbait-detector 표 외 별도 절) |
+| `sdd/tech-stack.md` | `passlib` / `python-Levenshtein` / `beautifulsoup4` / `lxml` / `feedparser` / `tenacity` / `vcrpy` 6 행 제거 또는 v13 폐기 표기 |
+| `sdd/api-conventions.md` | HTTP 상태 코드 표에 `207 Multi-Status` 행 추가 |
+| `sdd/agent-orchestration.md` | Phase 표 A1~A6 ✅ 마킹 + 의존 그래프 status |
+| `api/interest.md` | 9 endpoint base path 통일 + `EventResponse.error_code` 필드 + `BatchResponse` 스키마 |
+| `data/schema.md` | `UserEvent.payload_hash` + `UserInterestState.boost_applied_at_active_day` 컬럼 명시 |
+| `data/erd.mmd` | `SYSTEM_CONFIG` 엔티티 + `USER_EVENT` / `USER_INTEREST_STATE` attribute block 보강 |
+| `data/cso-import.md` | R3-C03 `SEEDS` dict 5 라벨 + csv-quoted N-Triples parser 반영 |
+| `algorithms/interest-bayesian.md` | `dwell_tick` Lua + propagation feature flag default false + NULLIF/alpha floor 룰 |
+| `algorithms/cso-mapping.md` | 5 cluster seed 라벨 교체 (Operating Systems / Automata Theory / Interactive Computer Graphics / Multimedia Systems / Scientific Computing) |
+| `ops/docker-compose.md` | 5432→5433 호스트 매핑 |
+| `ops/runbooks.md` | `make seed` (A12 미완) 표시 |
+| `security/threat-model.md` | 5432→5433 호스트 매핑 |
+| `prompts/03-A4-collection.md` | LLM provider lifespan 가드 `{mock, openai}` 명시 + Anthropic `NotImplementedError` |
+| `scripts/check_contracts.py` + `check_redis_keys.py` | A6 신규 `JobType` / Redis prefix 5 종 추가 |
+| `AGENTS.md` / `decision-backlog.md` | C-급 카운트 32→38 + A6 fix 12 |

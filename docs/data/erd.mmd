@@ -16,6 +16,7 @@ erDiagram
     USER ||--o{ RECOMMENDATION_SLOT : "has"
 
     ADMIN_USER ||--o{ REPROCESS_REQUEST : "requests"
+    ADMIN_USER ||--o{ SYSTEM_CONFIG : "updates"
 
     CSO_TOPIC ||--o{ CSO_TOPIC : "parent_of"
     CSO_TOPIC ||--o{ DYNAMIC_LEAF_TOPIC_CSO_TOPIC : "links"
@@ -123,6 +124,7 @@ erDiagram
         timestamp updated_at
         int last_event_active_day
         int last_decay_active_day
+        int boost_applied_at_active_day
     }
     SOURCE_POLICY {
         uuid policy_id PK
@@ -193,9 +195,14 @@ erDiagram
         uuid event_id PK
         uuid user_id FK
         uuid document_id FK
+        uuid cso_topic_id FK
+        uuid leaf_topic_id FK
         string event_type
         int dwell_ms
         string client_request_id
+        string payload_hash
+        timestamp occurred_at
+        timestamp created_at
     }
     SAVED_DOCUMENT {
         uuid user_id FK
@@ -225,4 +232,11 @@ erDiagram
         uuid expected_cso_topic_id FK
         string error_message
         int retry_count
+    }
+    SYSTEM_CONFIG {
+        string key PK
+        json value
+        string description
+        timestamp updated_at
+        uuid updated_by_admin_id FK
     }

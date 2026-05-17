@@ -92,7 +92,7 @@ class TraversalTraceDetail(BaseModel):
 
 - `/topics/cso/clusters`는 12 클러스터를 캐시 (TTL=24h). 클라이언트는 **온보딩 화면과 설정의 관심 분야 화면 모두에서 본 endpoint를 호출**한다 (단일 진실 공급원).
 - 동적 리프 토픽 GET은 사용자별 격리 (`user_id` JWT 클레임 기반 필터).
-- `/topics/{topic_id}/documents`는 다음 우선순위로 필터: 1) 사용자 NotInterestedTopic 제외, 2) 사용자 HiddenDocument 제외, 3) ClickbaitResult.decision='clickbait' 제외 (FR-31).
+- `/topics/{topic_id}/documents`는 다음 우선순위로 필터 (**A8 머지 후 적용** — 1차 시연 A4~A6 단계에서는 SELECT DISTINCT + ORDER BY 만, 필터 비활성. router.py:1 주석 참조): 1) 사용자 `NotInterestedTopic` 제외, 2) 사용자 `HiddenDocument` 제외, 3) `ClickbaitResult.decision='clickbait'` 제외 (FR-31). **`SavedDocument` 는 제외 X** — 사용자가 저장해도 토픽 페이지에는 계속 표시 (저장 목록은 별도 `/feedback/saved`). recommendation-ranking.md §Core 의 후보 제외 룰 (SavedDocument 후보 제외) 은 `/recommendations/dashboard` 전용이고 본 endpoint 는 토픽 탐색용이므로 분리.
 - `/topics/traces`는 사용자 자신의 trace만 반환 (`user_id` JWT 클레임 필터). active+stale만 default, `?status=archived` 명시 시 archived 포함.
 - `score_tail`은 NFR-04 마스킹 대상 — 일반 사용자 응답에서 null 반환. 관리자 endpoint(`/admin/users/{id}/...`)에서만 실제 값.
 

@@ -13,7 +13,7 @@
 새 에이전트는 다음 4개를 순서대로 읽으면 작업 시작 가능.
 
 1. **[`docs/decisions.md`](docs/decisions.md)** — 13 라운드 결정 매트릭스 압축본 (v13 = A4 Topic-driven Pivot, 2026-05-11). 모든 코드 결정의 단일 진실 공급원. SRS와 충돌 시 본 파일이 우선 (단 SRS의 FR/NFR/AT 식별자·표는 보존).
-2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 + C-급 백로그. **P0 0건. P1 활성 7건 + P2 활성 5건은 default·stub 경로 정의됨. C-급 32건 모두 해소** (A2 자체 검수 + Codex review v1·v2·v3 + multi-worker + 옵션 B + mypy strict 26 + 초기 결정 11, 2026-05-11).
+2. **[`docs/decision-backlog.md`](docs/decision-backlog.md)** — P0/P1/P2 + C-급 백로그. **P0 0건. P1 활성 7건 + P2 활성 5건은 default·stub 경로 정의됨. C-급 38건 모두 해소** (A2 자체 검수 + Codex review v1·v2·v3 + multi-worker + 옵션 B + mypy strict 26 + 초기 결정 11 + A4 코드 + 3-라운드 audit + A6 본문 + 2-라운드 audit, 2026-05-11~17).
 3. **[`docs/sdd/contracts.md`](docs/sdd/contracts.md)** + **[`docs/sdd/agent-orchestration.md`](docs/sdd/agent-orchestration.md)** — 모든 enum·error code·Redis key는 `backend/app/contracts.py` 단일 SOR. 멀티 에이전트 5겹 방어와 Phase별 순차 호출 룰.
 4. **자기 모듈에 해당하는 `docs/` 하위 디렉토리** — 후술 §에이전트 분할 표.
 
@@ -33,7 +33,7 @@
 ├── docs/                              # 산출 문서 54+ 파일
 │   ├── README.md                      # docs 인덱스
 │   ├── decisions.md                   # 결정 매트릭스 (SOR)
-│   ├── decision-backlog.md            # P0/P1/P2 + C-급 (A2 후 32 해소 / A3 11 / A4 26 / A6 11 신규)
+│   ├── decision-backlog.md            # P0/P1/P2 + C-급 (A2 후 32 해소 / A3 11 / A4 26 / A6 12 신규 → 누적 38)
 │   ├── srs/                           # SRS 분할본 10개
 │   ├── sdd/                           # 9: 아키텍처·데이터 흐름·배포·모듈 경계·기술 스택·동시성·API 규약·계약·에이전트 오케스트레이션
 │   ├── api/        (8)                # auth/consent/onboarding/topics/interest/collection/recommendation/admin — A6: interest.md 오류 표 갱신

@@ -237,6 +237,14 @@
 - **default action**: A11 (test-ci) 단계에서 DB fixture 통합 테스트로 모두 교체. e.g. active/stale leaf 4개 삽입 → `len(get_trace_detail.leaves) == list_traces.leaf_count` 통합 검증. 본 라운드는 cache hit 부분만 DYNAMIC 으로 전환 완료.
 - **시점**: A11 머지.
 
+### P2-21. alembic 0004 의 `ck_collection_job_type` CHECK 갱신 누락 (audit 발견, 2026-05-17)
+- **원본**: `backend/alembic/versions/0003_a4_collection_tables.py:180-183` + `0004_a6_interest_tables.py` (CHECK 갱신 부재) vs `backend/app/contracts.py::JobType` (interest_decay 포함 5종)
+- **현황**: 0003 의 `ck_collection_job_type` clause = `job_type IN ('daily_collect','leaf_lifecycle','merge_evaluation','summary_generation')` 4종. A6 머지로 `JobType.INTEREST_DECAY` 가 신설됐으나 alembic 0004 가 본 CHECK 를 갱신하지 않음 → `interest_decay` job 을 `collection_job` 테이블에 INSERT 시 CHECK 위반으로 실패.
+- **영향**: 1차 시연 검증 시 decay cron 이 18 UTC (03 KST) 발동 시각 외라서 발견되지 않았으나 운영 진입 시 즉시 노출.
+- **default action**: alembic 0005 (가칭) 로 `ALTER TABLE collection_job DROP CONSTRAINT ck_collection_job_type` + 재생성 (`job_type IN ('daily_collect','leaf_lifecycle','merge_evaluation','summary_generation','interest_decay')`). 또는 worker/jobs/interest_decay.py 가 collection_job 에 INSERT 하지 않는 구조면 본 CHECK 갱신 불필요 (확인 필요).
+- **검증 가드**: `scripts/check_contracts.py` CHECKS 리스트에 JobType 항목 일시 제외 (false-positive FAIL 차단). alembic 갱신 후 재추가.
+- **시점**: A7 머지 직전 (decay cron 안정성 확보).
+
 ### P2-15. UUID v7 (time-ordered) cursor pagination (자체감사 C-3)
 - **원본**: `backend/app/topic/leaf_service.py / trace_service.py` cursor
 - **현황**: leaf_id / trace_id 가 UUID v4 — cursor tie-break 시 lexicographic 순서 (안전하지만 의미 없음). v7 (time-ordered) 사용 시 더 자연 정렬.
@@ -258,9 +266,9 @@
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 11 (해결 1, 무효 1 — P1-6 v13 pivot, 활성 9) | (없음) | reasonable default + stub |
 | P2 | 20 (해결 2, 무효 2 — P2-3·P2-4 v13 pivot, 활성 16) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit) | 36 (해결 36 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17) | (없음) | A2 + v13 라운드 + A4 |
+| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit + A6 본문 + Codex 2-라운드 audit) | 38 (해결 38 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17, C-37/C-38 A6 본문 + Codex round 1/2 fix 2026-05-17) | (없음) | A2 + v13 라운드 + A4 + A6 |
 
-**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. 다음 진입 가능 모듈: A6 interest-bayesian.**
+**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. A6 본문 + Codex 2-라운드 audit + 통합 시연 검증 (C-37/C-38, 2026-05-17) [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) 완료. 다음 진입 가능 모듈: A7 leaf-lifecycle + traversal.**
 
 ## 본 백로그의 출처
 
@@ -278,4 +286,4 @@
 - `sdd/architecture.md` (1, P0-1 해소되어 마커 제거)
 - `ux/wireframes.md` (정리 작업으로 본 백로그 P1-7로 이동)
 
-마지막 정리: 2026-05-17 (A4 v13 코드 구현 + Codex round 2 fix 15건 (C-34) + round 3 재감사 fix 7건 (C-35) + 통합 시연 발견 fix 4건 (C-36) — [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 머지. 합계 26건 추가 해소. 실 OpenAI GPT-5.5 + docker compose 통합 시연으로 round 1/2/3 fix 검증 — 26 documents inserted, NFR-25 self-summary 100% 준수). 이전: 2026-05-11 (P0-1·P2-6 해소 + clickbait_module 코드 phase 완료로 P1-8·P2-7 해결 — 합계 4건 해소).
+마지막 정리: 2026-05-17 (A6 interest-bayesian 본문 + Codex round 1 fix 8건 (C-37) + round 2 재감사 fix 4건 (C-38) — [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) 머지 commit `a0a3fbf`. 합계 12건 추가 해소. docker compose 격리 통합 시연으로 alembic 0001→0004 + 22 tables + system_config_loaded + signup/consent/JWT 흐름 + `/interest/state` 200 + NFR-04 마스킹 + `/events` idempotency 200/409 + `/events/batch` 207 정합 검증. PR #19 docs drift fix (`a2930cf`) 후속). 이전: 2026-05-17 (A4 v13 코드 구현 + Codex round 2 fix 15건 (C-34) + round 3 재감사 fix 7건 (C-35) + 통합 시연 발견 fix 4건 (C-36) — [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 머지. 합계 26건 추가 해소). 이전: 2026-05-11 (P0-1·P2-6 해소 + clickbait_module 코드 phase 완료로 P1-8·P2-7 해결 — 합계 4건 해소).

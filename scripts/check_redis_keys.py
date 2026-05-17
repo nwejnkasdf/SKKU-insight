@@ -31,8 +31,13 @@ REDIS_KEY_PREFIXES = [
     "cold_start:status:",
     "rl:",
     "llm:tokens:",
+    "llm:active:",              # C-19 LLM 분산 semaphore (global + per-user)
     "dwell:",
     "events:buffer:",
+    "system_config:",           # A6 SystemConfig 캐시 (lifespan 1회 로드)
+    "lock:interest_decay:",     # A6 daily cron lock (18 UTC = 03 KST)
+    "event:dup:",               # A6 payload-hash idempotency (200 match / 409 mismatch)
+    "cso:clusters:",            # A3 12 cluster cache (cso_topic 임포트 후 SETEX)
 ]
 
 # A2 가 의도적으로 contracts.py 외에서 사용하는 키 (Plan §4 account-deletion lock,

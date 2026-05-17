@@ -62,14 +62,16 @@ User:
     "slot_type": "core" | "adjacent" | "discovery",
     "title": "기사/논문 제목 (영문 원문 우선)",
     "title_ko": "한국어 의역 1줄",
-    "source_name": "arXiv | Google Research | OpenAI | DeepMind | TechCrunch | ...",
-    "source_type": "academic" | "vendor_blog" | "tech_news",
+    "publisher_domain": "arxiv.org | openai.com | deepmind.com | techcrunch.com | ...",  // v13: Document.raw->>'publisher_domain'
+    "publisher_label": "arXiv | OpenAI Blog | DeepMind | TechCrunch | ...",                // 사람이 읽는 표시명, Document.raw->>'publisher_label'
+    "source_type": "academic" | "vendor_blog" | "tech_news",                                // Document.content_type 결정 휴리스틱
     "url_hint": "정확한 URL을 모른다면 null. 추측 금지.",
     "doi_hint": "DOI를 알면 명시. 모르면 null.",
     "published_year": 2024 | 2025 | 2026 | null,
     "related_csos_en": ["Computer Vision", "Reinforcement Learning"],
     "reason_short_ko": "한국어 한 문장 추천 이유 (60자 이내). 점수나 알고리즘 언급 금지."
   }
+- **v13 라운드 (2026-05-11)**: `publisher_domain` + `publisher_label` 은 `Document.raw` JSONB 에 저장. `source_id` 는 sentinel `cold_start_pseudo` (또는 매칭 후 실 Document 로 merge). 별도 `Source` row 만들지 않음.
 - 가짜 URL/DOI/제목을 만들지 마라. 모르면 null로 둬라.
 - 한국어 사용자에게도 영어 원문 자료 추천이 자연스럽다. 단, reason_short_ko는 반드시 한국어.
 - 동일 source가 한 슬롯에서 2개 이상 나오지 않도록.

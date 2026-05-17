@@ -30,19 +30,21 @@
 ## 3. Phase별 순차 호출
 
 ```
-Phase 0a (1 세션): contracts.py + 모든 endpoint stub
+Phase 0a (1 세션): contracts.py + 모든 endpoint stub ✅ (A1 docs + A2-stub, PR #4)
    ↓ 사용자 검수 30분, OpenAPI export 확인
-Phase 0b (2 세션 병렬): A3 CSO 임포트 stub, A2 인증·동의·온보딩 stub 본문
+Phase 0b (2 세션 병렬): A3 CSO 임포트 ✅ (PR #?), A2 인증·동의·온보딩 본문 ✅ (PR #7)
    ↓ 사용자 검수 30분
-Phase 1 (3 세션 병렬): A4 collection, A5 clickbait, A6 interest-bayesian
+Phase 1 (3 세션 병렬): A4 collection ✅ (PR #16), A5 clickbait ✅ (외부 PR #2), A6 interest-bayesian ✅ (PR #18 + #19)
    ↓ 사용자 검수 + OpenAPI 갱신 확인 60분
-Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal → A8 recommendation
+Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ⬜ → A8 recommendation ⬜
    ↓ 사용자 검수 + 시드 페르소나로 end-to-end 90분
-Phase 3 (2 세션 병렬): A9 electron-client (codegen api.ts import), A10 admin-console
+Phase 3 (2 세션 병렬): A9 electron-client ⬜ (codegen api.ts import), A10 admin-console ⬜
    ↓ 사용자 검수 + 시연 리허설 60분
-Phase 4 (2 세션 병렬): A11 test-ci, A12 demo-seed
+Phase 4 (2 세션 병렬): A11 test-ci ⬜, A12 demo-seed ⬜
    ↓ 최종 검수 + 발표 자료
 ```
+
+**현재 위치**: Phase 1 완료 (2026-05-17). 다음 진입 Phase 2 — **A7 leaf-lifecycle + traversal** (D 하이브리드 + `extend/retract/split/archive` + 3단계 강등 + `INTEREST_PROPAGATION_ENABLED=true` 토글).
 
 총 ~12 에이전트 세션 + 사용자 검수 시간 ~5시간.
 
@@ -74,25 +76,25 @@ Phase 4 (2 세션 병렬): A11 test-ci, A12 demo-seed
 ## 4. 에이전트 간 의존 그래프 (재정리)
 
 ```
-contracts.py (Phase 0a) ← 모든 후속 모듈이 import
+contracts.py (Phase 0a) ✅ ← 모든 후속 모듈이 import
 
-A2 backend-foundation
+A2 backend-foundation ✅
   ├─ /auth, /consent, /onboarding, /events, /interest, /topics, /recommendations, /admin
   └─ Pydantic schemas: contracts.py 의 Base 모델 상속
 
-A3 cso-topic ── topic_engine, NetworkX cache
-A4 collection ── **(v13 라운드)** LLMProvider.search_with_tools + Document/DocumentTopic/CollectionJob + dedup + jitter
-A5 clickbait ── DoRA wrap. **(v13 라운드)** 1차 default 비활성, 사용자 News 활성화 시만 호출
-A6 interest-bayesian ── atomic UPSERT, propagation, active day decay
+A3 cso-topic ✅ — topic_engine, NetworkX cache
+A4 collection ✅ — **(v13 라운드)** LLMProvider.search_with_tools + Document/DocumentTopic/CollectionJob + dedup + jitter
+A5 clickbait ✅ (외부 서비스) — DoRA wrap. **(v13 라운드)** 1차 default 비활성, 사용자 News 활성화 시만 호출
+A6 interest-bayesian ✅ — atomic UPSERT, propagation (env flag default false), active day daily decay, 14-day boost 만료
 
-A7 leaf-lifecycle + traversal ── A6 (state) + A3 (graph) 의존
-A8 recommendation ── A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존
+A7 leaf-lifecycle + traversal ⬜ — A6 (state) + A3 (graph) 의존. `INTEREST_PROPAGATION_ENABLED=true` 토글 작업 포함
+A8 recommendation ⬜ — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존
 
-A9 electron-client ── client/src/generated/api.ts (A2 OpenAPI codegen)
-A10 admin-console ── admin-console/src/generated/api.ts (A2 OpenAPI codegen)
+A9 electron-client ⬜ — client/src/generated/api.ts (A2 OpenAPI codegen)
+A10 admin-console ⬜ — admin-console/src/generated/api.ts (A2 OpenAPI codegen). `system_config` UI 갱신 책임 (A6 read-only loader 와 분담)
 
-A11 test-ci ── 모든 모듈
-A12 demo-seed ── 모든 모듈
+A11 test-ci ⬜ — 모든 모듈
+A12 demo-seed ⬜ — 모든 모듈
 ```
 
 ## 5. 자동 검증 강제

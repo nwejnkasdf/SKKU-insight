@@ -314,3 +314,60 @@
 - §4 Trace operation 정의: extend/retract/split/archive 4 → **extend/retract/split/archive/merge 5** (룰 기반, merge 만 룰+LLM)
 - §11 propagation feature flag: "default false (A7 도래 후 true)" → "default true (A7 PR-3 머지)"
 
+## 13. A8 라운드 — Recommendation Engine (2026-05-17)
+
+본 라운드는 A8 recommendation engine Phase 2 후반 본문 구현 + R1 self-review fix 를 SOR 에 박는다. decision-backlog C-40 신규.
+
+### 결정 매트릭스 7건 (사용자 결정 4 + 자체 결정 3)
+
+| # | 결정 영역 | 값 |
+|---|---|---|
+| 1 | PR-stack 패턴 | A7형 7-commit + 3 라운드 (PR-1 alembic+ORM / PR-2 본문 / PR-3 tests / R1 fix / R2 재감사 / docs drift / R3 통합 시연) |
+| 2 | Document 섹션형 LLM 요약 캐시 위치 | **신규 테이블 `DocumentSummaryCache`** (alembic 0006). document_id PK + sections JSONB + reason_short + generator CHECK ('llm' | 'source_abstract'). DB 가 1차 SOR — Redis 보조 캐시 없음 |
+| 3 | Cold-start 후 첫 trace 생성 hook | **A8 cold_start orchestrator + click hook 협업** (A7 결정 #6 plan TBD 완성). cold_start orchestrator 가 pseudo Document INSERT 시 mark. 첫 click 이벤트가 들어와 `app/interest/service.py:ingest_event_atomic` 의 traversal_lock 보유 구간 안 `mark_stale_if_idle` hook 옆에서 `DefaultTraversalEngine.ingest_event()` 위임 — 매칭 trace 있으면 last_activity 갱신, 없으면 새 trace |
+| 4 | PUT /onboarding/interests (FR-55) | **A8 범위 외 — stub 유지** (현재 cluster 검증 + 202). 데모 시나리오 §1·§2 에 없고 settings 화면 (UI-05) 은 A9 (electron-client) 범위. prior boost 갱신은 A6 bootstrap 협업, stale 마킹은 A7 evaluate_retract |
+| 5 | sentinel `cold_start_pseudo` 활성화 | A2 alembic 0001 시드 행 (`name="cold_start_pseudo"`, `enabled=false`, `trust_level="low"`) 을 A8 가 본격 사용. cold_start orchestrator 가 pseudo Document INSERT 시 본 source_id FK 사용. `content_type='pseudo_cold_start'` enum (contracts.ContentType) 도 활성화 — candidates SQL AntiJoin 6번째 (일반 추천 경로 제외) |
+| 6 | emerging quota 정책 | core 5 중 **1개는 emerging leaf 우선** (recommendation.toml `core_slot_quota.emerging_leaf_quota_in_core = 1`). emerging 후보 부재 시 active leaf 로 자동 회수 (recommendation-ranking.md §1.3). emerging vs active 구분은 candidates SQL 단일 호출로 `leaf.status` 컬럼 함께 fetch — race 차단 (§11.#3 사전 방어) |
+| 7 | NFR-04 score 마스킹 정책 | Recommendation 테이블 `score` 컬럼 nullable Float **영속** (admin 노출용). 일반 사용자 응답 schema `RecommendationCard` 에는 score field **부재**. 응답 변환 (`engine._filled_slots_to_cards`, `engine._materialize_cards`) 시 명시 field 매핑만 (no `**row`) — `**ORM_row` 패턴이 우연한 leak 위험 (§11.#4 사전 방어) |
+
+### §11 anti-pattern 5건 사전 방어 (R1 fix 최소화 핵심)
+
+A2/A4/A6/A7 Codex 감사 누적 lesson 에서 A8 재발 가능 anti-pattern 을 본문 작성 시점에 사전 차단:
+
+1. **Cache-before-commit (#1, A4 C-02 / A6 C-02 lesson)** — `service.get_dashboard` 의 `_build_and_cache` 가 `await db.commit()` → `await redis.setex(cache)` 순서. `cold_start_orchestrator.run_cold_start` 가 `session.commit()` 성공 후 `_set_status(completed)` + redis cache. DB commit 실패 시 cache/status 미적용.
+2. **Recommendation daily UNIQUE race (#2, A6 C-03 lesson)** — `pg_insert(Recommendation).on_conflict_do_nothing().returning(recommendation_id)` + None-check + 동일 (user, doc, slot, today) lookup fallback. functional unique index `((created_at AT TIME ZONE 'UTC')::date)` 정합.
+3. **emerging quota race (#3)** — candidates SQL 시점에 `leaf_status` 컬럼 함께 fetch (단일 SQL). emerging vs active 구분 in-memory partition. 별도 SQL 호출 X — A7 cron 의 status 전이 사이 race 차단.
+4. **Score 컬럼 노출 (#4, NFR-04 위반)** — `RecommendationCard` schema 자체에 score field 부재 + `_materialize_cards` / `_filled_slots_to_cards` 가 명시 field 매핑만.
+5. **Lock token race (#5, A7 R2-RG-3 lesson)** — `_RELEASE_LOCK_LUA` 상수 + uuid token + Lua atomic CAS DEL. cold_start orchestrator 의 onboarding_lock 명시 DEL 도 같은 패턴 권고 (TODO P2 — 현재 plain DEL, 자연 TTL 만료 의존).
+
+### R1 self-review fix 1건 (commit 15883d1)
+
+본문 commit 후 self-review 결과 §11 5건 사전 방어는 모두 적용 OK. 추가 점검에서 발견:
+
+- **TopicChip dedup by (topic_id, type)** — `engine._fetch_topic_chips` 가 같은 doc 의 (cso, leaf) 매핑이 여러 confidence 행으로 존재 시 같은 chip 중복 추가 위험. `seen_per_doc: dict[UUID, set[tuple[UUID, str]]]` 추가 — chip append 전 (topic_id, type) tuple key 로 dedup.
+
+### R2/R3 후속 (별도 세션)
+
+- **R2 Codex 재감사** — Codex CLI 또는 `/ultrareview` 로 본문 11 파일 + tests 9 파일 독립 감사. self-review 가 catch 못 한 결함 발견 가능.
+- **R3 통합 시연** — 사용자 OPENAI_API_KEY 설정 후 `docker compose up -d` + signup → consent → onboarding 3 cluster → cold-start 8s SLA 폴링 → `GET /recommendations/dashboard` → 10 카드 + 5/3/2 slot + 한국어 reason ≤80자 + NFR-04 score 미노출 + cold_start=true → 2회 호출 cache hit → 첫 click 이벤트 → UserCSOTraversal trace 1 row 자동 생성 검증.
+
+### 본 라운드가 만들거나 갱신하는 docs
+
+| 파일 | 갱신 내용 |
+|---|---|
+| 본 파일 §13 | 본 절 (결정 매트릭스 7건 + §11 사전 방어 + R1 fix) |
+| `decision-backlog.md` | C-40 신규 + 카운트 39→40 + 다음 진입 = A9 (또는 A8 R2/R3 별도) |
+| `sdd/contracts.md` | 신규 enum/error code/Redis key 0 (모두 기존) |
+| `sdd/agent-orchestration.md` | Phase 표 A8 ⬜ → ✅ + 다음 진입 A9 + Ownership 표 cold_start_job A8 ✅ |
+| `data/schema.md` | Recommendation·RecommendationSlot "(A8 ⬜)" 마커 제거 + DocumentSummaryCache § 신규 추가 + daily UNIQUE 표현 정정 |
+| `ops/env-vars.md` | A8 § 신규 (9 entry) + 표 행 + example block |
+| `api/recommendation.md` | 본문 정합 (이미 SOR 보유 — 별도 변경 없음) |
+| `algorithms/recommendation-ranking.md` | 본문 정합 (recommendation.toml 가 SOR) |
+| `algorithms/cold-start.md` | 본문 정합 (orchestrator 흐름 + LLM prompt + validate) |
+| `AGENTS.md` / `README.md` / `prompts/README.md` | A8 완료 ✅ 표기 + commit 4-stack 명시 |
+
+### 폐기 또는 의미 변경 항목
+
+- §4 추천 슬롯: "core 5/adjacent 3/discovery 2 (SRS), fallback 룰 SRS FR-42·43 그대로. core 5개 중 1개는 emerging leaf 우선" 그대로 — 본 라운드 코드 구현으로 SOR 활성화 (이전엔 docs 명세만).
+- §4 Cold-start: "LLM 이 온보딩 입력(선택 CSO + 가입 메타)을 보고 첫 10개 추천 직접 생성. 사용자가 첫 카드 클릭 시점에 그 cso_topic 이 root 인 trace 1건 생성" → A7 결정 #6 plan TBD 본 라운드 완성 (interest.service.py:ingest_event_atomic 안 hook).
+

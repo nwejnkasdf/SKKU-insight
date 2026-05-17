@@ -53,7 +53,7 @@
 | **Phase 1 — A6 interest-bayesian** | ✅ 완료 ([PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18), 2026-05-17) — alembic 0004 (6 신규 테이블 + 12 partial UNIQUE + system_config 2 row seed) + 9 endpoint + decay daily cron + onboarding bootstrap 협업 + Codex 2 라운드 감사 12건 fix + 통합 시연 검증 (idempotency 200/409, batch 207, C-03 batch race fix 정합) |
 | Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian ✅ | 🟢 Phase 1 완료 |
 | **Phase 2 — A7 leaf-lifecycle + traversal** | ✅ 완료 (2026-05-17) — 7-commit PR-stack + Codex 3 라운드 23건 fix. trace operation 4 → 5 (merge 신규) + D 하이브리드 LifecycleEvaluator + Strict 검증 + INTEREST_PROPAGATION_ENABLED=true. alembic 0005 (UserCSOTraversal.merged_into_trace_id + ck_collection_job_type 갱신 P2-21 해소) + app/traversal 5 + app/leaf_lifecycle 6 + worker/jobs 3 신규 + 47 unit test |
-| Phase 2 — A8 recommendation | 🟡 A8 대기 |
+| **Phase 2 — A8 recommendation** | ✅ 본문 완료 (2026-05-17, R2/R3 별도 세션) — 4-commit local PR-stack + R1 self-review fix. alembic 0006 (Recommendation/RecommendationSlot/DocumentSummaryCache + daily UNIQUE) + `app/recommendation/` 11 파일 (service/engine/candidates/ranking/diversify/fallback/reasons/cold_start/summary_service/config_loader + router wire) + `worker/jobs/cold_start.py` 본문 + `interest/service.py` 첫 trace 생성 hook (A7 #6 plan TBD 완성) + Settings 9 + `recommendation.toml`. **§11 anti-pattern 5건 사전 방어** (cache-before-commit / daily UNIQUE race / emerging quota race / NFR-04 score 노출 / lock token race) + R1 self-review: TopicChip dedup. R2 Codex 재감사 + R3 실 OpenAI GPT-5.5 cold-start 시연 별도 세션 |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
 | 시연 리허설 + 발표 자료 | ⬜ |
@@ -174,4 +174,4 @@ docs/
 
 ---
 
-**다음 액션**: A8 recommendation 본문 구현 ([`prompts/07-A8-recommendation.md`](prompts/07-A8-recommendation.md)) — core/adjacent/discovery 3 슬롯 (5/3/2) + Cold-start LLM + first trace 생성 (A6 ingest_event_atomic hook 완성) + emerging quota (core 5 중 1 emerging leaf). A7 완료로 `TraversalEngine.get_active_traces/get_current_topics/get_adjacent_topics/get_descendant_leaves/get_emerging_leaves` 5 read API 안정 — A8 가 직접 호출. INTEREST_PROPAGATION_ENABLED=true 활성, 1-hop 0.5 trace 조상 propagation 동작. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.
+**다음 액션**: A9 electron-client 본문 구현 ([`prompts/08-A9-electron-client.md`](prompts/08-A9-electron-client.md)) — UI-01~05 + Electron `safeStorage` (OS 키체인) + 한국어 i18n + `client/src/generated/api.ts` codegen 결과 import (raw fetch 금지). A8 완료로 4 endpoint (`/recommendations/dashboard{,refresh}`, `/documents/{id}{,/summary}`) 안정 — A9 가 직접 호출 + 카드 클릭 시 `POST /events {event_type=click}` 가 trace 자동 생성 (A8 hook). 또는 A8 R2 Codex 재감사 + R3 통합 시연 (실 OpenAI GPT-5.5 cold-start 1회) 별도 세션 우선. 자세히는 [`prompts/README.md`](prompts/README.md) 진행 트래커.

@@ -13,7 +13,18 @@ RUN apt-get update \
         build-essential \
         libpq-dev \
         curl \
+        ca-certificates \
+        gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Codex CLI (CodexOAuthProvider 본문, 2026-05-18). LLM_PROVIDER=codex_oauth 토글
+# 시 lifespan 이 `codex --version` 검증. Node.js 20 LTS + `@openai/codex`.
+# `~/.codex` 는 docker-compose 가 volume mount (호스트 OAuth 토큰 재사용).
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @openai/codex \
+    && codex --version
 
 WORKDIR /app
 

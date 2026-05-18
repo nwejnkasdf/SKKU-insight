@@ -1,7 +1,7 @@
 # SKKU InSight — A2 Phase 0b Makefile.
 # 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
 
-.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all ci-regression-net stop down clean
+.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all ci-regression-net stop down clean codex-login codex-status
 
 help:
 	@echo "주요 타깃:"
@@ -18,6 +18,10 @@ help:
 	@echo "  make stop           - docker compose stop (데이터 유지)"
 	@echo "  make down           - docker compose down (네트워크 제거)"
 	@echo "  make clean          - docker compose down -v (볼륨 삭제 — destructive)"
+	@echo ""
+	@echo "CodexOAuthProvider (LLM_PROVIDER=codex_oauth 시):"
+	@echo "  make codex-login    - 호스트에서 codex login 진행 (~/.codex 토큰 발급)"
+	@echo "  make codex-status   - 컨테이너 안 codex login status 확인"
 
 dev:
 	docker compose up -d
@@ -86,3 +90,18 @@ down:
 clean:
 	@read -p "볼륨까지 삭제합니다 (Postgres + Redis 데이터 손실). 계속하시려면 'yes' 입력: " ans; \
 	if [ "$$ans" = "yes" ]; then docker compose down -v; else echo "취소"; fi
+
+# CodexOAuthProvider — 호스트 ~/.codex 인증 도우미 (2026-05-18).
+# docker-compose 가 ~/.codex 를 backend 컨테이너에 volume mount 하므로 호스트에서
+# 한 번 login 하면 컨테이너가 그대로 재사용. token refresh 도 codex CLI 가
+# file lock 으로 자동 처리.
+codex-login:
+	@command -v codex >/dev/null 2>&1 || { \
+		echo "[ERR] 호스트에 codex 미설치 — `npm install -g @openai/codex` 또는"; \
+		echo "      `brew install --cask codex` 후 재시도"; exit 1; }
+	codex login
+	@echo "[OK] ~/.codex/auth.json 발급 완료. docker compose up 후 동일 토큰 재사용."
+
+codex-status:
+	@docker compose exec api codex login status || { \
+		echo "[ERR] codex login 만료 또는 binary 없음 — `make codex-login` 후 재시도"; exit 1; }

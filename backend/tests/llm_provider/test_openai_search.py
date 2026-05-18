@@ -4,7 +4,8 @@ httpx.MockTransport 로 OpenAI 호출을 차단하고, response body 를 직접 
 검증 항목:
 - POST 가 `/v1/responses` 로 가는지
 - request body 에 tools=[{type:web_search}] 포함
-- request body 에 reasoning 필드 미포함 (v13 round 2 — OpenAI default 위임)
+- request body 에 reasoning={"effort": "high"} 포함 (2026-05-18 fix — 사용자 원래
+  결정 코드 반영, gpt-5.5 model 일 때만)
 - output[].content[].type=output_text 파싱 → SearchResult list
 - 실패 응답 → ProviderError
 """
@@ -103,8 +104,9 @@ class TestSearchWithTools:
 
         assert captured["url"].endswith("/v1/responses")
         assert captured["body"]["tools"] == [{"type": "web_search"}]
-        # v13 round 2: reasoning 파라미터 미전송 (OpenAI default 위임).
-        assert "reasoning" not in captured["body"]
+        # 2026-05-18 reasoning_effort fix — search_with_tools 는 high slot 호출.
+        # gpt-5.5 default 라 Responses API nested reasoning.effort 박힘.
+        assert captured["body"]["reasoning"] == {"effort": "high"}
         assert captured["body"]["model"] == "gpt-5.5"
         assert len(results) == 1
         assert results[0].publisher_domain == "arxiv.org"

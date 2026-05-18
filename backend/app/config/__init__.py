@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     # 외 토글 차단.
     LLM_MODEL_HIGH: str = "gpt-5.5"
     LLM_MODEL_MEDIUM: str = "gpt-5.5"
+    # OpenAI reasoning_effort (gpt-5/o-series). 가능 값: none, minimal, low,
+    # medium, high, xhigh (openai-python `types/shared/reasoning_effort.py`).
+    # 사용자 결정 (2026-05-18): high slot → "high", medium slot → "medium".
+    # xhigh 는 latency 증가 + 5시간 ChatGPT 세션 한도 초과 우려로 미사용. reasoning
+    # 모델이 아닌 경우 (gpt-4o 등) 본 값은 openai.py 가 model name prefix 로
+    # 분기해서 payload 에서 제외 — chat/completions 400 Unsupported value 차단.
+    LLM_REASONING_EFFORT_HIGH: str = "high"
+    LLM_REASONING_EFFORT_MEDIUM: str = "medium"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
@@ -72,6 +80,27 @@ class Settings(BaseSettings):
     LLM_DAILY_TOKEN_BUDGET: int = 1_000_000
     LLM_MAX_CONCURRENT: int = 8
     LLM_MAX_CONCURRENT_PER_USER: int = 2
+
+    # === CodexOAuthProvider (2026-05-18 본문) ===
+    # `LLM_PROVIDER=codex_oauth` 토글 시 사용. `~/.codex/auth.json` 의 ChatGPT
+    # OAuth 토큰 재사용 — OpenAI 공식 허용 path. backend 컨테이너에 codex CLI
+    # 설치 (`npm i -g @openai/codex`) + 호스트 `~/.codex` volume mount 전제.
+    CODEX_CLI_PATH: str = "codex"  # PATH 의 codex binary
+    # codex sandbox 정책. read-only 권장 — codex 가 backend 컨테이너 파일을 임의
+    # mutation 못 하도록. 가능 값: read-only / workspace-write / danger-full-access.
+    CODEX_SANDBOX_MODE: str = "read-only"
+    # codex 가 사용할 격리 작업 디렉토리 (--cd). git repo 검출 회피 + 외부 파일
+    # 차단. /tmp 또는 dedicated tmpfs.
+    CODEX_WORKDIR: str = "/tmp/codex-runtime"
+    # web_search 모드 — cached (default, 안정) vs live (최신성). search_with_tools
+    # 호출 시 cached 면 codex 가 자체 cache 사용, live 면 `--search` flag 로 실
+    # 검색. 1차 시연 default = cached (latency / 비용 안정).
+    CODEX_WEB_SEARCH_MODE: Literal["cached", "live"] = "cached"
+    # codex `service_tier` — fast (default, 우선순위 큐 + 빠른 응답) / default /
+    # flex / scale / priority. 사용자 결정 (2026-05-18): codex 활용 시 모든 호출
+    # 에 `fast` 적용. 5시간 ChatGPT 세션 한도 안에서 단일 호출 latency 줄이는 게
+    # 시연 안정성에 직접 영향. codex가 모델/요금제 호환 자동 처리.
+    CODEX_SERVICE_TIER: str = "fast"
     # decision-backlog C-19: 분산 semaphore acquire 시도 timeout (초). 초과 시
     # LLMBudgetExceeded 와 동일하게 fallback 경로 진입.
     LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS: int = 30

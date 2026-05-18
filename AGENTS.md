@@ -86,7 +86,7 @@
 | 베이지안 | Beta-Bernoulli, 단기 t1/2=7 active days, 장기 60. atomic SQL UPSERT. 1-hop 0.5 propagation |
 | Trace operation | extend/retract/split/archive 룰 기반. LLM은 leaf 재배치에만 (retract/split). **3단계 강등** active→stale→retract→archive |
 | Leaf 라이프사이클 | D 하이브리드 (신규 식별·병합만 LLM, 승격·강등 룰). emerging는 active trace path 끝 산하에서만 분기. core 슬롯 5개 중 1개 emerging quota |
-| LLM 어댑터 | **`MockProvider` (default)** + OpenAI/Anthropic/OpenRouter/CodexOAuth(local experimental). 환경변수 `LLM_PROVIDER` 토글 |
+| LLM 어댑터 | **`MockProvider`** (Settings 코드 default, CI 안전) / **`CodexOAuthProvider`** (`.env.example` 권고 시연 default — 2026-05-18 본문, `codex exec --json` subprocess wrap, 사용자 본인 ChatGPT 구독 OAuth) / `OpenAIAPIProvider` (정식 API) / Anthropic·OpenRouter stub. 환경변수 `LLM_PROVIDER` 토글. 모든 slot 모델 = `gpt-5.5`, slot 구분 = `reasoning_effort` (high/medium, xhigh 미사용) |
 | 낚시성 | DoRA 파인튜닝 `A.X-4.0-Light` 모듈 (✅ `clickbait_module/` 자체 vLLM 서비스, P0-1 해결 2026-05-11) |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI/제목 정규화 + Levenshtein |
 | 수집 모델 | **(v13 라운드 pivot, 2026-05-11)** `LLMProvider.search_with_tools()` 단일 경로 (web 검색 도구). user trace JSON 입력 → LLM 자율 query → Document INSERT. Source 테이블 = sentinel `llm_search` + `cold_start_pseudo` 2행. publisher 정보는 `Document.raw` JSONB. 6 source 어댑터(arXiv/OpenAlex/S2/DBLP/RSS/네이버BS4) **폐기**. 자세히는 [`docs/decisions.md §10`](docs/decisions.md). |
@@ -100,12 +100,12 @@
 1. **본문 한국어, 코드/CLI/식별자 영어**. 변수·함수·테이블 snake_case.
 2. **FR-XX·NFR-XX·AT-XX·UC-XX는 SRS 표기 그대로**. 새 식별자 만들지 말 것.
 3. **결정은 [`docs/decisions.md`](docs/decisions.md) 우선**. SRS와 충돌 시 그쪽 우선이지만 SRS 식별자·표는 보존.
-4. **모델 종속 회피**. `MockProvider` (default)와 정식 API provider 모두에서 동일 동작. CodexOAuth는 local experimental.
+4. **모델 종속 회피**. `MockProvider` (CI default) / `CodexOAuthProvider` (시연 default, 2026-05-18 본문) / `OpenAIAPIProvider` (정식 API) 모두에서 동일 동작.
 5. **이미지 자산 부재**. SRS 분할의 `assets/*.png` 링크는 IEEE 830 원형 보존 목적의 죽은 링크. 와이어프레임 SOR은 [`docs/ux/wireframes.md`](docs/ux/wireframes.md), ERD는 [`docs/data/erd.mmd`](docs/data/erd.mmd).
 6. **새 기능 임의 추가 금지**. SRS·본 가이드에 없으면 [`docs/decision-backlog.md`](docs/decision-backlog.md) P2로 추가 후 사용자 승인.
 7. **TODO 마커**: `<!-- TODO: ... -->` 표기 + 동시에 `decision-backlog.md` 항목 추가.
 8. **테스트**: pytest(backend) + vitest(client/admin) + GitHub Actions. AT-01~15 자동화 가능 항목은 [`docs/srs/08-acceptance-tests.md`](docs/srs/08-acceptance-tests.md) 표.
-9. **시연 모드 default**: `LLM_PROVIDER=mock` 으로 부트, 외부 키 없이 핵심 흐름 동작.
+9. **시연 모드 default**: `LLM_PROVIDER=codex_oauth` (`.env.example` 권고 — 사용자 본인 ChatGPT 구독 OAuth, 시연 부트 전 `make codex-login` 1회). CI 환경은 `LLM_PROVIDER=mock` override (Settings 코드 default 가 mock 이라 .env 없이도 부트 가능).
 10. **동시성 가드**: [`docs/sdd/concurrency.md`](docs/sdd/concurrency.md) §10 체크리스트 통과 필수. single-flight + user-mutex + atomic SQL + LLM semaphore + batch flush + consent cache.
 11. **API 통신 규약**: [`docs/sdd/api-conventions.md`](docs/sdd/api-conventions.md) 따름. JSON·헤더·ErrorResponse·PagedResponse cursor envelope·idempotency·rate limit·CORS·OpenAPI cross-check.
 12. **Contracts SOR**: 모든 enum·error code·Redis key·base 모델은 `backend/app/contracts.py`만이 정의 ([`docs/sdd/contracts.md`](docs/sdd/contracts.md)). 에이전트는 import만, 새 항목 정의 금지. 추가는 별도 contracts PR + 사용자 승인.

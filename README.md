@@ -33,7 +33,7 @@
 - **Active day 회계**. 모든 시간 임계(라이프사이클·베이지안 감쇠)가 wallclock이 아니라 "사용자가 인터랙션한 날"의 단조증가 카운터 기반. 시험기간 잠수해도 trace가 깨지지 않음.
 - **Beta-Bernoulli 베이지안 + 1-hop propagation**. atomic SQL UPSERT로 race condition 방어, leaf 활동이 부모 노드 점수로 propagate.
 - **(v13 라운드)** 수집은 **LLM tool-use(web search) 단일 경로** — 6 source 어댑터 폐기. user trace 의 active leaf 를 LLM 에 입력 → LLM 이 자율 query 결정 + 웹 검색 + Document INSERT. NFR-25 정합은 prompt instruction (self-summary) 으로.
-- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글. clickbait_module 은 1차 시연 default 비활성 (사용자 News 소스 명시 활성화 시만).
+- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **CodexOAuthProvider 시연 default** (2026-05-18 본문 — `codex exec --json` subprocess wrap, 사용자 본인 ChatGPT 구독 OAuth, 비용 0) / OpenAI 정식 API / Mock fixture (CI) 토글. 모든 slot 모델 = `gpt-5.5`, slot 구분은 `reasoning_effort` (high/medium). clickbait_module 은 1차 시연 default 비활성.
 - **10-20명 동시성 가드**: single-flight + user-level Redis mutex + atomic SQL + LLM semaphore + batch flush + consent cache.
 
 ## 진행 상황

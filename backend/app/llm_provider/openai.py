@@ -8,8 +8,14 @@ v13 round 2 (2026-05-16) 사용자 결정:
 - `search_with_tools()` = **OpenAI Responses API web_search 도구 정식 호출**
   - endpoint `https://api.openai.com/v1/responses`
   - tools=[{"type":"web_search"}], tool_choice="auto"
-  - reasoning 파라미터 미전송 — OpenAI default 에 위임 (사용자 결정)
   - 응답 `output[].content[]` 의 `type=output_text` 텍스트 → JSON parse → SearchResult list
+
+2026-05-18 reasoning_effort fix (사용자 원래 결정의 코드 반영):
+- `complete()` (Chat Completions) — top-level `reasoning_effort` 키. model_slot 별 분기.
+- `search_with_tools()` (Responses API) — nested `reasoning.effort` 키. high slot.
+- 가능 값: none/minimal/low/medium/high/xhigh. 사용자 결정값은 high/medium (xhigh 는
+  latency + ChatGPT 5h 세션 한도 우려). 비 reasoning 모델 (gpt-4o 등) 토글 시 model
+  name prefix 분기로 payload 제외 — 400 Unsupported parameter 차단.
 
 `complete()` 는 기존 Chat Completions API 유지.
 """
@@ -69,8 +75,20 @@ class OpenAIAPIProvider:
         # GPT-5 series (gpt-5, gpt-5.x, gpt-5-mini, gpt-5-nano) 는 chat/completions 에서
         # `temperature` 미지원 — only default (1) 허용. 400 Unsupported value 차단.
         # 다른 모델 (gpt-4o 등) 만 temperature 전달. (R3 시연 발견 결함, 2026-05-17)
-        if not model_name.lower().startswith("gpt-5"):
+        is_gpt5_series = model_name.lower().startswith("gpt-5")
+        if not is_gpt5_series:
             payload["temperature"] = temperature
+        else:
+            # reasoning_effort (top-level key, Chat Completions API spec).
+            # high slot → LLM_REASONING_EFFORT_HIGH, medium slot → LLM_REASONING_EFFORT_MEDIUM.
+            # 가능 값: none/minimal/low/medium/high/xhigh — 사용자 결정값 = high/medium
+            # (xhigh 는 latency + ChatGPT 5h 세션 한도 우려로 미사용, 2026-05-18).
+            # gpt-5-pro 만 high 강제 — 본 값이 다르면 OpenAI 가 400 반환 (운영자 책임).
+            payload["reasoning_effort"] = (
+                settings.LLM_REASONING_EFFORT_HIGH
+                if model_slot == "high"
+                else settings.LLM_REASONING_EFFORT_MEDIUM
+            )
         if max_tokens is not None:
             # GPT-5 series 는 `max_tokens` 대신 `max_completion_tokens`.
             if model_name.lower().startswith("gpt-5"):
@@ -164,8 +182,10 @@ class OpenAIAPIProvider:
             {"trace": trace_json, "leaf_label": leaf_label, "top_n": top_n},
             ensure_ascii=False,
         )
-        # Responses API request body — web_search 도구. reasoning 파라미터는 미전송하여
-        # OpenAI default 에 위임 (v13 round 2 사용자 결정).
+        # Responses API request body — web_search 도구. reasoning.effort = high
+        # (search_with_tools 는 leaf 별 1회 high slot 호출, 2026-05-18 사용자 결정 반영).
+        # gpt-5 / o-series 만 reasoning 파라미터 지원 — 운영자가 LLM_MODEL_HIGH 를 비
+        # reasoning 모델로 토글 시 400 회피를 위해 prefix 분기.
         payload: dict[str, Any] = {
             "model": settings.LLM_MODEL_HIGH,
             "input": [
@@ -175,6 +195,10 @@ class OpenAIAPIProvider:
             "tools": [{"type": "web_search"}],
             "tool_choice": "auto",
         }
+        if settings.LLM_MODEL_HIGH.lower().startswith("gpt-5"):
+            payload["reasoning"] = {
+                "effort": settings.LLM_REASONING_EFFORT_HIGH
+            }
         async with acquire_slot(user_id):
             async with httpx.AsyncClient(
                 timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS

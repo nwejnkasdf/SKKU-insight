@@ -7,8 +7,11 @@ env `LLM_PROVIDER` 토글로 인스턴스 선택. 시연 default 는 mock (deter
 - 동시성: _concurrency.py (전역 + per-user semaphore + Redis 토큰 budget)
 - 구현체:
   - MockProvider: prompt_hash → backend/tests/fixtures/mock_llm/{hash}.json
-  - OpenAIAPIProvider: httpx async, /v1/chat/completions
-  - Anthropic / OpenRouter / CodexOAuth: stub NotImplementedError (후속 작업)
+  - OpenAIAPIProvider: httpx async, /v1/chat/completions + Responses API web_search
+  - CodexOAuthProvider: `codex exec --json` subprocess wrap (2026-05-18 본문) —
+    사용자 본인 ChatGPT 구독 OAuth 활용. lifespan 가드가 `codex --version`
+    검증 후 부트.
+  - AnthropicAPIProvider / OpenRouterProvider: stub NotImplementedError (후속 작업)
 """
 from __future__ import annotations
 

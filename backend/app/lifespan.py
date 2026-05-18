@@ -190,10 +190,15 @@ def _validate_secrets(jwt_secret: str, postgres_password: str) -> None:
 
 
 # (Codex round 2 S-08) A4 collection 이 search_with_tools 본문을 구현한 provider 만 허용.
-# anthropic / openrouter / codex_oauth 는 NotImplementedError 라 runtime crash 방지 목적.
-# 향후 본문 구현 시 본 set 에 추가.
+# anthropic / openrouter 는 NotImplementedError 라 runtime crash 방지 목적.
+# 2026-05-18: codex_oauth 본문 구현 (`codex exec --json` subprocess wrap) — 화이트리스트
+# 추가. anthropic / openrouter 는 여전히 stub.
 _SUPPORTED_A4_PROVIDERS = frozenset(
-    {LLMProviderType.MOCK, LLMProviderType.OPENAI}
+    {
+        LLMProviderType.MOCK,
+        LLMProviderType.OPENAI,
+        LLMProviderType.CODEX_OAUTH,
+    }
 )
 
 
@@ -203,7 +208,45 @@ def _validate_llm_provider(provider: LLMProviderType) -> None:
         raise RuntimeError(
             f"LLM_PROVIDER={provider.value} 는 A4 collection 미지원 "
             f"(search_with_tools NotImplementedError). 지원 provider: {supported}. "
-            ".env 의 LLM_PROVIDER 를 mock 또는 openai 로 변경하세요."
+            ".env 의 LLM_PROVIDER 를 mock / openai / codex_oauth 중 하나로 변경하세요."
+        )
+    if provider == LLMProviderType.CODEX_OAUTH:
+        _validate_codex_cli()
+
+
+def _validate_codex_cli() -> None:
+    """codex_oauth 토글 시 codex CLI binary 사전 검증 (시연 30초 전 부트 가드).
+
+    `codex --version` 1회 실행 — binary 존재 + 실행 가능 여부만 확인.
+    OAuth refresh token 만료까지 부트 차단하면 시연 30분 전에 재로그인 강제하는데
+    refresh 가 자주 깨지므로 binary 존재까지만 strict. OAuth refresh 실패는
+    endpoint 호출 시 ProviderError 로 자연 raise → fallback (또는 시연 운영자
+    재로그인) 으로 처리.
+    """
+    import subprocess
+
+    settings = get_settings()
+    try:
+        result = subprocess.run(
+            [settings.CODEX_CLI_PATH, "--version"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"LLM_PROVIDER=codex_oauth 인데 codex CLI binary 없음 "
+            f"(path={settings.CODEX_CLI_PATH!r}). `npm i -g @openai/codex` 후 "
+            f"backend 컨테이너 재빌드, 또는 LLM_PROVIDER 를 mock/openai 로 토글."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"codex --version 이 10s 안에 응답 안 함 (path={settings.CODEX_CLI_PATH!r})"
+        ) from exc
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()[:200]
+        raise RuntimeError(
+            f"codex --version exit={result.returncode} stderr={stderr!r}"
         )
 
 

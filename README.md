@@ -33,7 +33,7 @@
 - **Active day 회계**. 모든 시간 임계(라이프사이클·베이지안 감쇠)가 wallclock이 아니라 "사용자가 인터랙션한 날"의 단조증가 카운터 기반. 시험기간 잠수해도 trace가 깨지지 않음.
 - **Beta-Bernoulli 베이지안 + 1-hop propagation**. atomic SQL UPSERT로 race condition 방어, leaf 활동이 부모 노드 점수로 propagate.
 - **(v13 라운드)** 수집은 **LLM tool-use(web search) 단일 경로** — 6 source 어댑터 폐기. user trace 의 active leaf 를 LLM 에 입력 → LLM 이 자율 query 결정 + 웹 검색 + Document INSERT. NFR-25 정합은 prompt instruction (self-summary) 으로.
-- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **Mock provider default** + OpenAI/Anthropic/OpenRouter/CodexOAuth 토글. clickbait_module 은 1차 시연 default 비활성 (사용자 News 소스 명시 활성화 시만).
+- **DoRA 파인튜닝 `A.X-4.0-Light` 낚시성 모듈** + LLM은 **CodexOAuthProvider 시연 default** (2026-05-18 본문 — `codex exec --json` subprocess wrap, 사용자 본인 ChatGPT 구독 OAuth, 비용 0) / OpenAI 정식 API / Mock fixture (CI) 토글. 모든 slot 모델 = `gpt-5.5`, slot 구분은 `reasoning_effort` (high/medium). clickbait_module 은 1차 시연 default 비활성.
 - **10-20명 동시성 가드**: single-flight + user-level Redis mutex + atomic SQL + LLM semaphore + batch flush + consent cache.
 
 ## 진행 상황
@@ -54,6 +54,7 @@
 | Phase 1 — A4 collection ✅ / A5 clickbait (외부 모듈 ✅, 1차 default 비활성) / A6 interest-bayesian ✅ | 🟢 Phase 1 완료 |
 | **Phase 2 — A7 leaf-lifecycle + traversal** | ✅ 완료 (2026-05-17) — 7-commit PR-stack + Codex 3 라운드 23건 fix. trace operation 4 → 5 (merge 신규) + D 하이브리드 LifecycleEvaluator + Strict 검증 + INTEREST_PROPAGATION_ENABLED=true. alembic 0005 (UserCSOTraversal.merged_into_trace_id + ck_collection_job_type 갱신 P2-21 해소) + app/traversal 5 + app/leaf_lifecycle 6 + worker/jobs 3 신규 + 47 unit test |
 | **Phase 2 — A8 recommendation** | ✅ 시연 검증 완료 (2026-05-17, 실 GPT-5.5 docker compose 통합) — 7-commit PR-stack + Codex 3 라운드 audit fix. alembic 0006 (Recommendation/RecommendationSlot/DocumentSummaryCache + daily UNIQUE) + `app/recommendation/` 11 파일 + `worker/jobs/cold_start.py` 본문 + `interest/service.py` 첫 trace 생성 hook + Settings 9 + `recommendation.toml`. **§11 anti-pattern 5건 사전 방어** + R1 self-review (TopicChip dedup) + R2 Codex 외부 감사 (Critical 2/Suggested 1/Discussion 2/Acknowledged 6 — Critical #2 UTC 경계 fallback + Suggested #1 Lua atomic 즉시 fix, P2-22/24 backlog, P2-23 R3 검증 해소) + R3 시연 발견 1 fix (GPT-5 temperature/max_tokens 분기). **R3 시연**: alembic 0001→0006 통과 → signup → consent → onboarding 3 cluster → cold_start_job (실 OpenAI GPT-5.5 HTTP 200 61s) → dashboard 10 cards (Learning to Reason with LLMs / Llama 3.1 / AlphaFold 3 등 실 논문·뉴스) + 5/3/2 slot + Korean reason 23~31자 + NFR-04 score 미노출 + 2회차 cache hit + cold_start=true |
+| **CodexOAuth 라운드** | ✅ 완료 (2026-05-18, commit `b3b89b8`, C-41) — `CodexOAuthProvider` stub → 본문 (`codex exec --json --output-schema` subprocess wrap, OpenAI 공식 허용 path) + reasoning_effort dead intent fix (chat top-level + responses nested, high/medium slot 분리, xhigh 미사용) + 시연 default 전환 (`.env.example` 권고 = codex_oauth, 사용자 본인 ChatGPT 구독 OAuth 활용) + service_tier=fast + `--ignore-user-config`·`--ignore-rules` 모든 호출 + Dockerfile (`npm i -g @openai/codex`) + docker-compose ~/.codex rw mount + `make codex-login`/`make codex-status`. **통합 검증**: WSL docker build → container codex 0.130.0 + login OK + 실 codex exec ping→pong + input_tokens 24k→13k (~10k 절감). 21 신규 테스트 케이스. decisions.md §14 + 사용자 결정 8 + 자체 결정 8 |
 | Phase 3 — A9 electron-client / A10 admin-console | ⬜ |
 | Phase 4 — A11 test-ci / A12 demo-seed | ⬜ |
 | 시연 리허설 + 발표 자료 | ⬜ |

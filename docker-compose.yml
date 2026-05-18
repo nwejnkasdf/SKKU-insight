@@ -61,6 +61,13 @@ services:
       - "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1}"
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # CodexOAuthProvider 본문 (2026-05-18). LLM_PROVIDER=codex_oauth 토글 시
+      # 호스트의 codex login 토큰 재사용. read-write — codex CLI 가 refresh 시
+      # auth.json 을 file lock 하에 atomic rewrite. ro 로 묶으면 refresh 실패.
+      # 호스트에 ~/.codex 없으면 docker compose 가 빈 디렉토리 생성 → codex CLI
+      # 가 unauthorized 로 ProviderError → lifespan 가드가 부트 시 잡음.
+      - ${HOME}/.codex:/root/.codex
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,6 +90,9 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
+    volumes:
+      # api 와 동일 — worker 잡 (cold_start, collection 등) 도 codex_oauth 호출.
+      - ${HOME}/.codex:/root/.codex
     command: ["python", "-m", "app.worker"]
     depends_on:
       postgres:

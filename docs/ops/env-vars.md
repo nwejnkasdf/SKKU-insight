@@ -38,10 +38,17 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `LLM_PROVIDER` | **`mock` (default)** / `openai`. (v13 round 2 lifespan 가드 — `anthropic`/`openrouter`/`codex_oauth` 는 search_with_tools NotImplementedError 라 boot 거부.) 1차 부트는 mock 으로 별도 키 없이 동작. 시연·운영은 openai 정식 API. |
+| `LLM_PROVIDER` | **`mock`** (Settings 코드 default — CI 안전) / **`codex_oauth`** (`.env.example` 권고, 시연 default — 사용자 본인 ChatGPT 구독 OAuth) / **`openai`** (정식 API, OPENAI_API_KEY 필수). 2026-05-18 부터 lifespan 가드가 `{mock, openai, codex_oauth}` 화이트리스트 — `anthropic`/`openrouter` 만 NotImplementedError 라 boot 거부. codex_oauth 토글 시 `codex --version` binary 사전 검증 + 호스트 `~/.codex` volume mount + `make codex-login` 1회. |
 | `LLM_MODEL_HIGH` | **`gpt-5.5` (default — v13 round 2 사용자 결정)**. mock 일 때도 fixture lookup 이라 model name 무관. 운영자가 OpenAI 의 다른 모델로 토글 가능. | 동적 리프 생성·병합 + search_with_tools |
 | `LLM_MODEL_MEDIUM` | **`gpt-5.5` (default — v13 round 2 사용자 결정)**. high/medium 슬롯 모두 동일 모델 (사용자 결정). 토글로 다른 모델 분리 가능. | 요약·추천 이유 |
-| `CODEX_OAUTH_TOKEN` | (선택; Codex CLI session token) | `LLM_PROVIDER=codex_oauth` 일 때만 필요. local experimental 경로. |
+| `LLM_REASONING_EFFORT_HIGH` | **`high` (default)** | gpt-5/o-series `reasoning_effort` (chat/completions top-level + responses `reasoning.effort`). 가능 값: `none` / `minimal` / `low` / `medium` / `high` / `xhigh`. **xhigh 는 latency + 5h ChatGPT 세션 한도 초과 우려로 미사용** (2026-05-18 사용자 결정). cold-start / leaf identify / trace merge verify / search_with_tools 등 high slot 호출에 적용. 비 reasoning 모델 (gpt-4o 등) 토글 시 자동 제외. |
+| `LLM_REASONING_EFFORT_MEDIUM` | **`medium` (default)** | gpt-5/o-series `reasoning_effort` (medium slot). reason 생성 / summary / 일반 medium slot 호출에 적용. |
+| `CODEX_OAUTH_TOKEN` | (legacy, 미사용) | 2026-05-18 본문 구현 후 codex CLI 가 `~/.codex/auth.json` 으로 자체 관리 — 본 env 직접 사용 안 함. legacy 호환만. |
+| `CODEX_CLI_PATH` | `codex` | `LLM_PROVIDER=codex_oauth` 시 lifespan 이 `<path> --version` 으로 사전 검증. backend Dockerfile 이 `npm i -g @openai/codex` 로 PATH 에 install. |
+| `CODEX_SANDBOX_MODE` | `read-only` | codex 가 backend 컨테이너 파일을 임의 mutation 못 하도록 read-only 권장. 가능 값: `read-only` / `workspace-write` / `danger-full-access`. |
+| `CODEX_WORKDIR` | `/tmp/codex-runtime` | codex 가 사용할 격리 작업 디렉토리 (`--cd`). git repo 검출 회피. |
+| `CODEX_WEB_SEARCH_MODE` | `cached` | search_with_tools 동작 — `cached` (default, codex 자체 cache) / `live` (`--search` flag, 실시간 검색). 시연 안정성 우선이면 cached, 최신성 요구면 live. |
+| `CODEX_SERVICE_TIER` | **`fast`** | codex `service_tier` (`-c service_tier=...`). 모든 codex_oauth 호출에 적용 (2026-05-18 사용자 결정). 가능 값: `fast` (우선순위 큐 + 빠른 응답, 시연 latency 최소화) / `default` / `flex` / `scale` / `priority`. 5시간 ChatGPT 세션 한도 안에서 단일 호출 latency 줄이는 게 시연 안정성에 직접 영향. codex 가 모델/요금제 호환 자동 처리. |
 | `OPENAI_API_KEY` | `sk-...` | LLM_PROVIDER=openai 일 때 필수 |
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | LLM_PROVIDER=anthropic 일 때 필수 |
 | `OPENROUTER_API_KEY` | `sk-or-...` | LLM_PROVIDER=openrouter 일 때 필수 |
@@ -271,12 +278,25 @@ JWT_ISSUER=skku-insight
 BCRYPT_COST=12
 
 # === LLM ===
-# 1차 부트는 mock(deterministic fixture)으로 키 없이 동작. 실제 LLM 시연은 openai 권장.
-LLM_PROVIDER=mock
+# 시연 default 권고 = codex_oauth (사용자 본인 ChatGPT 구독 OAuth, 비용 0).
+# 호스트 `make codex-login` 1회 후 docker compose up. CI 환경은 LLM_PROVIDER=mock 으로 override.
+LLM_PROVIDER=codex_oauth
 LLM_MODEL_HIGH=gpt-5.5
 LLM_MODEL_MEDIUM=gpt-5.5
+# OpenAI reasoning_effort (gpt-5/o-series). high/medium 슬롯 분리 (2026-05-18 fix).
+# 가능 값: none, minimal, low, medium, high, xhigh.
+# xhigh 는 latency + 5h ChatGPT 세션 한도 초과 우려로 미사용 (사용자 결정).
+LLM_REASONING_EFFORT_HIGH=high
+LLM_REASONING_EFFORT_MEDIUM=medium
 # 정식 API로 토글하려면 위 LLM_PROVIDER=openai 후 아래 키 채움
 OPENAI_API_KEY=
+# CodexOAuthProvider (LLM_PROVIDER=codex_oauth 토글 시, 2026-05-18 본문) —
+# 사용자 본인 ChatGPT 구독 OAuth 활용. 호스트에서 `make codex-login` 1회 필요.
+CODEX_CLI_PATH=codex
+CODEX_SANDBOX_MODE=read-only
+CODEX_WORKDIR=/tmp/codex-runtime
+CODEX_WEB_SEARCH_MODE=cached
+CODEX_SERVICE_TIER=fast
 ANTHROPIC_API_KEY=
 OPENROUTER_API_KEY=
 # CodexOAuth는 local experimental — 본인 토이 빌드 전용

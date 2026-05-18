@@ -38,8 +38,8 @@
 | 항목 | 결정 | 한 줄 근거 |
 |---|---|---|
 | 낚시성 탐지 | **사용자 보유 DoRA 파인튜닝된 `A.X-4.0-Light` 모듈을 통합**. 모듈 위치 = `clickbait_module/`, 서빙 엔진 = **vLLM**(DoRA를 base에 사전 머지 후 일반 base로 로드 + continuous batching). 호스팅·transport는 운영 결정으로 backend는 `CLICKBAIT_SERVICE_URL` env로만 호출. **2차 문헌(테크 뉴스) 수집 단계 1차 정제에만 사용** | NFR-09, FR-30 직접 충족 |
-| 그 외 LLM 작업 | `LLMProvider` 추상으로 **모델 슬롯**만 고정. 슬롯 `high` = 동적 리프 생성·병합, `medium` = 섹션형 요약·추천 이유. 1차는 누구나 클론 즉시 부트되도록 `MockProvider`(deterministic fixture)를 기본값으로 사용하고, 실제 LLM 호출이 필요한 기능은 `OpenAIAPIProvider` 등 정식 API로 토글 | 모델 의존 표현 회피, 재현성 |
-| LLM 어댑터 | `LLMProvider` 추상 + 5 구현체: **`MockProvider` (default, CI/시연 fixture)**, `OpenAIAPIProvider`, `AnthropicAPIProvider`, `OpenRouterProvider`, **`CodexOAuthProvider` (local experimental)**. 환경변수 `LLM_PROVIDER`로 토글. CodexOAuth는 비공식 OAuth 세션을 사용하므로 로컬 실험·개인 토이 빌드에만 권장하고 배포·시연 환경의 기본값이 아니다 | 신뢰성 + 본인 빌드용 도피선 둘 다 확보 |
+| 그 외 LLM 작업 | `LLMProvider` 추상으로 **모델 슬롯**만 고정. 슬롯 `high` = 동적 리프 생성·병합, `medium` = 섹션형 요약·추천 이유. 모델은 슬롯 모두 `gpt-5.5` 단일. 슬롯 구분은 **`reasoning_effort`** 로 — `high` slot → `reasoning_effort=high`, `medium` slot → `medium`. `xhigh` 미사용 (latency + ChatGPT 5h 세션 한도). 코드 부트 default 는 `MockProvider` (CI 안전), `.env.example` 권고 default 는 `codex_oauth` (시연 narrative — 사용자 본인 ChatGPT 구독 활용) | 모델 의존 표현 회피, 재현성 + 시연 비용 절감 |
+| LLM 어댑터 | `LLMProvider` 추상 + 5 구현체: **`MockProvider`** (CI fixture, Settings default), **`OpenAIAPIProvider`** (정식 API + Responses web_search), **`CodexOAuthProvider`** (`codex exec --json` subprocess wrap, 2026-05-18 본문, **시연 default — `.env.example` 권고**), `AnthropicAPIProvider`·`OpenRouterProvider` (stub). 환경변수 `LLM_PROVIDER` 로 토글. CodexOAuth 는 OpenAI 가 외부 도구 사용 **공식 허용** path ([openclaw docs/concepts/oauth] + [developers.openai.com/codex/cli/features]). 시연 부트 전 `make codex-login` 1회 → `~/.codex/auth.json` refresh_token 30일 유효 | 신뢰성 + 사용자 ChatGPT 구독 활용 + endpoint 회전 흡수 (codex CLI 가 처리) |
 | 임베딩 | **미사용**. 토픽 유사도는 CSO 그래프 거리, 중복 제거는 URL/DOI + 제목 정규화 + Levenshtein | 인프라 단순화 |
 
 ## 4. 토픽·알고리즘
@@ -407,4 +407,73 @@ fix: `model_name.lower().startswith("gpt-5")` 분기 — temperature payload omi
 
 - §4 추천 슬롯: "core 5/adjacent 3/discovery 2 (SRS), fallback 룰 SRS FR-42·43 그대로. core 5개 중 1개는 emerging leaf 우선" 그대로 — 본 라운드 코드 구현으로 SOR 활성화 (이전엔 docs 명세만).
 - §4 Cold-start: "LLM 이 온보딩 입력(선택 CSO + 가입 메타)을 보고 첫 10개 추천 직접 생성. 사용자가 첫 카드 클릭 시점에 그 cso_topic 이 root 인 trace 1건 생성" → A7 결정 #6 plan TBD 본 라운드 완성 (interest.service.py:ingest_event_atomic 안 hook).
+
+## 14. CodexOAuth 라운드 — Subprocess Wrap + reasoning_effort Fix (2026-05-18)
+
+본 라운드는 `CodexOAuthProvider` 본문 작성 + 직전까지 dead intent 였던 `reasoning_effort` payload 처리 fix + `service_tier=fast` default 적용 을 SOR 에 박는다. 직접 fetch (openclaw docs, openai/codex repo) + 호스트 codex 0.130.0 실 호출 (JSONL event format / `-c service_tier=fast` accept) 로 검증 후 결정. decision-backlog C-41 신규.
+
+### 사용자 결정 (직접 합의) 8건
+
+| # | 결정 영역 | 값 | 근거 |
+|---|---|---|---|
+| 1 | CodexOAuth 방식 선택 | **`codex exec --json` subprocess wrap** (방식 B). 자체 PKCE OAuth (방식 C) X | openclaw 의 primary path 도 native codex CLI subprocess wrap. endpoint 회전 시 codex CLI 업데이트로 자동 흡수. 자체 PKCE 는 `auth.openai.com/oauth/*` flow 까지만 구현해도 실제 LLM call endpoint 가 docs 미공개 — 모방 risk |
+| 2 | 합법성 평가 | **공식 허용 path 로 간주**. 시연 규모 (10-20 사용자) 에서 OpenAI 자동 차단 위험 무시 가능 | openclaw 공식 문서 인용: "OpenAI explicitly supports subscription OAuth usage in external tools and workflows like OpenClaw" |
+| 3 | 모델 slot 매핑 | **모든 slot `gpt-5.5` 동일** + `model_reasoning_effort` 로 high/medium 구분 | 사용자 원래 의도 — 모델은 단일 (gpt-5.5), 깊이만 다르게 |
+| 4 | reasoning_effort 값 | **high → "high", medium → "medium"**. `xhigh` 미사용 | xhigh 는 latency 길어지고 5시간 ChatGPT 세션 한도 초과 우려. 100$ 요금제도 부족할 수 있음 (사용자 본인 경험) |
+| 5 | 시연 default | **`.env.example` 권고 = `codex_oauth`** (Settings 코드 default 는 `mock` 유지 — CI 안전) | 발표 narrative — "사용자 본인 ChatGPT 구독으로 동작". 비용 0. 단 CI / 신규 운영자 환경에서 부트 안 깨지도록 코드 default 는 mock |
+| 6 | `web_search` mode default | **`cached`** (default), `live` 토글 옵션 | 시연 안정성 우선. `live` 는 실시간 web 크롤링이라 latency·비용 변동 큼. cached 가 부족한 신선도 보이면 시연 30분 전에 live 토글 |
+| 7 | `service_tier` default | **`fast`** (default, 모든 codex_oauth 호출에 `-c service_tier=fast`) | 5시간 ChatGPT 세션 한도 안에서 단일 호출 latency 줄이는 게 시연 안정성에 직접 영향. fast = 우선순위 큐 + 빠른 응답. 가능 값 `fast/default/flex/scale/priority`. codex 가 모델/요금제 호환 자동 처리. 사용자 본인 PC `~/.codex/config.toml` 도 동일 설정 |
+| 8 | `--ignore-user-config` + `--ignore-rules` 항상 적용 | **모든 codex 호출에 두 flag 박음** | backend prompt 가 SOR — NFR-04 마스킹 / 한국어 응답 / FR-44 reason 형식 등 자체 제어. 사용자 본인 `~/.codex/config.toml` 의 personality (`pragmatic` 등) 가 backend 응답 스타일에 잡스러운 영향 주는 것 차단. API 검증된 prompt 가 이미 codex 자체 prompt 없이도 충분 (호스트 실측: 호출 정상 응답). `-c key=value` override 와 충돌 없음 (override 우선순위 더 높음 — 직접 호출로 검증) |
+
+### 결정 매트릭스 8건 (자체 결정)
+
+| # | 결정 영역 | 값 | 근거 |
+|---|---|---|---|
+| 1 | `codex` sandbox 정책 | `read-only` | codex 가 backend 컨테이너 파일을 임의 mutation 못 하도록. workspace-write 는 시연 외 케이스 |
+| 2 | `--cd` workdir | `/tmp/codex-runtime` | git repo 검출 회피 + 외부 파일 격리. /tmp 또는 dedicated tmpfs |
+| 3 | docker volume mount | `${HOME}/.codex:/root/.codex` rw | refresh token 자동 갱신 위해 rw 필수. ro 면 codex 가 auth.json 갱신 실패 → 1시간 후 access 만료로 모든 호출 깨짐 |
+| 4 | lifespan binary 검증 | `codex --version` strict (fail-fast) | `codex login status` 까지는 검증 X — refresh 만료가 자주 발생하므로 binary 존재까지만 startup 차단 |
+| 5 | `--output-schema` 사용 | response_format=json 시 generic schema 임시 파일, search_with_tools 는 `_SEARCH_OUTPUT_SCHEMA` 강제 | structured output 보장 — Codex 가 free-form text 대신 JSON parse 가능 형태로 응답 |
+| 6 | JSONL event parser | `item.completed` 의 `agent_message` text 만 final_text 로 합침. `web_search_call` 등 다른 item 은 skip | LLMResponse 인터페이스 호환 — caller 는 final text 만 필요 |
+| 7 | usage 매핑 | `prompt_tokens = input_tokens`, `completion_tokens = output_tokens + reasoning_output_tokens` | reasoning_output_tokens 도 사용량 차감 — budget guard 정합 |
+| 8 | LLM_PROVIDER 토글 구조 | **글로벌 단일** (slot 별 분기 X) | slot 별 분기는 fallback narrative 복잡. 운영 단계 backlog |
+
+### reasoning_effort fix (사용자 원래 결정 코드 반영, 2026-05-18)
+
+직전까지 `openai.py` 가 `reasoning_effort` 를 payload 에 안 박아서 high slot 도 medium slot 도 OpenAI default (보통 medium) 로 동작 중. 사용자 결정이 dead intent 였던 결함 fix.
+
+| 항목 | 변경 |
+|---|---|
+| `Settings.LLM_REASONING_EFFORT_HIGH/MEDIUM` 신규 | 사용자 결정값 `high` / `medium` default. `.env` 토글로 xhigh 같은 다른 값 가능 (운영자 책임) |
+| `openai.py:complete` | GPT-5 series 분기에 `payload["reasoning_effort"] = settings.LLM_REASONING_EFFORT_HIGH or _MEDIUM` 추가 (top-level key, Chat Completions API spec) |
+| `openai.py:search_with_tools` | Responses API nested `payload["reasoning"] = {"effort": settings.LLM_REASONING_EFFORT_HIGH}` 추가 |
+| `codex_oauth.py` 양 메서드 | `-c model_reasoning_effort=<value>` argv override |
+| OpenAI spec 출처 | `openai-python/types/chat/completion_create_params.py` + `shared_params/reasoning.py` 직접 fetch. 가능 값 `none / minimal / low / medium / high / xhigh` |
+
+### 본 라운드가 만들거나 갱신하는 파일
+
+| 파일 | 변경 |
+|---|---|
+| 본 파일 §3 LLM 어댑터 + §14 | LLM 어댑터 행 갱신 + 본 라운드 §14 신규 |
+| `decision-backlog.md` | C-41 (codex_oauth 본문 + reasoning_effort fix) 신규 + C-급 카운트 40→41 |
+| `backend/app/llm_provider/codex_oauth.py` | stub → ~500줄 본문 |
+| `backend/app/llm_provider/openai.py` | reasoning_effort payload 분기 (chat + responses) |
+| `backend/app/llm_provider/__init__.py` | docstring 갱신 |
+| `backend/app/config/__init__.py` | Settings 6 신규 (`LLM_REASONING_EFFORT_HIGH/MEDIUM` + `CODEX_CLI_PATH` + `CODEX_SANDBOX_MODE` + `CODEX_WORKDIR` + `CODEX_WEB_SEARCH_MODE`) |
+| `backend/app/lifespan.py` | `_SUPPORTED_A4_PROVIDERS` 확장 + `_validate_codex_cli()` 신규 |
+| `backend/Dockerfile` | Node.js 20 + `npm i -g @openai/codex` |
+| `docker-compose.yml` | api + worker 둘 다 `~/.codex` volume mount |
+| `Makefile` | `make codex-login` + `make codex-status` target |
+| `backend/.env.example`, `.env.example` (루트) | 시연 default `LLM_PROVIDER=codex_oauth` 권고 + CODEX_* 4 env |
+| `docs/ops/env-vars.md` | 표 5 행 갱신 + example block 갱신 |
+| `backend/tests/llm_provider/test_codex_oauth.py` | 신규 14 케이스 |
+| `backend/tests/llm_provider/test_openai_reasoning_effort.py` | 신규 6 케이스 |
+| `backend/tests/llm_provider/test_lifespan_provider_guard.py` | codex_oauth 케이스 갱신 (allowed/binary-missing/exit-nonzero) |
+| `backend/tests/llm_provider/test_openai_search.py` | reasoning 미전송 → reasoning 전송 가드로 갱신 |
+
+### 폐기 또는 의미 변경 항목
+
+- §3 LLM 어댑터 표의 "CodexOAuth (local experimental) — 로컬 실험·개인 토이 빌드에만 권장하고 배포·시연 환경의 기본값이 아니다" → **본 라운드로 정정** — subprocess wrap 본문 완성 + 시연 default 권고
+- 직전 v13 round 2 (2026-05-16) "reasoning 파라미터 미전송 — OpenAI default 위임" → 본 라운드 reasoning_effort fix 로 폐기. 사용자 원래 결정 (high/medium 분리) 이 코드에 반영
+- `CODEX_OAUTH_TOKEN` env → legacy 표시. codex CLI 가 `~/.codex/auth.json` 으로 자체 관리
 

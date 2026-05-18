@@ -207,6 +207,11 @@ CI에서 PR마다 실행:
 ## 9. 시연 30분 전 최종 체크
 
 ```bash
+# 0. CodexOAuth 사전 인증 (시연 default — `.env.example` LLM_PROVIDER=codex_oauth, 2026-05-18 C-41)
+make codex-login              # 호스트에서 ChatGPT OAuth (브라우저 1회)
+                              # → ~/.codex/auth.json refresh_token 30일 유효
+                              # → docker compose 가 ~/.codex 를 container 에 rw mount
+
 # 깨끗한 부트
 docker compose down -v
 docker compose up -d postgres redis
@@ -222,10 +227,16 @@ git log -1   # 최신 commit이 main에 머지됨
 # 통합 smoke test
 docker compose up -d
 sleep 10
-make smoke-test   # 5+ 페르소나 dashboard 호출 + 응답 검증
+make codex-status            # container 안 'Logged in using ChatGPT' 확인
+                              # 실패 시 `codex logout && make codex-login` 또는 LLM_PROVIDER=openai fallback
+make smoke-test               # 5+ 페르소나 dashboard 호출 + 응답 검증
 
 # Electron 부트
 cd client && npm start
 ```
 
 5분 안에 깨끗한 시연 환경 부팅. 이게 안 되면 시연 직전에 발견되는 race·DB·envvar 누락 문제.
+
+**fallback narrative** — codex OAuth refresh 30일 만료 또는 OpenAI revoke 시:
+1. `codex logout && make codex-login` (재발급)
+2. 또는 `.env` 의 `LLM_PROVIDER=openai` + `OPENAI_API_KEY` 토글 — 시연 narrative 만 약간 다름 ("ChatGPT 구독" → "정식 API")

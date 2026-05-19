@@ -597,3 +597,42 @@ if not pool:
 - §4 추천 슬롯 "discovery 2" 의미 — 기존 "trust=high trend" → "Fusion 1 (archive × current cross-product) + Reincarnation 1 (score_tail >= 0.6 archive)". core 5 + adjacent 3 의미는 그대로.
 - §13 A8 라운드 결정 #7 (NFR-04 score 마스킹 정책) — 본 라운드 reason_short 거부 키워드 강화로 확장 적용 (UserProfile context).
 
+### Codex R1 audit + R1 fix 7건 + P2 backlog 4건 (2026-05-19, [PR #25](https://github.com/nwejnkasdf/SKKU-insight/pull/25) merge commit `63f2cdde`)
+
+본문 commit 직후 `codex:rescue` (GPT-5.5) 외부 audit 수행. **Critical 2 + Suggested 7 + Nit 2 = 11 issue** 식별. R1 fix 7건 즉시 적용, 큰 변경 4건 (LLMProvider protocol 시그니처 / archived_at 별도 컬럼 / candidate_pool 매핑 / cache key version) 은 P2 backlog (P2-26~29) 로 등재.
+
+#### R1 fix 7건
+
+| # | Audit 등급 | 위치 | Fix |
+|---|---|---|---|
+| 1 | **Critical** | `app/config/__init__.py` + `worker/jobs/user_profile.py` | `USER_PROFILE_LOCK_TTL_SECONDS` 180→360s — 2x LLM timeout 마진. 직전 180s == LLM_REQUEST_TIMEOUT_SECONDS 라 LLM 호출 도중 lock 만료 race 위험 |
+| 2 | **Critical** | `app/recommendation/engine.py` | fusion + reincarnation pool 통합 → `_build_discovery_pools` 가 tuple 반환 + `_build_fusion_subslot` + `_build_reincarnation_subslot` 별도 + build_dashboard 가 각 [:1] concat → slot 별 1개씩 강제. `_resolve_seed_id` helper 가 active path 제외 + cso_graph 멤버십 검증 |
+| 3 | Suggested | `app/worker/jobs/user_profile.py` | cache invalidate 를 finally 안 별도 try/except 로 분리 + `committed` flag — redis 실패가 committed DB write 를 rollback 처리하지 않음 |
+| 4 | Suggested | `app/recommendation/engine.py:_resolve_seed_id` | Fusion bridge_id 가 `trace_path_csos` (active path 노드) 안이면 거부 — core 슬롯 후보 중복 차단 |
+| 5 | Suggested | `app/recommendation/engine.py:_build_fusion_subslot` + `_build_reincarnation_subslot` | fallback 이 candidate 존재 (`fusion_used=True` 직접 마킹) 가 아니라 SQL rows 결과 기반 (`if rows: return rows`) — 빈 결과 시 다음 fallback 진행 |
+| 6 | Suggested | `alembic/versions/0007_a9_user_profile.py:downgrade` | `raise NotImplementedError` — downgrade 시 `daily_user_profile_generation` row CHECK violation 차단. 운영 rollback 은 별도 SOP |
+| 7 | Nit | `app/profile/prompt_builder.py` | system prompt 안 raw `score_tail >= 0.6` 문구 → "강한 흥미로 종료된 보관 궤적 (충분히 큰 흥미 신호만 사전 필터)" 자연어 |
+
+#### P2 backlog 4건 (decision-backlog P2-26 ~ P2-29)
+
+| ID | 영역 | 미해결 사유 |
+|---|---|---|
+| P2-26 | `LLMProvider.complete` 시그니처에 `output_schema` 인자 추가 (codex `--output-schema` / openai `response_format=json_schema` strict 모드 API 수준 연결) | protocol 변경이 다른 provider 전체 영향 — 별도 라운드 |
+| P2-27 | `UserCSOTraversal.archived_at_active_day` 별도 컬럼 추가 (A7 execute_archive 가 user.active_day_counter 저장) | alembic migration + A7 archive operation 갱신 — 별도 라운드 |
+| P2-28 | Fusion bridge_cso 가 `cso_candidate_pool` 멤버십 강제 (graph 전체 외) | UserProfile.candidate_pool_ids JSONB 신규 컬럼 또는 engine 시점 재계산 — 별도 라운드 |
+| P2-29 | `RedisKey.recommendation_cache` key 에 `UserProfile.generated_at` 버전 토큰 포함 + read 시점 stale 거부 | multi-worker race window — single-worker 시연 환경 실효 무해, 운영 단계 적용 |
+
+#### 검증 결과 (R1 fix 후)
+
+- `ruff check backend/app` (151 files): All checks passed
+- `mypy --strict backend/app` (151 files): no issues
+- 6 cross-check scripts: 모두 통과 (`check_contracts` / `check_env` 131=131 / `check_schema` 25 tables / `check_error_codes` 45=45 / `check_redis_keys` raw f-string 0 / `check_api_docs` 55=55)
+- `pytest tests/profile/`: **57 passed** (52 base + R1 audit_regressions 5 추가)
+- WSL docker compose 통합 시연: alembic 0007 통과 + lifespan 부트 (`cso_graph nodes=14707 edges=44131 clusters=12 / provider=codex_oauth / system_config_loaded=true`) + scheduler `JOB_REGISTRATIONS count=7` (A8-v2 신규 `user_profile_generation_job` 포함) + 모든 신규 모듈 surface import 검증 통과
+
+#### 후속 (별도 세션)
+
+- 5 persona × 실 GPT-5.5 fusion 카드 데모 (broad_interest ID 매핑 + 행동 데이터 SQL seed 필요)
+- Codex R2 재감사 (R1 fix 회귀 검증) + P2-26~29 본격 fix
+- A9 electron-client (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts)
+

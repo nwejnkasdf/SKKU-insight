@@ -161,6 +161,9 @@ docker compose exec api alembic upgrade head --sql > /tmp/migration.sql
 docker compose down -v       # 모든 데이터 삭제
 docker compose up -d postgres redis
 make migrate
+# (선택, C-43, 2026-05-19) 호스트의 CSO.3.4.1.csv 를 컨테이너 cso_cache volume 에 카피.
+# KMI 서버 다운로드 skip — 오프라인 시연 + 트래픽 절감. 본 단계 생략 시 import-cso 가 자동 다운로드.
+# make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv
 make import-cso              # CSO 임포트
 make create-admin            # admin 1
 # make seed                  # A12 ⬜ 미구현 — Makefile 타깃 없음, backend/scripts/seed_personas.py 도 부재.
@@ -171,6 +174,16 @@ cd client && npm start       # Electron 앱 (A9 ⬜ 미구현 — A9 머지 후)
 ```
 
 소요: 약 5–10분 (CSO 임포트가 가장 길다 — 1차 다운로드 1분 + insert ~3분).
+
+### 8.1 `--reset` 운영 가드 (C-43, P2-16 + P2-10, 2026-05-19)
+
+`make import-cso ARGS=--reset` 가 dynamic_leaf_topic 또는 user_cso_traversal 행이 존재하면 default 거부 (RuntimeError + 카운트 메시지). leaf 의 `cso_topic_ids` 가 orphan 되고 `user_cso_traversal.path` UUID 가 stale 되는 것이 의도된 경우만 우회:
+
+```bash
+make import-cso ARGS="--reset --force-orphan-cso-refs"
+```
+
+빈 DB (시연 환경) 는 카운트 0 이라 가드 발동 X. 운영 단계 진입 후 leaf/trace 데이터 누적된 시점부터 본 가드가 의미.
 
 ---
 

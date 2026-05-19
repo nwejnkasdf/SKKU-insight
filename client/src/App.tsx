@@ -1384,15 +1384,15 @@ function buildInterestModelLayers(
     {
       key: "prior",
       kicker: "1",
-      title: "초기 prior",
+      title: "초기 seed",
       nodes: (trackedTopics.length ? trackedTopics.map((topic) => topic.label) : fallbackTopics)
         .slice(0, 3)
-        .map((label) => ({ label, tone: "prior", meta: "onboarding" }))
+        .map((label) => ({ label, tone: "prior", meta: "CSO seed" }))
     },
     {
       key: "bayes",
       kicker: "2",
-      title: "Bayesian 상태",
+      title: "Bayesian 신호",
       nodes: (trackedTopics.length ? trackedTopics : interestTopics.slice(0, 4))
         .slice(0, 4)
         .map((topic) => ({ label: topic.label, tone: topic.bucket, meta: bucketLabel(topic.bucket) }))
@@ -1400,10 +1400,16 @@ function buildInterestModelLayers(
     {
       key: "trace",
       kicker: "3",
-      title: "Traversal trace",
-      nodes: (traceLabels.length ? traceLabels : buildTrackedNodes(dashboard, interest, traces))
-        .slice(0, 4)
-        .map((label) => ({ label, tone: "trace", meta: activeTraces.length ? "active" : "대기" }))
+      title: "활성 trace",
+      nodes: activeTraces.length
+        ? activeTraces.slice(0, 4).map((trace) => ({
+            label: trace.path_labels.join(" > "),
+            tone: "trace",
+            meta: trace.path_labels.length > 1 ? `${trace.path_labels.length} nodes` : "단일 노드"
+          }))
+        : buildTrackedNodes(dashboard, interest, traces)
+            .slice(0, 4)
+            .map((label) => ({ label, tone: "trace", meta: "생성 대기" }))
     },
     {
       key: "slots",

@@ -257,7 +257,8 @@ async def _query_any_backfill_documents(
     """최근 trend fallback 이 부족할 때 쓰는 넓은 보충 후보.
 
     시연 데이터는 published_at 이 오래됐거나 trust_level 이 high 가 아닐 수 있어,
-    숨김/저장/관심없음/clickbait 제외 조건은 유지하면서 전체 문서 풀까지 넓힌다.
+    숨김/저장/관심없음/clickbait 제외 조건은 유지하면서 topic 매핑 없는 문서까지
+    전체 문서 풀로 넓힌다.
     """
     if limit <= 0:
         return []
@@ -278,8 +279,8 @@ async def _query_any_backfill_documents(
             DynamicLeafTopic.label.label("leaf_label"),
             CSOTopic.label.label("cso_label"),
         )
-        .join(DocumentTopic, DocumentTopic.document_id == Document.document_id)
         .join(Source, Source.source_id == Document.source_id)
+        .outerjoin(DocumentTopic, DocumentTopic.document_id == Document.document_id)
         .outerjoin(
             DynamicLeafTopic,
             DynamicLeafTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
@@ -339,7 +340,7 @@ async def _query_any_backfill_documents(
                 leaf_status=r.leaf_status,
                 leaf_label=r.leaf_label,
                 cso_label=r.cso_label,
-                topic_confidence=float(r.topic_confidence),
+                topic_confidence=float(r.topic_confidence or 0.2),
             )
         )
         if len(result) >= limit:

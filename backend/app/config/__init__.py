@@ -169,7 +169,7 @@ class Settings(BaseSettings):
     # A4 _DEDUP_WINDOW_DAYS=30 과 동일 (기존 LLM 검색 결과 재활용).
     COLD_START_DEDUP_WINDOW_DAYS: int = 30
     # POST /recommendations/dashboard/refresh slowapi rate limit.
-    RATE_LIMIT_DASHBOARD_REFRESH: str = "1/minute"
+    RATE_LIMIT_DASHBOARD_REFRESH: str = "20/minute"
     # GET /documents/{id}/summary LLM timeout (초). DB 영속 캐시 (DocumentSummaryCache) 가
     # 1차 SOR — 본 timeout 은 miss 시 LLM 호출 한계.
     DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS: int = 60

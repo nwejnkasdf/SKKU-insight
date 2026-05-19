@@ -7,7 +7,8 @@ const state = {
   loading: false,
   error: "",
   users: [],
-  health: null
+  health: null,
+  view: window.location.hash === "#users" ? "users" : "overview"
 };
 
 const root = document.querySelector("#root");
@@ -239,8 +240,6 @@ function changePasswordView() {
 }
 
 function shellView() {
-  const activeUsers = state.users.filter((user) => user.consent_active).length;
-  const pendingDeletion = state.users.filter((user) => user.deletion_pending).length;
   return `
     <div class="shell">
       <aside class="sidebar">
@@ -252,9 +251,8 @@ function shellView() {
           </div>
         </div>
         <nav class="nav">
-          <a href="#overview" class="active">운영 요약</a>
-          <a href="#users">사용자</a>
-          <a href="#jobs">작업 상태</a>
+          ${navButton("overview", "운영 요약")}
+          ${navButton("users", "사용자 관리")}
         </nav>
         <button class="secondary" id="logoutButton">로그아웃</button>
       </aside>
@@ -266,28 +264,56 @@ function shellView() {
           </div>
         </header>
         ${state.error ? `<p class="notice">${state.error}</p>` : ""}
-        <section class="grid" id="overview">
-          ${metricCard("사용자", state.users.length, "등록 계정")}
-          ${metricCard("동의 활성", activeUsers, "추천 가능")}
-          ${metricCard("시스템", state.health || "확인 중", "API 상태")}
-        </section>
-        <section class="wideGrid">
-          <div class="card" id="users">
-            <div class="cardHead">
-              <h2>사용자 목록</h2>
-              <button class="iconRefresh" type="button" title="사용자 목록 새로고침" data-refresh>↻</button>
-            </div>
-            ${usersTable()}
-          </div>
-          <div class="stack" id="jobs">
-            ${operationCard("수집 파이프라인", "정상 대기", "새 요청이 들어오면 worker 큐에서 처리됩니다.")}
-            ${operationCard("추천 캐시", "활성", "대시보드 새로고침 시 사용자별 캐시가 갱신됩니다.")}
-            ${operationCard("토픽 그래프", "로드됨", "CSO 그래프 기반으로 관심 경로를 계산합니다.")}
-            ${operationCard("삭제 대기", `${pendingDeletion}건`, "계정 삭제 예약 상태를 추적합니다.")}
-          </div>
-        </section>
+        ${state.view === "users" ? usersView() : overviewView()}
       </section>
     </div>
+  `;
+}
+
+function navButton(view, label) {
+  return `<button class="${state.view === view ? "active" : ""}" type="button" data-view="${view}">${label}</button>`;
+}
+
+function overviewView() {
+  const activeUsers = state.users.filter((user) => user.consent_active).length;
+  const pendingDeletion = state.users.filter((user) => user.deletion_pending).length;
+  return `
+    <section class="grid">
+      ${metricCard("사용자", state.users.length, "등록 계정")}
+      ${metricCard("동의 활성", activeUsers, "추천 가능")}
+      ${metricCard("삭제 대기", pendingDeletion, "예약 계정")}
+    </section>
+    <section class="contentStack">
+      <div class="card">
+        <div class="cardHead">
+          <h2>시스템 상태</h2>
+          <button class="iconRefresh" type="button" title="시스템 상태 새로고침" data-refresh>↻</button>
+        </div>
+        <span class="status ${state.health === "정상" ? "" : "warn"}">${state.health || "확인 중"}</span>
+        <p class="muted">API health check 기준으로 운영 가능 여부를 확인합니다.</p>
+      </div>
+      <div class="card">
+        <div class="cardHead">
+          <h2>최근 사용자</h2>
+          <button class="iconRefresh" type="button" title="최근 사용자 새로고침" data-refresh>↻</button>
+        </div>
+        ${usersTable(state.users.slice(0, 5))}
+      </div>
+    </section>
+  `;
+}
+
+function usersView() {
+  return `
+    <section class="contentStack">
+      <div class="card">
+        <div class="cardHead">
+          <h2>사용자 관리</h2>
+          <button class="iconRefresh" type="button" title="사용자 관리 새로고침" data-refresh>↻</button>
+        </div>
+        ${usersTable(state.users)}
+      </div>
+    </section>
   `;
 }
 
@@ -301,14 +327,14 @@ function metricCard(title, value, caption) {
   `;
 }
 
-function usersTable() {
-  if (state.users.length === 0) return `<p class="muted">표시할 사용자가 없습니다.</p>`;
+function usersTable(users) {
+  if (users.length === 0) return `<p class="muted">표시할 사용자가 없습니다.</p>`;
   return `
     <div class="table">
       <div class="row header">
         <span>이메일</span><span>동의</span><span>삭제 대기</span><span>가입일</span>
       </div>
-      ${state.users.map((user) => `
+      ${users.map((user) => `
         <div class="row">
           <strong>${escapeHtml(user.email)}</strong>
           <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
@@ -316,19 +342,6 @@ function usersTable() {
           <span class="muted">${formatDate(user.created_at)}</span>
         </div>
       `).join("")}
-    </div>
-  `;
-}
-
-function operationCard(title, status, body) {
-  return `
-    <div class="card">
-      <div class="cardHead">
-        <h2>${title}</h2>
-        <button class="iconRefresh" type="button" title="${title} 새로고침" data-refresh>↻</button>
-      </div>
-      <span class="status">${status}</span>
-      <p class="muted">${body}</p>
     </div>
   `;
 }
@@ -343,6 +356,13 @@ function bindPasswordChange() {
 }
 
 function bindApp() {
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.view = button.getAttribute("data-view") || "overview";
+      window.location.hash = state.view === "users" ? "users" : "overview";
+      render();
+    });
+  });
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", loadDashboard);
   });

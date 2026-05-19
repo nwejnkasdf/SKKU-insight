@@ -52,7 +52,8 @@ button.secondary {
 }
 
 button.secondary:hover,
-button.iconRefresh:hover {
+button.iconRefresh:hover,
+.nav button:hover {
   color: #183f39;
   background: #ecefe9;
 }
@@ -127,27 +128,26 @@ input {
   gap: 8px;
 }
 
-.nav a {
+.nav button {
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   min-height: 42px;
   padding: 0 12px;
   color: var(--ink);
-  text-decoration: none;
+  font-weight: 700;
+  background: transparent;
+  border: 0;
   border-radius: 8px;
 }
 
-.nav a:hover {
-  background: var(--surface-soft);
-}
-
-.nav a.active {
+.nav button.active {
   color: #183f39;
   background: #ecefe9;
 }
 
-.nav a.active::before {
+.nav button.active::before {
   content: "";
   width: 3px;
   height: 18px;
@@ -205,9 +205,8 @@ input {
   gap: 12px;
 }
 
-.wideGrid {
+.contentStack {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) 360px;
   gap: 12px;
   margin-top: 12px;
 }
@@ -331,7 +330,7 @@ button.iconRefresh {
   }
 
   .grid,
-  .wideGrid {
+  .contentStack {
     grid-template-columns: 1fr;
   }
 

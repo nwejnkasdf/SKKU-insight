@@ -21,6 +21,23 @@ const brandIcon = `
     <path d="M6 14c0-4 3-6 9-6" />
   </svg>
 `;
+const navIcons = {
+  operations: `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 19V5" />
+      <path d="M8 19v-7" />
+      <path d="M12 19v-4" />
+      <path d="M16 19V9" />
+      <path d="M20 19V7" />
+    </svg>
+  `,
+  account: `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 3 5 6v5c0 4.5 2.8 8.4 7 10 4.2-1.6 7-5.5 7-10V6l-7-3Z" />
+      <path d="M9 12l2 2 4-5" />
+    </svg>
+  `
+};
 
 function brandBlock(subtitle = "관리자 콘솔") {
   return `
@@ -269,7 +286,9 @@ function shellView() {
           ${navButton("operations", "운영")}
           ${navButton("account", "내 계정")}
         </nav>
-        <button class="secondary" id="logoutButton">로그아웃</button>
+        <div class="sidebarFoot">
+          <button class="secondary" id="logoutButton">로그아웃</button>
+        </div>
       </aside>
       <section class="main">
         <header class="pageTitle">
@@ -286,7 +305,7 @@ function shellView() {
 }
 
 function navButton(view, label) {
-  return `<button class="${state.view === view ? "active" : ""}" type="button" data-view="${view}">${label}</button>`;
+  return `<button class="${state.view === view ? "active" : ""}" type="button" data-view="${view}">${navIcons[view] || ""}${label}</button>`;
 }
 
 function operationsView() {

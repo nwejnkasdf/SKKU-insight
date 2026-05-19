@@ -85,11 +85,12 @@ input {
   top: 0;
   bottom: 0;
   left: 0;
-  display: grid;
-  align-content: start;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
   gap: 24px;
   width: 248px;
-  height: 100vh;
+  min-height: 100vh;
   padding: 22px 16px;
   background: #fafaf6;
   border-right: 1px solid var(--line);
@@ -138,6 +139,10 @@ input {
   color: var(--muted);
 }
 
+.brand span {
+  font-size: 13px;
+}
+
 .nav {
   display: grid;
   gap: 8px;
@@ -145,19 +150,21 @@ input {
 
 .nav button {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  min-height: 42px;
+  gap: 8px;
+  min-height: 38px;
   padding: 0 12px;
-  color: var(--ink);
+  color: #34342e;
   font-weight: 700;
   background: transparent;
   border: 0;
   border-radius: 8px;
 }
 
-.nav button.active {
+.nav button.active,
+.nav button:hover {
   color: #183f39;
   background: #ecefe9;
 }
@@ -166,9 +173,28 @@ input {
   content: "";
   width: 3px;
   height: 18px;
-  margin-right: 10px;
   background: var(--accent);
   border-radius: 99px;
+}
+
+.nav svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.sidebarFoot {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.sidebarFoot button {
+  width: 100%;
 }
 
 .main {
@@ -464,6 +490,7 @@ button.iconRefresh {
     position: static;
     width: auto;
     height: auto;
+    min-height: auto;
   }
 
   .grid,

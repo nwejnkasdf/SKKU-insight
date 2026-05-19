@@ -27,8 +27,11 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.collection.dedup import normalize_title
 from app.config import Settings
 from app.contracts import (
+    ContentType,
+    SentinelSource,
     SlotType,
     TopicChip,
 )
@@ -208,6 +211,15 @@ async def _backfill_cold_start_dashboard(
                 limit=deficit - len(rows),
             )
         )
+    if len(rows) < deficit:
+        rows.extend(
+            await _create_demo_backfill_candidates(
+                db,
+                user.user_id,
+                exclude_ids=excluded | {r.document_id for r in rows},
+                limit=deficit - len(rows),
+            )
+        )
     if not rows:
         return [], []
 
@@ -345,6 +357,101 @@ async def _query_any_backfill_documents(
         )
         if len(result) >= limit:
             break
+    return result
+
+
+async def _create_demo_backfill_candidates(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    exclude_ids: set[UUID],
+    limit: int,
+) -> list[CandidateRow]:
+    """데모 DB에 문서 풀이 10개보다 작을 때 부족분을 즉시 보충.
+
+    실제 운영에서는 collection job 이 문서 풀을 넓히지만, 시연 DB는 cold-start 10개만
+    있는 경우가 많다. 숨김 후에도 UI-02 의 10 카드 계약을 보여주기 위해 내부 pseudo
+    문서를 생성한다.
+    """
+    if limit <= 0:
+        return []
+    source = (
+        await db.execute(
+            select(Source).where(Source.name == SentinelSource.COLD_START_PSEUDO_NAME)
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        return []
+
+    topic_rows = (
+        await db.execute(
+            select(CSOTopic.cso_topic_id, CSOTopic.label)
+            .order_by(CSOTopic.label.asc())
+            .limit(max(limit, 1))
+        )
+    ).all()
+    if not topic_rows:
+        return []
+
+    now = datetime.now(UTC)
+    result: list[CandidateRow] = []
+    for idx in range(limit):
+        topic = topic_rows[idx % len(topic_rows)]
+        doc_id = uuid4()
+        if doc_id in exclude_ids:
+            continue
+        title = f"{topic.label} follow-up briefing {now:%Y%m%d}-{idx + 1}"
+        url = f"internal://recommendation-backfill/{user_id}/{doc_id}"
+        await db.execute(
+            pg_insert(Document)
+            .values(
+                document_id=doc_id,
+                source_id=source.source_id,
+                title=title,
+                normalized_title=normalize_title(title),
+                url=url,
+                canonical_url=url,
+                doi=None,
+                summary=f"{topic.label} 관련 후속 추천을 채우기 위한 데모 보충 자료입니다.",
+                published_at=now,
+                content_type=ContentType.PSEUDO_COLD_START.value,
+                language="en",
+                raw={
+                    "publisher_label": "SKKU InSight",
+                    "publisher_domain": "internal",
+                    "demo_backfill": True,
+                },
+            )
+            .on_conflict_do_nothing()
+        )
+        await db.execute(
+            pg_insert(DocumentTopic)
+            .values(
+                id=uuid4(),
+                document_id=doc_id,
+                cso_topic_id=topic.cso_topic_id,
+                leaf_topic_id=None,
+                confidence=0.2,
+            )
+            .on_conflict_do_nothing()
+        )
+        result.append(
+            CandidateRow(
+                document_id=doc_id,
+                title=title,
+                source_id=source.source_id,
+                source_name=source.name,
+                source_type=source.source_type,
+                trust_level=source.trust_level,
+                published_at=now,
+                cso_topic_id=topic.cso_topic_id,
+                leaf_topic_id=None,
+                leaf_status=None,
+                leaf_label=None,
+                cso_label=str(topic.label),
+                topic_confidence=0.2,
+            )
+        )
     return result
 
 
@@ -1149,6 +1256,15 @@ async def build_dashboard(
         if len(trend_raw) < deficit:
             trend_raw.extend(
                 await _query_any_backfill_documents(
+                    db,
+                    user.user_id,
+                    exclude_ids=excluded | {r.document_id for r in trend_raw},
+                    limit=deficit - len(trend_raw),
+                )
+            )
+        if len(trend_raw) < deficit:
+            trend_raw.extend(
+                await _create_demo_backfill_candidates(
                     db,
                     user.user_id,
                     exclude_ids=excluded | {r.document_id for r in trend_raw},

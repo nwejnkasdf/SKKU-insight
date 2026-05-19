@@ -728,17 +728,22 @@ function SlotBars({ dashboard }: { dashboard: DashboardResponse }) {
   );
 }
 
-function TraceMap() {
-  const nodes = ["CS", "AI", "IR", "RAG", "Agentic Search"];
+function TraceMap({ traces }: { traces: TraversalTraceSummary[] }) {
+  const activeTrace = traces.find((trace) => trace.status === "active") ?? traces[0];
+  const nodes = activeTrace?.path_labels ?? [];
   return (
     <div className="insightPanel">
       <PanelHeading icon={<GitBranch size={16} />} title="관심 경로" />
       <div className="traceMap" aria-label="interest trace">
-        {nodes.map((node, index) => (
-          <div key={node} className={index === nodes.length - 1 ? "traceNode active" : "traceNode"}>
-            <span>{node}</span>
-          </div>
-        ))}
+        {nodes.length === 0 ? (
+          <div className="traceNode"><span>경로 형성 대기</span></div>
+        ) : (
+          nodes.map((node, index) => (
+            <div key={`${node}-${index}`} className={index === nodes.length - 1 ? "traceNode active" : "traceNode"}>
+              <span>{node}</span>
+            </div>
+          ))
+        )}
       </div>
       <p className="panelNote">현재 중심 슬롯은 관심 경로 끝단과 하위 리프에서 우선 채웁니다.</p>
     </div>
@@ -810,11 +815,13 @@ function DocumentView({
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
+  const [traces, setTraces] = useState<TraversalTraceSummary[]>([]);
 
   useEffect(() => {
     startDwell(documentId);
     void api.documentDetail(documentId).then(setDetail).catch((err) => setError(messageForError(err)));
     void api.documentSummary(documentId).then(setSummary).catch(() => undefined);
+    void api.traces().then((res) => setTraces(res.items)).catch(() => undefined);
     return stopDwell;
   }, [api, documentId]);
 
@@ -977,8 +984,23 @@ function DocumentView({
             </div>
             <div className="panel docTraceCard">
               <PanelHeading icon={<GitBranch size={16} />} title="추천 경로" />
-              <div className="docTraceMini" aria-hidden="true">
-                {["CS", "AI", "IR", "RAG"].map((node, index) => <span key={node} className={index === 3 ? "active" : ""}>{node}</span>)}
+              <div className="docTraceMini">
+                {(() => {
+                  const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
+                  const matched =
+                    traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
+                    traces.find((t) => t.status === "active") ??
+                    traces[0];
+                  const nodes = matched?.path_labels ?? [];
+                  if (nodes.length === 0) {
+                    return <span>경로 형성 대기</span>;
+                  }
+                  return nodes.map((node, index) => (
+                    <span key={`${node}-${index}`} className={index === nodes.length - 1 ? "active" : ""}>
+                      {node}
+                    </span>
+                  ));
+                })()}
               </div>
             </div>
           </aside>

@@ -138,6 +138,20 @@
 - **구현**: `clickbait_module/scripts/merge_adapter.py` (peft `merge_and_unload()` + `chat_template.jinja` + `run_meta.json` 복사), `clickbait_module/app/inference.py` (vLLM `AsyncLLMEngine` 부트).
 - **잔여 작업**: GPU 환경에서 1회 머지 + 부트 + 학습 평가 1건 sanity check (코드 외부 운영 작업).
 
+### P1-12. Trace operation extend/split/archive caller 누락 — A7 미완성 발견 (2026-05-20, C-45 라운드)
+- **발견 경위**: 30일 day-by-day 시뮬레이션 (frontend 브랜치 worktree, 사용자 fd81e703 + AI/security trace 6개) 도중 `user_cso_traversal.path` 가 30일 내내 길이 1 유지. grep 으로 `evaluate_extend` / `execute_extend` (그리고 split / archive) 가 `app/traversal/` 안 정의만 있고 production code 어디서도 호출 안 됨을 확인.
+- **상태표**:
+  - ✅ `evaluate_retract` — `worker/jobs/daily_lifecycle_evaluation.py:98` 정상 호출
+  - ✅ leaf-level `execute_merges` — `leaf_lifecycle.hybrid_d.evaluate_merges` 정상 호출
+  - ❌ `execute_extend` / `evaluate_extend` — 0 production caller (Settings `TRACE_EXTEND_MIN_INTERACTIONS=5` 도 미사용)
+  - ❌ `execute_split` / `evaluate_split` — 0 production caller
+  - ❌ `execute_archive` / `evaluate_archive` — 0 production caller
+  - 단위 테스트 `tests/traversal/test_audit_regressions.py::test_execute_extend_uses_array_append` 는 `inspect.getsource` 정적 검증만이라 통합 caller 부재 detect 안 됨
+- **영향**: 사용자 `trace.path` 가 자연 확장 불가능 → UI 시각화 (관심 경로, docTraceMini) 가 root 노드 1개 고정. A8-v2 user_profile_generation 의 archive trace fusion 도 archive 진입 자체가 안 일어나서 무력화. 시연/평가에서 traversal 핵심 narrative 결손.
+- **Why**: A7 PR-stack 머지 시 Codex 3 라운드 audit 가 caller 누락을 놓침 (test 가 정적 패턴 검증만이라서). AGENTS.md / decisions.md §12 의 "A7 ✅ 완료" 표기는 함수 정의 + 단위 테스트 기준이지 통합 동작 기준이 아니었음 — 사실상 **docs drift**.
+- **How to apply (정공법 fix 방향)**: `daily_lifecycle_evaluation_job._evaluate_trace_demotion_for_user` 또는 같은 모듈에 신규 hook 안에서 (1) 각 active trace 의 path 끝 cso 의 graph 자식 cso 목록 조회, (2) 자식별 24h 또는 누적 `user_event` 카운트, (3) `Settings.TRACE_EXTEND_MIN_INTERACTIONS` 임계 통과 자식에 대해 `evaluate_extend` 호출. split / archive 도 같은 패턴.
+- **Before-fix snapshot**: `A9-before-fix-extend` 브랜치 — 30일 시뮬레이션 직후 + 사전 fix 4건 (codex_oauth `_SEARCH_OUTPUT_SCHEMA` strict 통과 + `_try_parse_json_relaxed`, leaf_lifecycle prompt 에 doc title/summary enrich, interest_decay `COALESCE` NULL-safe, client `App.tsx` docTraceMini 가 `path_labels` 받게).
+
 ---
 
 ## P2 — 폴리시·검증 단계 (7건, 활성 5 + 해결 2)

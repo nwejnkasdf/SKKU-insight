@@ -1941,8 +1941,15 @@ select:focus {
 }
 
 .topicSide {
+  position: fixed;
+  top: 116px;
+  right: 34px;
+  z-index: 3;
   display: grid;
   gap: 12px;
+  width: 338px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
 }
 
 .traceBoard {
@@ -2444,8 +2451,15 @@ select:focus {
 
   .insightRail,
   .documentRail,
-  .onboardingRail {
+  .onboardingRail,
+  .topicSide {
     position: static;
+  }
+
+  .topicSide {
+    width: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .authCopy h1 {

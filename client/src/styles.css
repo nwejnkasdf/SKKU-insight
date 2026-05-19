@@ -1847,6 +1847,44 @@ select:focus {
   background: var(--accent);
 }
 
+.documentQueueNav {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.documentQueueNav button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.documentQueueNav span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.documentQueueNav b,
+.documentQueueNav small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentQueueNav b {
+  font-size: 13px;
+}
+
+.documentQueueNav small {
+  color: var(--soft);
+  font-size: 11px;
+}
+
 .documentActions button.isActive {
   color: #ffffff;
   background: var(--accent);

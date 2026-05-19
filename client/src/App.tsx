@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowLeft,
+  ArrowRight,
   BarChart3,
   Bookmark,
   CheckCircle2,
@@ -807,6 +808,7 @@ function DocumentView({
 }) {
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
@@ -815,6 +817,7 @@ function DocumentView({
     startDwell(documentId);
     void api.documentDetail(documentId).then(setDetail).catch((err) => setError(messageForError(err)));
     void api.documentSummary(documentId).then(setSummary).catch(() => undefined);
+    void api.dashboard().then(setDashboard).catch(() => undefined);
     return stopDwell;
   }, [api, documentId]);
 
@@ -831,6 +834,16 @@ function DocumentView({
     .slice(0, 3);
   const sourceTone = detail.source_type;
   const externalUrl = getExternalUrl(detail.canonical_url ?? detail.url);
+  const queueCards = useMemo(() => uniqueRecommendationCards(dashboard?.cards ?? []), [dashboard]);
+  const queueIndex = queueCards.findIndex((card) => card.document_id === documentId);
+  const previousCard = queueIndex > 0 ? queueCards[queueIndex - 1] : null;
+  const nextCard = queueIndex >= 0 && queueIndex < queueCards.length - 1 ? queueCards[queueIndex + 1] : null;
+
+  function openQueuedDocument(card: RecommendationCard | null) {
+    if (!card) return;
+    setView({ name: "document", documentId: card.document_id });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   function openOriginal() {
     if (!externalUrl) {
@@ -965,6 +978,16 @@ function DocumentView({
               <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
                 <ExternalLink size={17} /> 원문 열기
               </button>
+              <div className="documentQueueNav" aria-label="추천 문서 이동">
+                <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
+                  <ArrowLeft size={16} />
+                  <span><b>이전 문서</b><small>{previousCard?.title ?? "처음 문서"}</small></span>
+                </button>
+                <button disabled={!nextCard} title={nextCard?.title ?? "추천 큐의 마지막입니다"} onClick={() => openQueuedDocument(nextCard)}>
+                  <ArrowRight size={16} />
+                  <span><b>다음 문서</b><small>{nextCard?.title ?? "마지막 문서"}</small></span>
+                </button>
+              </div>
               <button className={feedback.saved ? "isActive" : ""} aria-pressed={feedback.saved} disabled={busyAction !== null} onClick={() => void applyFeedback("save")}>
                 {feedback.saved ? <CheckCircle2 size={16} /> : <Bookmark size={16} />} {feedback.saved ? "저장됨" : "저장"}
               </button>
@@ -1640,6 +1663,15 @@ function compactTopicLabel(label: string): string {
   if (words.length === 0) return cleanLabel.slice(0, 3).toUpperCase();
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function uniqueRecommendationCards(cards: RecommendationCard[]): RecommendationCard[] {
+  const seen = new Set<UUID>();
+  return cards.filter((card) => {
+    if (seen.has(card.document_id)) return false;
+    seen.add(card.document_id);
+    return true;
+  });
 }
 
 function buildTopicRanks(cards: RecommendationCard[]): TopicRank[] {

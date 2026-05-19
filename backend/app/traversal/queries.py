@@ -212,12 +212,116 @@ async def count_active_traces(db: AsyncSession, user_id: UUID) -> int:
     return int(count or 0)
 
 
+# ============================================================
+# A8-v2 (UserProfile + Discovery Fusion + Reincarnation, 2026-05-19)
+# ============================================================
+
+
+async def get_archived_traces_with_score(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    score_tail_min: float,
+    limit: int,
+) -> list[UserCSOTraversal]:
+    """사용자의 archived trace 중 `score_tail >= score_tail_min` 만 반환.
+
+    A8-v2 daily user_profile cron 의 LLM input 풀. 강한 신호로 종료된 archive 만 fusion /
+    reincarnation 의 source. 자연 둔화 archive (score_tail < 임계) 는 노이즈로 제외.
+
+    정렬 — score_tail DESC, last_activity_active_day DESC. limit 적용 (token 폭주 가드).
+    `merged_into_trace_id IS NULL` 인 archive 만 (winner 로 흡수된 loser 는 제외).
+    """
+    stmt = (
+        select(UserCSOTraversal)
+        .where(
+            UserCSOTraversal.user_id == user_id,
+            UserCSOTraversal.status == TraversalStatus.ARCHIVED.value,
+            UserCSOTraversal.score_tail >= score_tail_min,
+            UserCSOTraversal.merged_into_trace_id.is_(None),
+        )
+        .order_by(
+            UserCSOTraversal.score_tail.desc(),
+            UserCSOTraversal.last_activity_active_day.desc(),
+        )
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def get_top_archived_trace(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    score_tail_min: float,
+    gap_days_min: int,
+    current_active_day: int,
+) -> UserCSOTraversal | None:
+    """discovery reincarnation 후보 — score_tail >= 임계 + last_activity 가 gap_days 전.
+
+    PR-5 (recommendation engine) 가 discovery slot 2 reincarnation 분기에서 호출.
+    가장 강한 신호 (score_tail DESC) + 충분한 시간 지난 (gap_days_min) archive 1건.
+    `merged_into_trace_id IS NULL` 강제.
+    """
+    cutoff_active_day = current_active_day - gap_days_min
+    stmt = (
+        select(UserCSOTraversal)
+        .where(
+            UserCSOTraversal.user_id == user_id,
+            UserCSOTraversal.status == TraversalStatus.ARCHIVED.value,
+            UserCSOTraversal.score_tail >= score_tail_min,
+            UserCSOTraversal.merged_into_trace_id.is_(None),
+            UserCSOTraversal.last_activity_active_day <= cutoff_active_day,
+        )
+        .order_by(
+            UserCSOTraversal.score_tail.desc(),
+            UserCSOTraversal.last_activity_active_day.desc(),
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def get_descendant_archived_leaves(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    trace: UserCSOTraversal,
+) -> list[DynamicLeafTopic]:
+    """archived trace.path 산하 archived/merged leaf list — PR-5 reincarnation 후보 풀.
+
+    `get_descendant_leaves` 와 대칭 — 단 status 가 archived/merged (자연 망각된 leaf).
+    LeafTopicStatus.ARCHIVED + MERGED 양쪽 포함 (둘 다 사용자 본인 흥미가 있었던 영역).
+    """
+    if not trace.path:
+        return []
+    stmt = (
+        select(DynamicLeafTopic)
+        .join(
+            DynamicLeafTopicCSOTopic,
+            DynamicLeafTopicCSOTopic.leaf_topic_id == DynamicLeafTopic.leaf_topic_id,
+        )
+        .where(
+            DynamicLeafTopic.user_id == user_id,
+            DynamicLeafTopic.status.in_(
+                [LeafTopicStatus.ARCHIVED.value, LeafTopicStatus.MERGED.value]
+            ),
+            DynamicLeafTopicCSOTopic.cso_topic_id.in_(trace.path),
+        )
+        .distinct()
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
 __all__ = [
     "count_active_traces",
     "find_active_trace_matching",
     "get_active_traces",
     "get_adjacent_topics",
+    "get_archived_traces_with_score",
     "get_current_topics",
+    "get_descendant_archived_leaves",
     "get_descendant_leaves",
     "get_emerging_leaves",
+    "get_top_archived_trace",
 ]

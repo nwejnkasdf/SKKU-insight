@@ -1,4 +1,4 @@
-"""rq-scheduler 부트스트랩 — 6 cron job 등록.
+"""rq-scheduler 부트스트랩 — 7 cron job 등록.
 
 본 모듈은 `python -m app.scheduler` 로 one-shot 실행 (docker-compose worker 컨테이너의
 entrypoint 직전 또는 Makefile `register-cron` 타깃에서). 이미 등록된 cron 은 skip
@@ -11,6 +11,8 @@ cron 등록 ownership (docs/sdd/agent-orchestration.md §5):
 - leaf_lifecycle_job (A7 신규): collection 직후 30분 (decision #14) — emerging 식별 LLM
 - trace_merge_job (A7 신규): daily 18 UTC (decision #23) — trace 병합 LLM
 - daily_lifecycle_evaluation_job (A7 신규): daily 18 UTC (decision #7/#13) — trace 강등 + leaf 강등 통합
+- user_profile_generation_job (A8-v2 신규): daily 19 UTC (decisions.md §15) — archive x current
+  fusion + reincarnation seeds 생성. discovery slot 2 의 input SOR.
 
 cold_start_job 과 account_deletion_job 은 event-driven (cron 아님) → enqueue 만, 등록 X.
 
@@ -89,14 +91,26 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
         "queue": "default",
         "timeout": 1800,
     },
+    # === A8-v2 신규 (2026-05-19, decisions.md §15) ===
+    # daily 19 UTC — A6/A7 의 18 UTC 와 분리. user-mutex
+    # (user_profile_generation_lock) 가 traversal_lock 과 독립 — profile 생성은
+    # read-only + INSERT ON CONFLICT 만이라 A7 trace mutation 과 병행 가능.
+    # timeout 5400s — 사용자당 LLM ~30s 가정 시 ~100명 + 마진.
+    {
+        "id": "user_profile_generation_job",
+        "cron_attr": "USER_PROFILE_CRON",
+        "func": "app.worker.jobs.user_profile.user_profile_generation_job",
+        "queue": "default",
+        "timeout": 5400,
+    },
 ]
 
 
 def register_cron_jobs() -> None:
-    """6 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록.
+    """7 cron job 등록 (idempotent). 이미 같은 id 가 있으면 cancel 후 재등록.
 
-    (Codex R1 Nit 1) A7 신규 (leaf_lifecycle / trace_merge / daily_lifecycle_evaluation)
-    포함 총 6 job.
+    A7 신규 (leaf_lifecycle / trace_merge / daily_lifecycle_evaluation) + A8-v2 신규
+    (user_profile_generation) 포함 총 7 job.
     """
     settings = get_settings()
     conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)

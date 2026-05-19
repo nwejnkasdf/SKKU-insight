@@ -270,6 +270,33 @@ class Settings(BaseSettings):
     PROPAGATION_HOP_DECAY: float = 0.5
     PROPAGATION_MAX_HOPS: int = 4
 
+    # === A8-v2 UserProfile + Discovery Fusion + Reincarnation (algorithms/recommendation-ranking.md §Discovery) ===
+    # decision-backlog C-42 (A8-v2 round 1). 결정 매트릭스는 decisions.md §15.
+    #
+    # daily LLM cron 시각 — A6 18 UTC + A7 18 UTC 와 분리해서 19 UTC. 사용자 활동
+    # 적은 시간대 + A6/A7 의 user-mutex 와 충돌 회피.
+    USER_PROFILE_CRON: str = "0 19 * * *"
+    # LLM input archive 필터 — score_tail >= 본 임계 archived trace 만 input 포함.
+    # 사용자 결정 #6 (2026-05-19): 강한 신호로 끝난 archive 만 reincarnation candidate
+    # 풀에 들어가고, 자연 둔화로 끝난 archive 는 노이즈로 간주.
+    USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN: float = 0.6
+    # prompt template 버전 추적. UserProfile.generator_version 컬럼 값. prompt 또는
+    # output schema 변경 시 bump → daily cron 매일 갱신이라 자연 교체.
+    USER_PROFILE_GENERATOR_VERSION: str = "v1"
+    # LLM input archive 상한 (token 폭주 가드). 활성 사용자가 archive 누적 시
+    # score_tail DESC 정렬 상위 N 만 LLM 에 전달.
+    USER_PROFILE_INPUT_ARCHIVE_MAX: int = 8
+    # Reincarnation 가드: archived_at 직후 본 active day 미만 archive 는 reincarnation
+    # 후보 제외 (너무 최근 archive — 자연 망각 시간 부재).
+    USER_PROFILE_REINCARNATION_GAP_DAYS_MIN: int = 7
+    # daily cron lock TTL (초). LLM 호출 동반 — Codex R1 Critical #1 fix (2026-05-19):
+    # 직전 180s == LLM_REQUEST_TIMEOUT_SECONDS 라 LLM call 도중 lock 만료 race 위험.
+    # 2x LLM timeout + commit/cache 오버헤드 마진. A7 traversal_lock 패턴 답습 + 확장.
+    USER_PROFILE_LOCK_TTL_SECONDS: int = 360
+    # UserProfile fetch 시 Redis cache TTL (초). engine.build_dashboard 가 1회 fetch
+    # 후 SETEX. daily cron 완료 후 DEL 로 invalidate.
+    USER_PROFILE_CACHE_TTL_SECONDS: int = 3600
+
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.
     # 향후 어댑터 재도입 가능성 위해 보존만.

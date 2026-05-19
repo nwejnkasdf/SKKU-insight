@@ -15,6 +15,11 @@
 | NFR-03 | 추천 이유는 문서 상세 화면에서 짧은 토픽 근거 수준으로 제공되어야 한다. |
 | NFR-04 | 시스템은 사용자 행동 로그나 관심 점수를 사용자 화면에 직접 노출하지 않아야 한다. |
 
+> **A8-v2 라운드 정합 박스 (2026-05-19)** — A8-v2 본문 ([`../decisions.md §15`](../decisions.md)) 이 도입한 `UserProfile` (캐릭터 한 단락 + fusion candidates JSONB) 의 NFR-04 정합 정책:
+> - **UserProfile 자체 비노출** — admin console 도, 일반 사용자 UI (UI-05 설정) 도 노출 안 함. ORM/schema 만 영속, endpoint 부재. 향후 노출 결정 시 endpoint 추가 (별도 SRS 결정 후).
+> - **Discovery 카드 `reason_short` 만 노출** — fusion / reincarnation 카드 옆 한국어 한 줄 (≤80자). 시간·강도 추상화 표현 (예: "현재 관심과 과거 관심이 만나는 영역", "N주 전 강한 흥미 영역에서 이어집니다") 만 허용. raw 점수·확률·버킷·`score_tail` 키워드 자동 거부 (reasons.py 의 `_REJECTED_KEYWORDS`).
+> - **Score 컬럼** (Recommendation.score, UserInterestState.long_score/short_score 등) 은 A8 § §11.#4 정책 그대로 — admin 노출만, 일반 사용자 응답 schema 부재.
+
 ### 3.3.1.2 Reliability and Accuracy Requirements
 
 | ID | 요구사항 |

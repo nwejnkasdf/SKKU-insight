@@ -52,15 +52,47 @@ candidates_adjacent = SELECT documents WHERE topic IN adjacent_csos ...
 
 ### Discovery (FR-41, 2개 목표)
 
-사용자의 어떤 active trace path에도 들어 있지 않은 영역의 trust=high 트렌드 + emerging dynamic leaf (= **proactive** 카테고리).
+**(A8-v2 라운드 본문 pivot, 2026-05-19, [`../decisions.md §15`](../decisions.md))** — discovery slot 2 의 본질을 "trust=high trend 정렬" 에서 "사용자 흥미 *궤적의 교차점*에서 새 방향성 발굴" 로 변경. FR-41 의 "**잠재적으로 관심 있을 수 있는**" 의도를 회복.
+
+**slot 1 (Fusion)**: 사용자 active trace × archived trace 의 cross-product 교차점. daily 19 UTC LLM cron (`worker/jobs/user_profile.py`) 이 `UserProfile.fusion_candidates` JSONB array (0-3개) 를 생성. `engine.build_dashboard` 의 `_build_discovery_pool_raw` 가 첫 valid candidate (`bridge_cso_topic_id ∈ cso_graph`) 로 `query_discovery_fusion()` 호출.
 
 ```
-trace_path_csos = {n for trace in user.active_traces for n in trace.path}
-discovery_topics = (all_csos - trace_path_csos) ∩ trending_topics_global
-candidates_discovery = SELECT documents WHERE topic IN discovery_topics
-                       AND source.trust_level = 'high'
-                       AND clickbait != true
+profile = await get_user_profile(user_id)
+# slot 1 — Fusion
+for candidate in profile.fusion_candidates:
+    bridge_id = UUID(candidate.bridge_cso_topic_id)
+    if bridge_id in cso_graph:
+        pool += await query_discovery_fusion(user_id, bridge_id)
+        break
+# fallback 1 — broadening_seeds[0]
+if not pool and profile.broadening_seeds:
+    pool += await query_discovery_fusion(user_id, profile.broadening_seeds[0].cso_topic_id)
 ```
+
+**slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 부활. Serendipity 3-dim framework (RecSys '25) 의 "taste reincarnation" — "강한 신호로 종료된 영역에서 다시 흥미 자료 제시". `gap_days_min=7` 가드로 너무 최근 archive 제외.
+
+```
+archived_trace = await get_top_archived_trace(user_id,
+    score_tail_min=0.6, gap_days_min=7, current_active_day=user.active_day_counter)
+if archived_trace:
+    archived_leaves = await get_descendant_archived_leaves(user_id, trace=archived_trace)
+    pool += await query_discovery_reincarnation(
+        user_id, archived_trace.path[-1], [lf.leaf_topic_id for lf in archived_leaves])
+# fallback 2 — deepening_seeds[0]
+elif profile.deepening_seeds:
+    pool += await query_discovery_fusion(user_id, profile.deepening_seeds[0].cso_topic_id)
+```
+
+**fallback 3 (Trend)**: 모든 경로 빈 list 시 — cold-start 직후 또는 archive 0건 신규 사용자.
+
+```
+if not pool:
+    pool = await query_discovery_trend(user_id, list(trace_path_csos))
+```
+
+**UserProfile schema** (`backend/app/db/models/user_profile.py` + `data/schema.md` UserProfile §, alembic 0007): 6 필드 — 3 자유 텍스트 (recent_signals / persistent_tendencies / likely_dislikes summary) + 3 JSONB array (fusion_candidates / deepening_seeds / broadening_seeds). daily 19 UTC LLM cron 이 생성·영속, ORM/schema 만 (endpoint·UI 부재 — 사용자 결정 #4).
+
+**Anti-pattern 회피**: LLM hallucination (cso_graph 부재 bridge_cso_topic_id) 매핑 가드 + cache-before-commit 회피 + per-user try/except + Lua atomic CAS release ([`decisions.md §15`](../decisions.md) 매트릭스).
 
 ## 신뢰도 임계 (`recommendation.toml`)
 

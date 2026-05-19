@@ -430,6 +430,30 @@ class DocumentSummaryCache(Base):
 
 CHECK: `generator IN ('llm','source_abstract')`. PK = document_id (1:1). 동시 INSERT race 는 `pg_insert(...).on_conflict_do_nothing(index_elements=["document_id"])` + caller None-check + lookup fallback 패턴 (A6 C-03 lesson). LLM 호출 실패 시 generator='source_abstract' + Document.summary[:500] 1 섹션 fallback (503 `document.summary_unavailable` 가 마지막 fallback).
 
+### UserProfile
+
+> **A8-v2 (2026-05-19 머지)**: 사용자별 1 row (PK=user_id, 1:1). daily 19 UTC LLM cron 갱신. discovery slot 2 (Fusion 1 + Reincarnation 1) 의 input SOR. 노출 정책: ORM/schema 만 정의, endpoint·UI 부재 (A8-v2 결정 #4 — 향후 노출 결정 시 endpoint 추가). alembic 0007 + ORM `backend/app/db/models/user_profile.py`.
+
+```python
+class UserProfile(Base):
+    __tablename__ = "user_profile"
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("user.user_id", ondelete="CASCADE"), primary_key=True)
+    recent_signals_summary: Mapped[str | None] = mapped_column(String(400))       # 단기 행동 변화 1-2 문장 한국어
+    persistent_tendencies_summary: Mapped[str | None] = mapped_column(String(400))  # 장기 성향 1-2 문장
+    likely_dislikes_summary: Mapped[str | None] = mapped_column(String(400))      # 거부 패턴 1-2 문장
+    fusion_candidates: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    #   [{from_archived: [str], from_active: [str], bridge_label: str,
+    #     bridge_cso_topic_id: uuid, bridge_reasoning: str}] (0-3개)
+    deepening_seeds: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    broadening_seeds: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    #   [{cso_topic_id: uuid, label: str}] (0-3개)
+    generator_version: Mapped[str] = mapped_column(String(20), nullable=False)    # prompt template 버전 추적
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+```
+
+인덱스: `ix_user_profile_generated_at` (cron 진행률 모니터링). UPSERT 패턴: 단일 `pg_insert(UserProfile).on_conflict_do_update(index_elements=["user_id"], set_={...})` — PK 만이라 partial unique 분기 불필요. A6 `_atomic_upsert_interest_state` 패턴 단순화. NFR-04 정합: 본 테이블은 사용자 화면에 노출 안 됨, discovery 카드의 `reason_short` 한 줄만 시간/강도 추상화 형태로 노출.
+
 ### UserEvent
 
 ```python

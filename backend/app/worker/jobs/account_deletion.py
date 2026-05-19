@@ -5,9 +5,9 @@ A2 본문 구현 (decision-backlog C-2 부분 해소). 호출 경로:
 2) worker process 가 본 함수 실행 (sync session — RQ 표준)
 3) FK ondelete=CASCADE 에 의해 UserConsent / UserEvent / UserInterestState /
    UserCSOTraversal / SavedDocument / HiddenDocument / NotInterestedTopic /
-   DynamicLeafTopic (사용자 소유분) / Recommendation 자동 삭제
+   DynamicLeafTopic (사용자 소유분) / Recommendation / UserProfile (A9, 2026-05-19) 자동 삭제
 4) Redis `refresh:{user_id}:*`, `recommendation:{user_id}`, `consent:active:{user_id}`,
-   `lock:*:{user_id}`, `events:buffer:{user_id}` DEL
+   `lock:*:{user_id}`, `events:buffer:{user_id}`, `user_profile:{user_id}` DEL
 
 NFR-21 의 30일 grace 는 post-시연 폴리시 — 본 worker 자체가 향후 grace period
 도입 시 재활용 (sleep+grace 컬럼 추가 시 본 함수가 분기).
@@ -63,6 +63,9 @@ def delete_user_account(user_id_str: str, reason: str | None = None) -> None:
             # codex v2 #2 → C-22: worker 완료 시점에 deletion lock 도 명시 DEL
             # (JwtAuthMiddleware deletion gate 가 본 lock 으로 차단하므로).
             RedisKey.account_deletion_pending(user_id),
+            # A8-v2 (2026-05-19): UserProfile cache + generation lock 도 정리.
+            RedisKey.user_profile_cache(user_id),
+            RedisKey.user_profile_generation_lock(user_id),
         ]
         for key in exact_keys:
             redis_conn.delete(key)

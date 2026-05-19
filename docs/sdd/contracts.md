@@ -92,6 +92,7 @@ class JobType(str, Enum):
     SUMMARY_GENERATION = "summary_generation"
     INTEREST_DECAY = "interest_decay"   # A6 daily decay + 14-day boost 만료 (2026-05-17 추가)
     TRACE_MERGE = "trace_merge"          # A7 daily trace merge (18 UTC, 2026-05-17 추가)
+    DAILY_USER_PROFILE_GENERATION = "daily_user_profile_generation"  # A8-v2 daily 19 UTC, archive×current fusion + seeds (2026-05-19 추가)
 
 
 class AdminRole(str, Enum):
@@ -154,6 +155,9 @@ class ErrorCode(str, Enum):
     FEEDBACK_ALREADY_SAVED = "feedback.already_saved"
     # interest (A6)
     INTEREST_SYSTEM_CONFIG_MISSING = "interest.system_config_missing"
+    # profile (A9, 2026-05-19) — daily cron 내부 오류 (endpoint 부재, worker 로그·metric)
+    PROFILE_LLM_OUTPUT_INVALID = "profile.llm_output_invalid"
+    PROFILE_BRIDGE_CSO_NOT_FOUND = "profile.bridge_cso_not_found"
     # onboarding
     ONBOARDING_CONSENT_REQUIRED = "onboarding.consent_required"
     ONBOARDING_NO_CLUSTER_SELECTED = "onboarding.no_cluster_selected"
@@ -317,6 +321,19 @@ class RedisKey:
         """12 CSO 클러스터 응답 캐시 — 24h TTL. A3 도입. prefix `cso:clusters:v1`.
         CSO 재임포트 종료 시 명시 DEL 로 invalidate (versioning 으로 stale 자연 만료 도 가능)."""
         return "cso:clusters:v1"
+
+    @staticmethod
+    def user_profile_generation_lock(user_id: UUID) -> str:
+        """A8-v2 daily user_profile cron 의 per-user mutex (19 UTC). TTL 180s — LLM
+        호출 동반. traversal_lock 과 분리: profile 생성은 read-only + INSERT ON
+        CONFLICT 만이라 A7 trace mutation 과 독립."""
+        return f"lock:user_profile_gen:{user_id}"
+
+    @staticmethod
+    def user_profile_cache(user_id: UUID) -> str:
+        """A8-v2 UserProfile 응답 캐시 — 1h TTL. recommendation.engine.build_dashboard
+        의 discovery 분기에서 1회 fetch + SETEX. daily cron 완료 시 DEL invalidate."""
+        return f"user_profile:{user_id}"
 ```
 
 > 키 prefix는 모두 영역별 단어. 직접 f-string 금지 — 검색·일괄 변경·CI 검증을 가능하게 함.

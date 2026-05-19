@@ -208,6 +208,20 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 | `PROPAGATION_HOP_DECAY` | `0.5` | path 위 조상 노드로 N-hop 감쇠 factor. |
 | `PROPAGATION_MAX_HOPS` | `4` | propagation 최대 hop 깊이. |
 
+## A8-v2 UserProfile + Discovery Fusion + Reincarnation (2026-05-19 추가)
+
+[`decisions.md §15`](../decisions.md) 결정 매트릭스 + [`../algorithms/recommendation-ranking.md`](../algorithms/recommendation-ranking.md) Discovery 섹션. discovery slot 2 (Fusion 1 + Reincarnation 1) 의 input SOR. daily LLM cron 이 사용자별 1회 archive×current cross-product 융합 + reincarnation seed 생성.
+
+| Var | 예시 값 | 비고 |
+|---|---|---|
+| `USER_PROFILE_CRON` | `0 19 * * *` | **(A8-v2 신규)** daily user_profile cron. 19 UTC — A6/A7 18 UTC 와 분리 (user-mutex 충돌 회피). |
+| `USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN` | `0.6` | **(A8-v2 신규)** reincarnation candidate 풀에 들어갈 archived trace 의 score_tail 최소 임계. 강한 신호로 끝난 archive 만 후보 — 자연 둔화 archive 는 노이즈 제외. |
+| `USER_PROFILE_GENERATOR_VERSION` | `v1` | **(A8-v2 신규)** prompt template + output schema 버전 추적. `UserProfile.generator_version` 컬럼 값. 변경 시 bump → daily cron 매일 갱신이라 자연 교체. |
+| `USER_PROFILE_INPUT_ARCHIVE_MAX` | `8` | **(A8-v2 신규)** LLM input archive 상한 (token 폭주 가드). score_tail DESC 정렬 상위 N. |
+| `USER_PROFILE_REINCARNATION_GAP_DAYS_MIN` | `7` | **(A8-v2 신규)** archived_at 직후 본 active day 미만 archive 는 reincarnation 후보 제외 — 자연 망각 시간 부재. |
+| `USER_PROFILE_LOCK_TTL_SECONDS` | `360` | **(A8-v2 신규)** daily cron `RedisKey.user_profile_generation_lock` TTL. LLM 호출 동반이라 2x LLM timeout 마진 (Codex R1 Critical #1 fix 2026-05-19 — 직전 180=LLM timeout 였음). |
+| `USER_PROFILE_CACHE_TTL_SECONDS` | `3600` | **(A8-v2 신규)** `RedisKey.user_profile_cache` SETEX TTL — engine.build_dashboard fetch 후 1h. daily cron 완료 시 DEL invalidate. |
+
 ## 외부 소스 키 (있을 때만 채움)
 
 > **v13 라운드 박스 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 6 source 어댑터 폐기. `OPENALEX_POLITE_EMAIL` / `SEMANTIC_SCHOLAR_API_KEY` 는 본 라운드 시점 **dead code** (어댑터 없음). config 에서 즉시 제거하지는 않고 — 향후 어댑터 도입 시 재사용 가능성 위해 보존. **활성 외부 키**: LLM provider 별 API key (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` — §LLM 섹션 참조) + `CSO_DOWNLOAD_URL`.
@@ -402,6 +416,15 @@ TRACE_MERGE_CRON=0 18 * * *
 TRACE_MERGE_LOCK_TTL_SECONDS=120
 PROPAGATION_HOP_DECAY=0.5
 PROPAGATION_MAX_HOPS=4
+
+# === A8-v2 UserProfile + Discovery Fusion + Reincarnation (2026-05-19) ===
+USER_PROFILE_CRON=0 19 * * *
+USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN=0.6
+USER_PROFILE_GENERATOR_VERSION=v1
+USER_PROFILE_INPUT_ARCHIVE_MAX=8
+USER_PROFILE_REINCARNATION_GAP_DAYS_MIN=7
+USER_PROFILE_LOCK_TTL_SECONDS=180
+USER_PROFILE_CACHE_TTL_SECONDS=3600
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

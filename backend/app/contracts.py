@@ -113,12 +113,14 @@ class CollectionJobStatus(str, Enum):
 class JobType(str, Enum):
     """CollectionJob.job_type + scheduler 등록 잡 종류.
 
-    decisions.md §10 v13 round + §12 A7 round + decision-backlog C-33·C-34·C-38·C-39.
-    DAILY_COLLECT/SUMMARY_GENERATION 은 A4 가 사용. INTEREST_DECAY 는 A6 daily cron
-    (`app/worker/jobs/interest_decay.py`) 이 사용 — 베이지안 사후 시간 감쇠 +
-    14-day onboarding boost 만료 일괄 차감. LEAF_LIFECYCLE / MERGE_EVALUATION /
-    TRACE_MERGE 는 A7 가 사용 — leaf 신규 식별 (collection 직후 hook), 주간 leaf
-    병합 (월 03 UTC), 일일 trace merge 평가 (18 UTC = 03 KST, decay 와 같은 시각).
+    decisions.md §10 v13 + §12 A7 + §16 A9 + decision-backlog C-33·C-34·C-38·C-39·C-42.
+    DAILY_COLLECT/SUMMARY_GENERATION 은 A4. INTEREST_DECAY 는 A6 daily cron
+    (`app/worker/jobs/interest_decay.py`) — 베이지안 사후 시간 감쇠 + 14-day onboarding
+    boost 만료 일괄 차감. LEAF_LIFECYCLE / MERGE_EVALUATION / TRACE_MERGE 는 A7 —
+    leaf 신규 식별 (collection 직후 hook), 주간 leaf 병합 (월 03 UTC), 일일 trace
+    merge 평가 (18 UTC). DAILY_USER_PROFILE_GENERATION 은 A8-v2 daily cron
+    (`app/worker/jobs/user_profile.py`) — 19 UTC 에 사용자별 캐릭터 프로파일 +
+    fusion seeds 생성, discovery slot Fusion + Reincarnation 의 input SOR.
     """
 
     DAILY_COLLECT = "daily_collect"
@@ -127,6 +129,7 @@ class JobType(str, Enum):
     SUMMARY_GENERATION = "summary_generation"
     INTEREST_DECAY = "interest_decay"
     TRACE_MERGE = "trace_merge"
+    DAILY_USER_PROFILE_GENERATION = "daily_user_profile_generation"
 
 
 class AdminRole(str, Enum):
@@ -207,6 +210,11 @@ class ErrorCode(str, Enum):
 
     # --- interest (A6) ---
     INTEREST_SYSTEM_CONFIG_MISSING = "interest.system_config_missing"
+
+    # --- profile (A9) — daily cron 내부 오류, endpoint 부재라 응답 path 없음.
+    # 본 코드는 worker 로그·메트릭 및 audit_regressions 회귀 가드에서만 사용.
+    PROFILE_LLM_OUTPUT_INVALID = "profile.llm_output_invalid"
+    PROFILE_BRIDGE_CSO_NOT_FOUND = "profile.bridge_cso_not_found"
 
     # --- onboarding ---
     ONBOARDING_CONSENT_REQUIRED = "onboarding.consent_required"
@@ -416,6 +424,26 @@ class RedisKey:
         SETEX, EventBuffer flush 후에도 보존되어 client retry 시 200 응답 가능.
         """
         return f"event:dup:{user_id}:{client_request_id}"
+
+    @staticmethod
+    def user_profile_generation_lock(user_id: UUID) -> str:
+        """A8-v2 daily user_profile cron 의 per-user mutex. 180s TTL (LLM 호출 동반).
+
+        19 UTC cron `app/worker/jobs/user_profile.py` 가 사용자별 1회 acquire.
+        traversal_lock 과 분리: profile 생성은 read-only (active + archived trace
+        조회) + INSERT ON CONFLICT (user_profile) 만이라 A7 trace mutation 과
+        독립. decision-backlog C-42 (A8-v2 round 1).
+        """
+        return f"lock:user_profile_gen:{user_id}"
+
+    @staticmethod
+    def user_profile_cache(user_id: UUID) -> str:
+        """A8-v2 UserProfile 응답 캐시. TTL 1h (engine.build_dashboard 가 SETEX).
+
+        daily cron 완료 후 DEL 하여 다음 dashboard 요청 시 신선한 profile 로
+        SETEX. recommendation.engine 의 discovery 분기에서 1회 fetch.
+        """
+        return f"user_profile:{user_id}"
 
     @staticmethod
     def cso_clusters_cache() -> str:

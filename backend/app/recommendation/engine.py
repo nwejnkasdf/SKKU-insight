@@ -47,12 +47,17 @@ from app.db.models import (
 )
 from app.interest.config_loader import InterestParams
 from app.llm_provider.protocol import LLMProvider
+from app.profile.config_loader import load_profile_config
+from app.profile.service import get_user_profile
 from app.traversal import queries as trav_queries
 
 from .candidates import (
+    CandidateRow,
     query_adjacent,
     query_core,
-    query_discovery,
+    query_discovery_fusion,
+    query_discovery_reincarnation,
+    query_discovery_trend,
     query_emerging_leaf_documents,
 )
 from .config_loader import RecommendationConfig
@@ -555,6 +560,179 @@ def _filled_slots_to_cards(
     return out
 
 
+def _resolve_seed_id(
+    seed: dict[str, Any],
+    cso_graph: nx.DiGraph,
+    *,
+    excluded: set[UUID],
+) -> UUID | None:
+    """seed dict 안 `cso_topic_id` 를 UUID 로 파싱 + cso_graph 멤버십 + excluded 외 확인.
+
+    Codex R1 Suggested #3 (2026-05-19): excluded (trace_path_csos) 안에 있는 노드는
+    fusion / reincarnation bridge / seed 로 거부 — active path 의 core 슬롯 후보와
+    중복 차단.
+    """
+    seed_id_raw = seed.get("cso_topic_id")
+    if not seed_id_raw:
+        return None
+    try:
+        seed_id = UUID(str(seed_id_raw))
+    except (ValueError, TypeError):
+        return None
+    if seed_id in excluded:
+        return None
+    if seed_id not in cso_graph:
+        return None
+    return seed_id
+
+
+async def _build_fusion_subslot(
+    db: AsyncSession,
+    profile: Any,
+    cso_graph: nx.DiGraph,
+    *,
+    user_id: UUID,
+    trace_path_csos: set[UUID],
+) -> list[CandidateRow]:
+    """slot 1 (Fusion) — fusion_candidates → broadening_seeds → trend fallback.
+
+    Codex R1 Critical #2 + Suggested #3 + #4 fix (2026-05-19):
+    - fusion_candidates 의 bridge_cso 가 trace_path_csos 안이면 거부 (Suggested #3)
+    - 후보 풀이 doc 0개면 다음 fallback 진행 (Suggested #4)
+    - 별도 sub-slot 반환 → engine 이 slot 별 1개씩 강제 (Critical #2)
+    """
+    if profile is not None:
+        for candidate in profile.fusion_candidates or []:
+            bridge_id = _resolve_seed_id(
+                {"cso_topic_id": candidate.get("bridge_cso_topic_id")},
+                cso_graph,
+                excluded=trace_path_csos,
+            )
+            if bridge_id is None:
+                continue
+            rows = await query_discovery_fusion(db, user_id, bridge_id)
+            if rows:
+                return rows
+        for seed in profile.broadening_seeds or []:
+            seed_id = _resolve_seed_id(
+                seed, cso_graph, excluded=trace_path_csos
+            )
+            if seed_id is None:
+                continue
+            rows = await query_discovery_fusion(db, user_id, seed_id)
+            if rows:
+                return rows
+    return await query_discovery_trend(db, user_id, list(trace_path_csos))
+
+
+async def _build_reincarnation_subslot(
+    db: AsyncSession,
+    profile: Any,
+    cso_graph: nx.DiGraph,
+    settings: Settings,
+    *,
+    user: User,
+    trace_path_csos: set[UUID],
+) -> list[CandidateRow]:
+    """slot 2 (Reincarnation) — top_archived_trace → deepening_seeds → trend fallback.
+
+    Codex R1 Critical #2 + Suggested #4 (2026-05-19): 별도 sub-slot 반환 + doc 결과
+    기반 fallback 판단.
+    """
+    archived_trace = await trav_queries.get_top_archived_trace(
+        db,
+        user.user_id,
+        score_tail_min=settings.USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN,
+        gap_days_min=settings.USER_PROFILE_REINCARNATION_GAP_DAYS_MIN,
+        current_active_day=int(user.active_day_counter),
+    )
+    if archived_trace is not None and archived_trace.path:
+        archived_leaves = await trav_queries.get_descendant_archived_leaves(
+            db, user.user_id, trace=archived_trace
+        )
+        archived_leaf_ids = [lf.leaf_topic_id for lf in archived_leaves]
+        tail_cso = archived_trace.path[-1]
+        rows = await query_discovery_reincarnation(
+            db, user.user_id, tail_cso, archived_leaf_ids
+        )
+        if rows:
+            return rows
+    if profile is not None:
+        for seed in profile.deepening_seeds or []:
+            seed_id = _resolve_seed_id(
+                seed, cso_graph, excluded=trace_path_csos
+            )
+            if seed_id is None:
+                continue
+            rows = await query_discovery_fusion(db, user.user_id, seed_id)
+            if rows:
+                return rows
+    return await query_discovery_trend(db, user.user_id, list(trace_path_csos))
+
+
+async def _build_discovery_pools(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    cso_graph: nx.DiGraph,
+    settings: Settings,
+    *,
+    user: User,
+    trace_path_csos: set[UUID],
+) -> tuple[list[CandidateRow], list[CandidateRow]]:
+    """A8-v2 discovery slot 본문 — `(fusion_pool, reincarnation_pool)` 별도 반환.
+
+    Codex R1 Critical #2 fix (2026-05-19): 직전 `_build_discovery_pool_raw` 가 두
+    source 를 untagged pool 로 통합 → ranking 시점에 의도된 "Fusion 1 + Reincarnation
+    1" 슬롯 분배가 지켜지지 않음 (fusion 만 2 또는 reincarnation 만 2 가능). 본 함수는
+    sub-slot 별 별도 list 반환 → caller (build_dashboard) 가 각 ranking + diversify
+    + `[:1]` 강제.
+
+    각 sub-slot 의 fallback chain:
+    - Fusion: fusion_candidates → broadening_seeds → trust=high trend
+    - Reincarnation: top_archived_trace → deepening_seeds → trust=high trend
+
+    decisions.md §15 (A8-v2 결정 #1) + algorithms/recommendation-ranking.md §Discovery.
+    """
+    profile_config = load_profile_config(settings)
+    profile = await get_user_profile(
+        db,
+        redis,
+        user.user_id,
+        cache_ttl_seconds=profile_config.cache_ttl_seconds,
+    )
+    fusion_pool = await _build_fusion_subslot(
+        db, profile, cso_graph, user_id=user.user_id, trace_path_csos=trace_path_csos
+    )
+    reincarnation_pool = await _build_reincarnation_subslot(
+        db,
+        profile,
+        cso_graph,
+        settings,
+        user=user,
+        trace_path_csos=trace_path_csos,
+    )
+    return fusion_pool, reincarnation_pool
+
+
+async def _build_discovery_pool_raw(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    cso_graph: nx.DiGraph,
+    settings: Settings,
+    *,
+    user: User,
+    trace_path_csos: set[UUID],
+) -> list[CandidateRow]:
+    """**Deprecated** (2026-05-19) — `_build_discovery_pools` 의 untagged 통합 wrapper.
+
+    backward-compat 만 유지. 신규 caller 는 `_build_discovery_pools` 직접 사용 권장.
+    """
+    fusion_pool, reincarnation_pool = await _build_discovery_pools(
+        db, redis, cso_graph, settings, user=user, trace_path_csos=trace_path_csos
+    )
+    return fusion_pool + reincarnation_pool
+
+
 async def build_dashboard(
     db: AsyncSession,
     redis: aioredis.Redis,
@@ -597,8 +775,18 @@ async def build_dashboard(
     adjacent_pool_raw = await query_adjacent(
         db, user.user_id, adjacent_csos, current_csos
     )
-    discovery_pool_raw = await query_discovery(
-        db, user.user_id, list(trace_path_csos)
+    # Codex R1 Critical #2 fix (2026-05-19): fusion + reincarnation 별도 sub-slot →
+    # ranking + diversify 별도 → 각 [:1] concat → fill_slots 가 source 별 1개씩 강제.
+    (
+        fusion_pool_raw,
+        reincarnation_pool_raw,
+    ) = await _build_discovery_pools(
+        db,
+        redis,
+        cso_graph,
+        settings,
+        user=user,
+        trace_path_csos=trace_path_csos,
     )
     emerging_pool_raw = await query_emerging_leaf_documents(
         db, user.user_id, emerging_leaf_ids
@@ -623,8 +811,18 @@ async def build_dashboard(
         config.trust_level_weights,
         config.bucket_score,
     )
-    discovery_pool = score_candidates(
-        discovery_pool_raw,
+    # Codex R1 Critical #2 fix (2026-05-19): fusion / reincarnation 별도 ranking + diversify.
+    fusion_pool = score_candidates(
+        fusion_pool_raw,
+        state_index,
+        params,
+        config.ranking_weights,
+        config.freshness,
+        config.trust_level_weights,
+        config.bucket_score,
+    )
+    reincarnation_pool = score_candidates(
+        reincarnation_pool_raw,
         state_index,
         params,
         config.ranking_weights,
@@ -645,8 +843,13 @@ async def build_dashboard(
     # 4. diversify (slot 별).
     core_pool = diversify(core_pool, config.diversification)
     adjacent_pool = diversify(adjacent_pool, config.diversification)
-    discovery_pool = diversify(discovery_pool, config.diversification)
+    fusion_pool = diversify(fusion_pool, config.diversification)
+    reincarnation_pool = diversify(reincarnation_pool, config.diversification)
     emerging_pool = diversify(emerging_pool, config.diversification)
+
+    # Codex R1 Critical #2 fix — source 별 1개씩 강제. fill_slots 가 본 list 의 첫
+    # 2개를 discovery 슬롯에 채우므로 fusion 1 + reincarnation 1 보장.
+    discovery_pool = fusion_pool[:1] + reincarnation_pool[:1]
 
     # 5. fill_slots — emerging quota + threshold + FR-42 fallback.
     filled = fill_slots(

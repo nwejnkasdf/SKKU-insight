@@ -30,6 +30,8 @@
 | NotInterestedTopic | user_id, cso_topic_id, leaf_topic_id, created_at | 사용자가 관심 없음으로 표시한 토픽 |
 | ReprocessRequest | request_id, admin_id, job_id, requested_at, status, result_message | 관리자 웹 콘솔에서 요청한 실패 작업 재실행 기록 |
 
+> **A8-v2 라운드 정합 박스 (2026-05-19)** — SRS Table 7 의 식별자·표는 원형 보존하되, A8-v2 본문 ([`../decisions.md §15`](../decisions.md)) 으로 신규 entity `UserProfile` 추가. SRS 원형 보존 정책 (헌법 §3) 에 따라 본 표를 직접 수정하지 않고 [`../data/schema.md` UserProfile §](../data/schema.md) 가 본 entity 의 SOR. 본 entity 는 사용자별 1 row (PK=user_id, 1:1), daily 19 UTC LLM cron 이 archive × current cross-product 융합 + reincarnation seeds 를 생성·영속. 노출 정책: ORM/schema 만, endpoint·UI 부재 (향후 노출 결정 시 endpoint 추가). discovery slot 2 (Fusion + Reincarnation) 의 input SOR.
+
 ## 3.4.2 Entity Relationship Diagram
 
 ![Figure 2. Entity Relationship Diagram](../../assets/figure_02_erd.png)

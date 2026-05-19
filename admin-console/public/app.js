@@ -264,7 +264,6 @@ function shellView() {
             <h1>관리자 콘솔</h1>
             <p>사용자 동의 상태와 운영 흐름을 확인합니다.</p>
           </div>
-          <button id="refreshButton" ${state.loading ? "disabled" : ""}>새로고침</button>
         </header>
         ${state.error ? `<p class="notice">${state.error}</p>` : ""}
         <section class="grid" id="overview">
@@ -274,7 +273,10 @@ function shellView() {
         </section>
         <section class="wideGrid">
           <div class="card" id="users">
-            <h2>사용자 목록</h2>
+            <div class="cardHead">
+              <h2>사용자 목록</h2>
+              <button class="iconRefresh" type="button" title="사용자 목록 새로고침" data-refresh>↻</button>
+            </div>
             ${usersTable()}
           </div>
           <div class="stack" id="jobs">
@@ -321,7 +323,10 @@ function usersTable() {
 function operationCard(title, status, body) {
   return `
     <div class="card">
-      <h2>${title}</h2>
+      <div class="cardHead">
+        <h2>${title}</h2>
+        <button class="iconRefresh" type="button" title="${title} 새로고침" data-refresh>↻</button>
+      </div>
       <span class="status">${status}</span>
       <p class="muted">${body}</p>
     </div>
@@ -338,7 +343,9 @@ function bindPasswordChange() {
 }
 
 function bindApp() {
-  document.querySelector("#refreshButton")?.addEventListener("click", loadDashboard);
+  document.querySelectorAll("[data-refresh]").forEach((button) => {
+    button.addEventListener("click", loadDashboard);
+  });
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
 }
 

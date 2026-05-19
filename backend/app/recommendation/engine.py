@@ -1146,6 +1146,15 @@ async def build_dashboard(
         trend_raw = await build_trend_fallback(
             db, user.user_id, excluded, deficit, cfg=config.fallback
         )
+        if len(trend_raw) < deficit:
+            trend_raw.extend(
+                await _query_any_backfill_documents(
+                    db,
+                    user.user_id,
+                    exclude_ids=excluded | {r.document_id for r in trend_raw},
+                    limit=deficit - len(trend_raw),
+                )
+            )
         trend_scored = score_candidates(
             trend_raw,
             state_index,

@@ -1,4 +1,4 @@
-"""CSO 3.4 임포트 CLI. A3 (CSO Topic Engine).
+"""CSO 3.4.1 임포트 CLI. A3 (CSO Topic Engine).
 
 backend 컨테이너 안에서 실행. WORKDIR=/app (= backend/) 이므로 `python -m scripts.import_cso`
 패턴 통일. 캐시 디렉토리는 컨테이너 내부의 /app/.cache/cso/ — docker-compose 가
@@ -49,11 +49,21 @@ BROAD_INTERESTS_TOML = Path(__file__).resolve().parent.parent / "app" / "config"
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CSO 3.4 importer")
+    parser = argparse.ArgumentParser(description="CSO 3.4.1 importer")
     parser.add_argument(
         "--reset",
         action="store_true",
         help="DELETE cso_topic/cso_topic_parent/broad_interest 후 재구성",
+    )
+    parser.add_argument(
+        "--force-orphan-cso-refs",
+        action="store_true",
+        dest="force_orphan_cso_refs",
+        help=(
+            "--reset 가드 (P2-16 + P2-10) 우회. dynamic_leaf_topic / user_cso_traversal "
+            "행이 존재할 때만 의미 — leaf 응답의 cso_topic_ids 가 [] 되고 traversal.path "
+            "UUID 가 stale 되는 것을 운영자가 명시 허용. 미설정 시 RuntimeError."
+        ),
     )
     parser.add_argument(
         "--refresh",
@@ -118,7 +128,9 @@ async def _main(args: argparse.Namespace) -> int:
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 if args.reset:
-                    await reset_cso_tables(session)
+                    await reset_cso_tables(
+                        session, force_orphan=args.force_orphan_cso_refs
+                    )
                 uri_to_id = await insert_cso(session, topics, cluster_assignments)
                 inserted = await seed_broad_interests(
                     session, BROAD_INTERESTS_TOML, uri_to_id, topics

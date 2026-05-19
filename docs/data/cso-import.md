@@ -21,8 +21,8 @@ CSO는 N3 (Notation3 RDF), TTL, CSV 포맷 제공. 1차는 CSV가 가장 다루�
 
 | 파일 | URL | 비고 |
 |---|---|---|
-| `CSO.3.4.csv` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv | CSV 형식. <subject, predicate, object> triple |
-| `CSO.3.4.nt` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.nt | RDF N-Triples 대안 |
+| `CSO.3.4.1.csv` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv | CSV 형식. <subject, predicate, object> triple |
+| `CSO.3.4.1.nt` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.nt | RDF N-Triples 대안 |
 
 `scripts/import_cso.py` 의사 코드:
 
@@ -31,12 +31,12 @@ import csv
 import httpx
 from pathlib import Path
 
-CSO_URL = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv"
+CSO_URL = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv"
 CACHE_DIR = Path("./.cache/cso")
 
 def download_cso():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    target = CACHE_DIR / "CSO.3.4.csv"
+    target = CACHE_DIR / "CSO.3.4.1.csv"
     if target.exists():
         return target
     with httpx.stream("GET", CSO_URL, follow_redirects=True) as r:
@@ -263,6 +263,8 @@ python -m scripts.import_cso --refresh --reset
 
 ## 8. 캐시 라이프사이클
 
-`./.cache/cso/CSO.3.4.csv`는 다운로드 결과 영속. 같은 버전이면 재다운로드 안 함. CSO 버전이 갱신되면 (3.4 → 3.5) `--reset` 플래그로 재임포트.
+`./.cache/cso/CSO.3.4.1.csv`는 다운로드 결과 영속. 같은 버전이면 재다운로드 안 함. CSO 버전이 갱신되면 (3.4.1 → 3.5) `--reset` 플래그로 재임포트.
 
-<!-- TODO: A3가 CSO 3.4 vs 최신 버전 차이를 확인해 시드 안정 버전 핀 -->
+호스트에 미리 다운로드 받은 `CSO.3.4.1.csv` 가 있으면 `make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv` 로 컨테이너 `cso_cache` volume 에 직접 카피 → `import_cso` 가 URL 미접근. KMI 서버 트래픽 절감 + 오프라인 시연 가능.
+
+<!-- TODO: A3가 CSO 3.4.1 vs 최신 버전 차이를 확인해 시드 안정 버전 핀 -->

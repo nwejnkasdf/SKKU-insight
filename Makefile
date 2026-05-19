@@ -1,7 +1,7 @@
 # SKKU InSight — A2 Phase 0b Makefile.
 # 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
 
-.PHONY: help dev demo migrate create-admin import-cso reset-password test lint check-all ci-regression-net stop down clean codex-login codex-status
+.PHONY: help dev demo migrate create-admin seed-cso-cache import-cso reset-password test lint check-all ci-regression-net stop down clean codex-login codex-status
 
 help:
 	@echo "주요 타깃:"
@@ -9,7 +9,8 @@ help:
 	@echo "  make demo           - dev + 데모용 cron 더 자주 (COLLECTION_CRON=COLLECTION_CRON_DEMO)"
 	@echo "  make migrate        - alembic upgrade head (api 컨테이너 안에서)"
 	@echo "  make create-admin   - AdminUser 부트스트랩 INSERT"
-	@echo "  make import-cso     - CSO 3.4 임포트 (cso_topic ~14k + broad_interest 12) — A3"
+	@echo "  make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv - 호스트 CSV 파일을 컨테이너 cso_cache volume 에 카피 (URL 다운로드 skip)"
+	@echo "  make import-cso     - CSO 3.4.1 임포트 (cso_topic ~14k + broad_interest 12) — A3"
 	@echo "  make reset-password EMAIL=user@x NEW=newpw - 사용자 비번 강제 변경 (P2-5)"
 	@echo "  make test           - pytest backend/tests (docker compose 실서비스 사용)"
 	@echo "  make lint           - ruff + mypy --strict"
@@ -36,8 +37,21 @@ migrate:
 create-admin:
 	docker compose exec api python -m scripts.create_admin
 
+seed-cso-cache:
+	# 호스트의 CSO CSV 파일을 컨테이너 cso_cache volume 에 카피 (P2-19 + 3.4.1 전환, 2026-05-19).
+	# 사용 예: make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv
+	# `import_cso` 가 캐시 파일 발견하면 KMI 다운로드 skip — 오프라인 시연 + 트래픽 절감.
+	# 카피 대상 경로 = /app/.cache/cso/CSO.3.4.1.csv (= URL basename).
+	@if [ -z "$(FILE)" ]; then echo "[ERR] FILE=... 필요 (예: make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv)"; exit 1; fi
+	@if [ ! -f "$(FILE)" ]; then echo "[ERR] FILE 없음: $(FILE)"; exit 1; fi
+	docker compose exec api mkdir -p /app/.cache/cso
+	docker compose cp "$(FILE)" api:/app/.cache/cso/CSO.3.4.1.csv
+	docker compose exec api ls -la /app/.cache/cso/CSO.3.4.1.csv
+	@echo "[OK] CSO 캐시 시드 완료 — 'make import-cso' 가 본 파일을 사용 (URL 미접근)."
+
 import-cso:
-	# A3 CSO 3.4 임포트 — ~14k 노드 + broad_interest 12 행 시드 (decision-backlog P1-5).
+	# A3 CSO 3.4.1 임포트 — ~14k 노드 + broad_interest 12 행 시드 (decision-backlog P1-5).
+	# 사용자가 호스트에 미리 받은 CSV 가 있으면 본 타깃 전에 `make seed-cso-cache FILE=...` 1회.
 	# --refresh 플래그를 추가하려면: make import-cso ARGS=--refresh
 	docker compose exec api python -m scripts.import_cso $(ARGS)
 

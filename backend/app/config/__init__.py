@@ -302,9 +302,11 @@ class Settings(BaseSettings):
     # 향후 어댑터 재도입 가능성 위해 보존만.
     OPENALEX_POLITE_EMAIL: str = "dev@insight.test"
     SEMANTIC_SCHOLAR_API_KEY: str = ""
-    # CSO 3.4 다운로드 URL (decision-backlog P1-5). A3 가 `backend/scripts/import_cso.py` 에서 사용.
+    # CSO 3.4.1 다운로드 URL (decision-backlog P1-5). A3 가 `backend/scripts/import_cso.py` 에서 사용.
+    # 캐시 파일명 = URL basename (CSO.3.4.1.csv). 호스트 사용자 파일을 cso_cache volume 에
+    # 미리 카피해두면 (`make seed-cso-cache FILE=...`) URL 다운로드 skip.
     # 신버전(3.5+) 출시 시 본 env 만 교체 후 `make import-cso ARGS="--reset --refresh"`.
-    CSO_DOWNLOAD_URL: str = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv"
+    CSO_DOWNLOAD_URL: str = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv"
 
     # === CORS / hosts / logging ===
     CORS_ALLOWED_ORIGINS: str = "http://localhost:3001,app://insight"

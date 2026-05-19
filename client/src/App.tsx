@@ -751,7 +751,7 @@ function TopicRanks({ ranks, setView }: { ranks: TopicRank[]; setView: (view: Vi
     <div className="insightPanel">
       <PanelHeading icon={<TrendingUp size={16} />} title="토픽 순위" />
       <div className="topicRanks">
-        {ranks.slice(0, 6).map((rank, index) => (
+        {ranks.slice(0, 4).map((rank, index) => (
           <button key={rank.topicId} title={rank.rawLabel ?? rank.label} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
             <b>{index + 1}</b>
             <span>{rank.label}</span>
@@ -1024,14 +1024,14 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
     const topics = (interest?.topics ?? [])
       .map(displayTopicChip);
     if (topics.length) {
-      return topics.slice(0, 5).map((topic) => ({
+      return topics.slice(0, 4).map((topic) => ({
         id: `${topic.cso_topic_id ?? topic.leaf_topic_id}`,
         label: topic.label,
         rawLabel: topic.rawLabel,
         value: bucketLabel(topic.bucket)
       }));
     }
-    return ranks.slice(0, 5).map((rank) => ({
+    return ranks.slice(0, 4).map((rank) => ({
       id: rank.topicId,
       label: rank.label,
       rawLabel: rank.rawLabel ?? rank.label,

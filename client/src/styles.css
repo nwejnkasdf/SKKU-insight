@@ -660,8 +660,7 @@ nav button.active::before {
   display: grid;
   gap: 12px;
   width: 338px;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .insightPanel {
@@ -2031,8 +2030,29 @@ select:focus {
   display: grid;
   gap: 12px;
   width: 338px;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
+  overflow: visible;
+}
+
+.topicSide .insightPanel {
+  padding: 14px;
+}
+
+.topicSide .panelHeading {
+  margin-bottom: 10px;
+}
+
+.topicSide .interestList,
+.topicSide .topicRanks {
+  gap: 7px;
+}
+
+.topicSide .interestList span {
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.topicSide .topicRanks button {
+  min-height: 32px;
 }
 
 .traceBoard {

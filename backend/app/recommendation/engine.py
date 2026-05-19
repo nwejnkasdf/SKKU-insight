@@ -168,6 +168,14 @@ async def _load_cold_start_dashboard(
     slot_summaries = _serialize_slot_summaries_from_recs(
         visible_recs + backfill_recs
     )
+    cards, slot_summaries = await _ensure_dashboard_card_count(
+        db,
+        user,
+        cards=cards,
+        slots=slot_summaries,
+        params=params,
+        config=config,
+    )
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -386,21 +394,43 @@ async def _create_demo_backfill_candidates(
     topic_rows = (
         await db.execute(
             select(CSOTopic.cso_topic_id, CSOTopic.label)
-            .order_by(CSOTopic.label.asc())
+            .join(UserInterestState, UserInterestState.cso_topic_id == CSOTopic.cso_topic_id)
+            .where(
+                UserInterestState.user_id == user_id,
+                UserInterestState.cso_topic_id.is_not(None),
+            )
+            .order_by(UserInterestState.long_score.desc(), CSOTopic.label.asc())
             .limit(max(limit, 1))
         )
     ).all()
+    if len(topic_rows) < max(limit, 1):
+        seen_topic_ids = {row.cso_topic_id for row in topic_rows}
+        fallback_topics = (
+            await db.execute(
+                select(CSOTopic.cso_topic_id, CSOTopic.label)
+                .where(CSOTopic.cso_topic_id.not_in(seen_topic_ids))
+                .order_by(CSOTopic.label.asc())
+                .limit(max(limit, 1) - len(topic_rows))
+            )
+        ).all()
+        topic_rows.extend(fallback_topics)
     if not topic_rows:
         return []
 
     now = datetime.now(UTC)
     result: list[CandidateRow] = []
-    for idx in range(limit):
+    max_attempts = max(limit * 3, limit + len(topic_rows))
+    for idx in range(max_attempts):
+        if len(result) >= limit:
+            break
         topic = topic_rows[idx % len(topic_rows)]
         doc_id = uuid4()
         if doc_id in exclude_ids:
             continue
-        title = f"{topic.label} follow-up briefing {now:%Y%m%d}-{idx + 1}"
+        title = (
+            f"{topic.label} follow-up briefing "
+            f"{now:%Y%m%d}-{len(exclude_ids) + idx + 1}"
+        )
         url = f"internal://recommendation-backfill/{user_id}/{doc_id}"
         await db.execute(
             pg_insert(Document)
@@ -687,6 +717,121 @@ async def _fetch_hidden_documents(
     )
     rows = (await db.execute(stmt)).scalars().all()
     return set(rows)
+
+
+def _dedupe_dashboard_cards(
+    cards: list[RecommendationCard],
+) -> list[RecommendationCard]:
+    seen_docs: set[UUID] = set()
+    seen_titles: set[str] = set()
+    out: list[RecommendationCard] = []
+    for card in cards:
+        title_key = normalize_title(card.title)
+        if card.document_id in seen_docs or title_key in seen_titles:
+            continue
+        seen_docs.add(card.document_id)
+        seen_titles.add(title_key)
+        out.append(card)
+    return out
+
+
+async def _fetch_all_hidden_documents(db: AsyncSession, user_id: UUID) -> set[UUID]:
+    stmt = select(HiddenDocument.document_id).where(
+        HiddenDocument.user_id == user_id
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+def _with_fallback_slot_count(
+    slots: list[SlotSummary], added_count: int
+) -> list[SlotSummary]:
+    if added_count <= 0:
+        return slots
+    out: list[SlotSummary] = []
+    updated = False
+    for summary in slots:
+        if summary.slot_type == SlotType.FALLBACK_TREND:
+            out.append(
+                summary.model_copy(
+                    update={
+                        "actual_count": summary.actual_count + added_count,
+                        "fallback_reason": summary.fallback_reason
+                        or "overall_short",
+                    }
+                )
+            )
+            updated = True
+            continue
+        out.append(summary)
+    if not updated:
+        out.append(
+            SlotSummary(
+                slot_type=SlotType.FALLBACK_TREND,
+                target_count=0,
+                actual_count=added_count,
+                fallback_reason="overall_short",
+            )
+        )
+    return out
+
+
+async def _ensure_dashboard_card_count(
+    db: AsyncSession,
+    user: User,
+    *,
+    cards: list[RecommendationCard],
+    slots: list[SlotSummary],
+    params: InterestParams,
+    config: RecommendationConfig,
+) -> tuple[list[RecommendationCard], list[SlotSummary]]:
+    target = config.slot_targets.total
+    cards = _dedupe_dashboard_cards(cards)
+    if len(cards) >= target:
+        return cards[:target], slots
+
+    hidden_docs = await _fetch_all_hidden_documents(db, user.user_id)
+    excluded = {card.document_id for card in cards} | hidden_docs
+    rows = await _create_demo_backfill_candidates(
+        db,
+        user.user_id,
+        exclude_ids=excluded,
+        limit=target - len(cards),
+    )
+    if not rows:
+        return cards, slots
+
+    state_index = await _fetch_state_index(db, user.user_id)
+    scored = score_candidates(
+        rows,
+        state_index,
+        params,
+        config.ranking_weights,
+        config.freshness,
+        config.trust_level_weights,
+        config.bucket_score,
+    )
+    scored = diversify(scored, config.diversification)[: target - len(cards)]
+    reasons = {
+        c.document_id: "추천 목록을 10개로 유지하기 위해 보충한 자료입니다."
+        for c in scored
+    }
+    doc_to_rec_id = await _persist_backfill_recommendations(
+        db, user.user_id, scored, reasons
+    )
+    chips = await _fetch_topic_chips(db, list(doc_to_rec_id.keys()))
+    extra_cards = _filled_slots_to_cards(
+        FilledSlots(fallback_trend=scored),
+        doc_to_rec_id,
+        reasons,
+        chips=chips,
+    )
+    if not extra_cards:
+        return cards, slots
+    return (
+        (cards + extra_cards)[:target],
+        _with_fallback_slot_count(slots, len(extra_cards)),
+    )
 
 
 def _serialize_slot_summaries(filled: FilledSlots, *, total_target: int = 10) -> list[SlotSummary]:
@@ -1300,10 +1445,19 @@ async def build_dashboard(
     cards = _filled_slots_to_cards(
         filled, doc_to_rec_id, reasons, chips=chips
     )
+    slot_summaries = _serialize_slot_summaries(filled)
+    cards, slot_summaries = await _ensure_dashboard_card_count(
+        db,
+        user,
+        cards=cards,
+        slots=slot_summaries,
+        params=params,
+        config=config,
+    )
     response = DashboardResponse(
         user_id=user.user_id,
         cards=cards,
-        slots=_serialize_slot_summaries(filled),
+        slots=slot_summaries,
         generated_at=datetime.now(UTC),
         cache="miss",
         cold_start=False,

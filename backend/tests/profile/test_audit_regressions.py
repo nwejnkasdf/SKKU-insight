@@ -246,7 +246,7 @@ class TestSettings:
 
 
 class TestOrmModel:
-    """alembic 0007 ↔ ORM 미러링."""
+    """alembic 0007/0008 ↔ ORM 미러링."""
 
     def test_user_profile_columns(self) -> None:
         columns = {col.name for col in UserProfile.__table__.columns}
@@ -260,7 +260,147 @@ class TestOrmModel:
         assert "generator_version" in columns
         assert "generated_at" in columns
         assert "updated_at" in columns
+        # (C-44 P2-28, alembic 0008, 2026-05-19) candidate_pool_ids 추가.
+        assert "candidate_pool_ids" in columns
 
     def test_user_profile_pk_is_user_id(self) -> None:
         pk_cols = [col.name for col in UserProfile.__table__.primary_key]
         assert pk_cols == ["user_id"]
+
+
+# ============================================================
+# C-44 P2-27: archived_at_active_day 분리 (A8-v2 reincarnation 정확성)
+# ============================================================
+
+
+class TestP2_27_ArchivedAtActiveDay:
+    """archived_at_active_day 컬럼 + execute_archive 가 본 값 저장 + queries 가 사용."""
+
+    def test_user_cso_traversal_has_archived_at_active_day_column(self) -> None:
+        from app.db.models import UserCSOTraversal
+
+        columns = {col.name for col in UserCSOTraversal.__table__.columns}
+        assert "archived_at_active_day" in columns, (
+            "UserCSOTraversal.archived_at_active_day 컬럼 누락 (P2-27 회귀). "
+            "alembic 0008 + ORM 정합 확인."
+        )
+
+    def test_user_cso_traversal_archived_at_index_present(self) -> None:
+        from app.db.models import UserCSOTraversal
+
+        index_names = {ix.name for ix in UserCSOTraversal.__table__.indexes}
+        assert "ix_user_cso_traversal_archived_at_active_day" in index_names
+
+    def test_execute_archive_accepts_active_day_counter(self) -> None:
+        """operations.execute_archive 시그니처에 active_day_counter."""
+        from app.traversal import operations
+
+        sig = inspect.signature(operations.execute_archive)
+        assert "active_day_counter" in sig.parameters
+
+    def test_execute_archive_saves_archived_at_active_day(self) -> None:
+        """execute_archive 본문이 archived_at_active_day=active_day_counter 저장."""
+        from app.traversal import operations
+
+        src = _source(operations.execute_archive)
+        assert "archived_at_active_day=active_day_counter" in src, (
+            "execute_archive 가 archived_at_active_day 저장 누락 (P2-27 회귀)."
+        )
+
+    def test_execute_merge_saves_archived_at_active_day(self) -> None:
+        """execute_merge 의 loser archive 도 archived_at_active_day 저장."""
+        from app.traversal import operations
+
+        src = _source(operations.execute_merge)
+        assert "archived_at_active_day=active_day_counter" in src, (
+            "execute_merge 가 loser archive 시 archived_at_active_day 저장 누락 (P2-27 회귀)."
+        )
+
+    def test_queries_use_coalesce_archive_sort_key(self) -> None:
+        """get_top_archived_trace + get_archived_traces_with_score 가 COALESCE 사용."""
+        src_top = _source(trav_queries.get_top_archived_trace)
+        src_list = _source(trav_queries.get_archived_traces_with_score)
+        # archived_at_active_day fallback last_activity_active_day.
+        assert "archived_at_active_day" in src_top
+        assert "archived_at_active_day" in src_list
+        assert "coalesce" in src_top.lower() or "COALESCE" in src_top
+        assert "coalesce" in src_list.lower() or "COALESCE" in src_list
+
+    def test_archived_trace_summary_uses_archived_at_column(self) -> None:
+        """fetch_profile_llm_input 의 ArchivedTraceSummary 가 archived_at 컬럼 직접 참조 +
+        NULL fallback 만 last_activity (alembic 0008 이전 row 대비)."""
+        src = _source(profile_service.fetch_profile_llm_input)
+        # tr.archived_at_active_day 참조.
+        assert "tr.archived_at_active_day" in src
+        # NULL fallback.
+        assert "tr.archived_at_active_day is not None" in src
+
+
+# ============================================================
+# C-44 P2-28: candidate_pool_ids 카테고리별 + LLM hallucination 추가 가드
+# ============================================================
+
+
+class TestP2_28_CandidatePoolCategorized:
+    """CSOTopicCandidatePool 카테고리별 + validation 강화 + DB 영속화."""
+
+    def test_candidate_pool_schema_categorized(self) -> None:
+        from app.profile.schemas import CSOTopicCandidatePool, ProfileLLMInput
+
+        # 카테고리 3 필드.
+        sig_fields = CSOTopicCandidatePool.model_fields
+        assert "fusion" in sig_fields
+        assert "deepening" in sig_fields
+        assert "broadening" in sig_fields
+        # ProfileLLMInput.cso_candidate_pool 의 타입이 CSOTopicCandidatePool.
+        cso_field = ProfileLLMInput.model_fields["cso_candidate_pool"]
+        assert cso_field.annotation is CSOTopicCandidatePool
+
+    def test_build_candidate_pool_returns_categorized(self) -> None:
+        """_build_cso_candidate_pool 의 반환이 CSOTopicCandidatePool."""
+        sig = inspect.signature(profile_service._build_cso_candidate_pool)
+        annotation = sig.return_annotation
+        # SQLAlchemy/typing 표현 — name 검사 fallback.
+        assert "CSOTopicCandidatePool" in str(annotation), (
+            f"return annotation = {annotation}, CSOTopicCandidatePool 아님 (P2-28 회귀)."
+        )
+
+    def test_validation_uses_categorized_pools(self) -> None:
+        """generate_profile_payload 가 카테고리별 풀 멤버십 검증."""
+        src = _source(profile_service.generate_profile_payload)
+        # 3 카테고리 풀 ID set 추출.
+        assert "fusion_pool_ids" in src
+        assert "deepening_pool_ids" in src
+        assert "broadening_pool_ids" in src
+        # 각 카테고리 응답이 자기 풀 안에 있는지 검증.
+        assert "in fusion_pool_ids" in src
+        assert "in deepening_pool_ids" in src
+        assert "in broadening_pool_ids" in src
+
+    def test_upsert_accepts_candidate_pool_arg(self) -> None:
+        """upsert_user_profile 시그니처에 candidate_pool 인자."""
+        sig = inspect.signature(profile_service.upsert_user_profile)
+        assert "candidate_pool" in sig.parameters
+
+    def test_upsert_saves_candidate_pool_ids_jsonb(self) -> None:
+        """upsert_user_profile 본문이 candidate_pool_ids JSONB 저장."""
+        src = _source(profile_service.upsert_user_profile)
+        assert "candidate_pool_ids=candidate_pool_ids" in src
+        # 3 카테고리 키.
+        assert '"fusion"' in src
+        assert '"deepening"' in src
+        assert '"broadening"' in src
+
+    def test_worker_passes_candidate_pool_to_upsert(self) -> None:
+        """worker/jobs/user_profile._run 이 llm_input.cso_candidate_pool 전달."""
+        src = _source(profile_worker._run)
+        assert "candidate_pool=llm_input.cso_candidate_pool" in src
+
+    def test_prompt_builder_specifies_category_pools(self) -> None:
+        """system prompt 가 카테고리별 풀 사용법 명시."""
+        from app.profile import prompt_builder
+
+        prompt = prompt_builder.build_system_prompt("test")
+        assert "cso_candidate_pool.fusion" in prompt
+        assert "cso_candidate_pool.deepening" in prompt
+        assert "cso_candidate_pool.broadening" in prompt

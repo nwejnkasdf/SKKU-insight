@@ -61,6 +61,13 @@ class UserProfile(Base):
     broadening_seeds: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )
+    # (C-44 P2-28, alembic 0008, 2026-05-19) candidate_pool_ids 카테고리별.
+    # 구조: {"fusion": [uuid_str, ...], "deepening": [...], "broadening": [...]}
+    # LLM 이 본 pool 안에서만 bridge_cso_topic_id / cso_topic_id 선택 — engine
+    # validation 이 LLM hallucination (graph 의 임의 노드 선택) 차단.
+    candidate_pool_ids: Mapped[dict[str, list[str]]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
     generator_version: Mapped[str] = mapped_column(String(20), nullable=False)
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -58,6 +58,7 @@ from app.profile.schemas import (
     ActiveTraceSummary,
     ArchivedTraceSummary,
     CSOTopicCandidate,
+    CSOTopicCandidatePool,
     InterestStateSummary,
     ProfileLLMInput,
     UserProfilePayload,
@@ -125,7 +126,13 @@ async def fetch_profile_llm_input(
                 path_cso_topic_ids=list(tr.path),
                 score_tail_at_archive=float(tr.score_tail),
                 last_activity_active_day=int(tr.last_activity_active_day),
-                archived_at_active_day=int(tr.last_activity_active_day),
+                # (C-44 P2-27 fix, 2026-05-19) archived_at_active_day 가 alembic 0008
+                # 이후 row 에 채워짐 — NULL 인 0008 이전 row 는 last_activity fallback.
+                archived_at_active_day=int(
+                    tr.archived_at_active_day
+                    if tr.archived_at_active_day is not None
+                    else tr.last_activity_active_day
+                ),
             )
         )
 
@@ -288,32 +295,61 @@ async def _fetch_not_interested_labels(
     return [str(row.label) for row in rows]
 
 
+def _resolve_label(
+    cid: UUID, label_lookup: dict[UUID, str], cso_graph: nx.DiGraph
+) -> str:
+    """label_lookup → cso_graph node attr → str(uuid) fallback chain."""
+    label = label_lookup.get(cid)
+    if label:
+        return label
+    if cid in cso_graph:
+        attrs = cso_graph.nodes[cid]
+        graph_label = attrs.get("label")
+        if graph_label:
+            return str(graph_label)
+    return str(cid)
+
+
 def _build_cso_candidate_pool(
     active: list[UserCSOTraversal],
     archived: list[UserCSOTraversal],
     label_lookup: dict[UUID, str],
     cso_graph: nx.DiGraph,
-) -> list[CSOTopicCandidate]:
-    """LLM 이 bridge_cso_topic_id 선택 시 사용할 후보 풀 — active + archive path 의
-    모든 노드 + active path 끝 노드의 1-hop 이웃.
+) -> CSOTopicCandidatePool:
+    """LLM 이 bridge / seed 선택 시 사용할 후보 풀 — 카테고리별 분리.
 
-    label_lookup 에 없는 ID 는 cso_graph 의 node attribute 에서 label 시도, 그것도
-    없으면 str(uuid). cso_graph 는 networkx DiGraph.
+    (C-44 P2-28, 2026-05-19) 카테고리별 분리:
+    - fusion: archive path + active path 안 노드 + active tail 1-hop neighbors
+      (archive x active 교차점 후보 — 두 영역을 잇는 새 영역)
+    - deepening: active path 안 + active tail 1-hop successors
+      (active 영역 안의 미답방 후속)
+    - broadening: archived path 안 + active path tail 1-hop predecessors
+      (archive 가 있으면 archive 의 인접 영역, 없으면 active 의 부모 — 다른 영역 후보)
+
+    label fallback: label_lookup → cso_graph node attr → str(uuid).
     """
-    seen: set[UUID] = set()
-    result: list[CSOTopicCandidate] = []
-    for trace in (*active, *archived):
+    # active / archive path 안 노드 셋 (label 변환)
+    active_path_csos: list[UUID] = []
+    active_seen: set[UUID] = set()
+    for trace in active:
         for cid in trace.path:
-            if cid in seen:
-                continue
-            seen.add(cid)
-            result.append(
-                CSOTopicCandidate(
-                    cso_topic_id=cid,
-                    label=label_lookup.get(cid) or str(cid),
-                )
-            )
-    # 1-hop 이웃 (active path 끝 only) — adjacent CSO label 도 후보 풀에.
+            if cid not in active_seen:
+                active_seen.add(cid)
+                active_path_csos.append(cid)
+
+    archived_path_csos: list[UUID] = []
+    archived_seen: set[UUID] = set()
+    for trace in archived:
+        for cid in trace.path:
+            if cid not in archived_seen:
+                archived_seen.add(cid)
+                archived_path_csos.append(cid)
+
+    # active tail 1-hop successors / predecessors
+    active_tail_successors: list[UUID] = []
+    active_tail_predecessors: list[UUID] = []
+    succ_seen: set[UUID] = set()
+    pred_seen: set[UUID] = set()
     for trace in active:
         if not trace.path:
             continue
@@ -321,24 +357,53 @@ def _build_cso_candidate_pool(
         if tail not in cso_graph:
             continue
         for neighbor in cso_graph.successors(tail):
-            if neighbor in seen:
+            if neighbor in succ_seen:
                 continue
-            seen.add(neighbor)
-            attrs = cso_graph.nodes[neighbor]
-            label = attrs.get("label") or label_lookup.get(neighbor) or str(neighbor)
-            result.append(
-                CSOTopicCandidate(cso_topic_id=neighbor, label=str(label))
-            )
+            succ_seen.add(neighbor)
+            active_tail_successors.append(neighbor)
         for predecessor in cso_graph.predecessors(tail):
-            if predecessor in seen:
+            if predecessor in pred_seen:
                 continue
-            seen.add(predecessor)
-            attrs = cso_graph.nodes[predecessor]
-            label = attrs.get("label") or label_lookup.get(predecessor) or str(predecessor)
-            result.append(
-                CSOTopicCandidate(cso_topic_id=predecessor, label=str(label))
+            pred_seen.add(predecessor)
+            active_tail_predecessors.append(predecessor)
+
+    def _build_list(ids: list[UUID]) -> list[CSOTopicCandidate]:
+        return [
+            CSOTopicCandidate(
+                cso_topic_id=cid,
+                label=_resolve_label(cid, label_lookup, cso_graph),
             )
-    return result
+            for cid in ids
+        ]
+
+    # 카테고리별 풀 — dedup 은 카테고리 안에서만 (카테고리 간 overlap 허용 — 같은 노드가
+    # 여러 카테고리에 적격일 수 있음, 예: active path 노드가 fusion + deepening 둘 다).
+    fusion_ids: list[UUID] = []
+    fusion_seen: set[UUID] = set()
+    for cid in (*active_path_csos, *archived_path_csos, *active_tail_successors):
+        if cid not in fusion_seen:
+            fusion_seen.add(cid)
+            fusion_ids.append(cid)
+
+    deepening_ids: list[UUID] = []
+    deepening_seen: set[UUID] = set()
+    for cid in (*active_path_csos, *active_tail_successors):
+        if cid not in deepening_seen:
+            deepening_seen.add(cid)
+            deepening_ids.append(cid)
+
+    broadening_ids: list[UUID] = []
+    broadening_seen: set[UUID] = set()
+    for cid in (*archived_path_csos, *active_tail_predecessors):
+        if cid not in broadening_seen:
+            broadening_seen.add(cid)
+            broadening_ids.append(cid)
+
+    return CSOTopicCandidatePool(
+        fusion=_build_list(fusion_ids),
+        deepening=_build_list(deepening_ids),
+        broadening=_build_list(broadening_ids),
+    )
 
 
 async def generate_profile_payload(
@@ -398,17 +463,52 @@ async def generate_profile_payload(
         )
         return None
 
+    # (C-44 P2-28 fix, 2026-05-19) 카테고리별 풀 멤버십 검증.
+    # fix 전: cso_graph 전체 멤버십만 — LLM 이 fusion bridge 로 deepening 풀 ID 선택해도 통과.
+    # fix 후: 각 카테고리 응답이 자기 카테고리 풀 안에 있어야 함.
+    fusion_pool_ids = {c.cso_topic_id for c in llm_input.cso_candidate_pool.fusion}
+    deepening_pool_ids = {
+        c.cso_topic_id for c in llm_input.cso_candidate_pool.deepening
+    }
+    broadening_pool_ids = {
+        c.cso_topic_id for c in llm_input.cso_candidate_pool.broadening
+    }
     valid_fusion = [
         candidate
         for candidate in payload.fusion_candidates
         if candidate.bridge_cso_topic_id in cso_graph
+        and candidate.bridge_cso_topic_id in fusion_pool_ids
     ]
     valid_deepening = [
-        seed for seed in payload.deepening_seeds if seed.cso_topic_id in cso_graph
+        seed
+        for seed in payload.deepening_seeds
+        if seed.cso_topic_id in cso_graph
+        and seed.cso_topic_id in deepening_pool_ids
     ]
     valid_broadening = [
-        seed for seed in payload.broadening_seeds if seed.cso_topic_id in cso_graph
+        seed
+        for seed in payload.broadening_seeds
+        if seed.cso_topic_id in cso_graph
+        and seed.cso_topic_id in broadening_pool_ids
     ]
+    dropped = (
+        len(payload.fusion_candidates) - len(valid_fusion)
+        + len(payload.deepening_seeds) - len(valid_deepening)
+        + len(payload.broadening_seeds) - len(valid_broadening)
+    )
+    if dropped:
+        logger.info(
+            "user_profile candidate_pool reject user=%s dropped=%d "
+            "(fusion=%d→%d deepening=%d→%d broadening=%d→%d)",
+            user_id,
+            dropped,
+            len(payload.fusion_candidates),
+            len(valid_fusion),
+            len(payload.deepening_seeds),
+            len(valid_deepening),
+            len(payload.broadening_seeds),
+            len(valid_broadening),
+        )
     return payload.model_copy(
         update={
             "fusion_candidates": valid_fusion,
@@ -423,15 +523,26 @@ async def upsert_user_profile(
     *,
     user_id: UUID,
     payload: UserProfilePayload,
+    candidate_pool: CSOTopicCandidatePool,
     generator_version: str,
 ) -> None:
     """단일 INSERT ON CONFLICT DO UPDATE — A6 _atomic_upsert_interest_state 패턴 단순화.
 
     PK = user_id 단일이라 partial unique 분기 불필요. caller (worker._run) 가 commit.
+
+    (C-44 P2-28, 2026-05-19) candidate_pool 인자 추가. LLM 이 사용한 카테고리별 풀의
+    cso_topic_id list 를 JSONB 로 영속화. engine 시점에 본 pool 안에서만 선택됐는지
+    재확인 가능 (현재는 generate_profile_payload validation 에서 1차 차단).
     """
     fusion_serialized = [c.model_dump(mode="json") for c in payload.fusion_candidates]
     deepening_serialized = [s.model_dump(mode="json") for s in payload.deepening_seeds]
     broadening_serialized = [s.model_dump(mode="json") for s in payload.broadening_seeds]
+    # candidate_pool 의 카테고리별 UUID list (JSONB 직렬화).
+    candidate_pool_ids = {
+        "fusion": [str(c.cso_topic_id) for c in candidate_pool.fusion],
+        "deepening": [str(c.cso_topic_id) for c in candidate_pool.deepening],
+        "broadening": [str(c.cso_topic_id) for c in candidate_pool.broadening],
+    }
     stmt = pg_insert(UserProfile).values(
         user_id=user_id,
         recent_signals_summary=payload.recent_signals_summary,
@@ -440,6 +551,7 @@ async def upsert_user_profile(
         fusion_candidates=fusion_serialized,
         deepening_seeds=deepening_serialized,
         broadening_seeds=broadening_serialized,
+        candidate_pool_ids=candidate_pool_ids,
         generator_version=generator_version,
         generated_at=sql_func.now(),
         updated_at=sql_func.now(),
@@ -453,6 +565,7 @@ async def upsert_user_profile(
             "fusion_candidates": fusion_serialized,
             "deepening_seeds": deepening_serialized,
             "broadening_seeds": broadening_serialized,
+            "candidate_pool_ids": candidate_pool_ids,
             "generator_version": generator_version,
             "generated_at": sql_func.now(),
             "updated_at": sql_func.now(),

@@ -65,6 +65,11 @@ class UserCSOTraversal(Base):
             "merged_into_trace_id",
             postgresql_where=text("merged_into_trace_id IS NOT NULL"),
         ),
+        # (C-44 P2-27 alembic 0008) archived_at_active_day 인덱스.
+        Index(
+            "ix_user_cso_traversal_archived_at_active_day",
+            "archived_at_active_day",
+        ),
     )
 
     trace_id: Mapped[uuid.UUID] = mapped_column(
@@ -81,6 +86,12 @@ class UserCSOTraversal(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     started_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
     last_activity_active_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    # (C-44 P2-27, alembic 0008, 2026-05-19) archive 진입 시점 user.active_day_counter.
+    # A8-v2 reincarnation 의 gap_days_min 가드 정확성 — last_activity 와 분리.
+    # NULL = 0008 이전 archived row (시연 환경 0건). queries 가 fallback 으로 처리.
+    archived_at_active_day: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     score_tail: Mapped[float] = mapped_column(
         Float, nullable=False, server_default="0.0"
     )

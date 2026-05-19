@@ -275,6 +275,7 @@ async def execute_archive(
     db: AsyncSession,
     trace_id: UUID,
     user_id: UUID,
+    active_day_counter: int,
 ) -> int:
     """trace.status='archived' + path 산하 active leaf 도 archive.
 
@@ -285,6 +286,10 @@ async def execute_archive(
     이전 구현은 SELECT 후 UPDATE 사이에 다른 worker (lock 없이) 가 status 변경하면
     stale path 기준 archive 가능 — caller 가 traversal_lock 보유해도 SQL transaction
     boundary 안 다른 row 영향. RETURNING path 가 archive 직전 SQL snapshot 보장.
+
+    (C-44 P2-27 fix, 2026-05-19) active_day_counter 인자 추가 — archive 시점의
+    user.active_day_counter 값을 archived_at_active_day 컬럼에 저장. A8-v2
+    reincarnation 의 gap_days_min 가드가 last_activity 가 아닌 본 컬럼 기준 비교.
     """
     # 1. atomic UPDATE — status=archived AND status != archived (idempotent), RETURNING path.
     update_stmt = (
@@ -295,6 +300,7 @@ async def execute_archive(
         )
         .values(
             status=TraversalStatus.ARCHIVED.value,
+            archived_at_active_day=active_day_counter,
             updated_at=datetime.now(UTC),
         )
         .returning(UserCSOTraversal.path)
@@ -352,6 +358,7 @@ async def execute_merge(
     return: 재매핑된 leaf 수.
     """
     # 1. loser archive + merged_into 마킹.
+    # (C-44 P2-27 fix, 2026-05-19) archived_at_active_day = active_day_counter.
     await db.execute(
         update(UserCSOTraversal)
         .where(
@@ -363,6 +370,7 @@ async def execute_merge(
         .values(
             status=TraversalStatus.ARCHIVED.value,
             merged_into_trace_id=plan.winner_trace_id,
+            archived_at_active_day=active_day_counter,
             updated_at=datetime.now(UTC),
         )
     )

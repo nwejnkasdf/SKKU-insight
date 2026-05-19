@@ -98,6 +98,25 @@ class CSOTopicCandidate(BaseModel):
     label: str
 
 
+class CSOTopicCandidatePool(BaseModel):
+    """LLM input — 카테고리별 후보 풀 (C-44 P2-28, 2026-05-19).
+
+    fix 전: 단일 union list — LLM 이 fusion bridge 로 deepening 풀 ID 선택해도 검증 통과.
+    fix 후: 카테고리별 분리 — fusion / deepening / broadening 각각 다른 의미의 풀.
+    응답 검증 (`generate_profile_payload`) 이 각 카테고리 ID 가 자기 풀 안에 있는지 확인.
+
+    - fusion: archive + active path 안 + active tail 1-hop 이웃 (교차점 후보)
+    - deepening: active path 안 + active tail 1-hop successors (미답방 자손)
+    - broadening: archived path 안 + active 외 cluster root (다른 영역)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fusion: list[CSOTopicCandidate]
+    deepening: list[CSOTopicCandidate]
+    broadening: list[CSOTopicCandidate]
+
+
 class ProfileLLMInput(BaseModel):
     """daily cron 이 fetch 한 LLM 입력 데이터 묶음. prompt_builder 가 dict 직렬화."""
 
@@ -110,7 +129,8 @@ class ProfileLLMInput(BaseModel):
     recent_saved_topic_labels: list[str]
     recent_hidden_topic_labels: list[str]
     not_interested_topic_labels: list[str]
-    cso_candidate_pool: list[CSOTopicCandidate]
+    # (C-44 P2-28) 카테고리별 풀 — fusion / deepening / broadening 키.
+    cso_candidate_pool: CSOTopicCandidatePool
 
 
 def _build_user_profile_json_schema() -> dict[str, Any]:
@@ -201,6 +221,7 @@ __all__ = [
     "ActiveTraceSummary",
     "ArchivedTraceSummary",
     "CSOTopicCandidate",
+    "CSOTopicCandidatePool",
     "FusionCandidate",
     "InterestStateSummary",
     "ProfileLLMInput",

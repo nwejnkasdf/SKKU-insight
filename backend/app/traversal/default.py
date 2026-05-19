@@ -15,7 +15,7 @@ from typing import Any
 from uuid import UUID
 
 import networkx as nx
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.config import get_settings
 from app.contracts import TraversalStatus
 from app.db.models import (
     DynamicLeafTopic,
+    User,
     UserCSOTraversal,
 )
 from app.llm_provider.protocol import LLMProvider
@@ -56,6 +57,21 @@ class DefaultTraversalEngine:
         self.db = db
         self.provider = provider
         self.graph = graph
+
+    # --- helpers ---
+
+    async def _resolve_active_day_counter(self, user_id: UUID) -> int:
+        """User.active_day_counter SELECT — execute_archive 의 archived_at 인자 source.
+
+        P2-27 (C-44, 2026-05-19): archive 시점 = 호출 시 user.active_day_counter.
+        trace_row.last_activity_active_day 와 다를 수 있음 (archive 직전 user 가
+        다른 trace 활동). protocol 시그니처 변경 회피 위해 default 내부 SELECT.
+        """
+        result = await self.db.execute(
+            select(User.active_day_counter).where(User.user_id == user_id)
+        )
+        val = result.scalar_one_or_none()
+        return int(val) if val is not None else 0
 
     # --- write (mutation) ---
 
@@ -138,7 +154,10 @@ class DefaultTraversalEngine:
         new_path = list(trace_row.path[:-1])
         # path 길이 1 → retract 무의미. 대신 archive 로 전이.
         if not new_path:
-            await operations.execute_archive(self.db, trace_id, trace_row.user_id)
+            active_day = await self._resolve_active_day_counter(trace_row.user_id)
+            await operations.execute_archive(
+                self.db, trace_id, trace_row.user_id, active_day
+            )
             return None
 
         # retracted_cso 매핑 leaf 만 한정 (Codex R1 Critical 2).
@@ -258,7 +277,10 @@ class DefaultTraversalEngine:
             return False
         # caller 가 active_day_counter 를 trace.last_activity 와 비교해서 호출 시점 결정.
         # 본 메서드는 단순 status 전이.
-        await operations.execute_archive(self.db, trace_id, trace_row.user_id)
+        active_day = await self._resolve_active_day_counter(trace_row.user_id)
+        await operations.execute_archive(
+            self.db, trace_id, trace_row.user_id, active_day
+        )
         return True
 
     async def evaluate_merge_candidates(
@@ -308,8 +330,10 @@ class DefaultTraversalEngine:
                 )
             ).scalar_one_or_none()
             if idle_stale is not None:
+                # P2-27 (C-44): create_new_trace 의 arg active_day_counter 가 호출
+                # 시점의 user.active_day_counter — archive 시점도 동일.
                 await operations.execute_archive(
-                    self.db, idle_stale.trace_id, user_id
+                    self.db, idle_stale.trace_id, user_id, active_day_counter
                 )
             else:
                 # active cap 도달 + stale 도 없음 — 가장 오래된 active 의 path 단축 또는

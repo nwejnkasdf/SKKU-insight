@@ -18,6 +18,7 @@ from app.profile.schemas import (
     ActiveTraceSummary,
     ArchivedTraceSummary,
     CSOTopicCandidate,
+    CSOTopicCandidatePool,
     ProfileLLMInput,
     UserProfilePayload,
 )
@@ -62,10 +63,20 @@ def _llm_input(cso_a: UUID, cso_b: UUID) -> ProfileLLMInput:
         recent_saved_topic_labels=[],
         recent_hidden_topic_labels=[],
         not_interested_topic_labels=[],
-        cso_candidate_pool=[
-            CSOTopicCandidate(cso_topic_id=cso_a, label="A"),
-            CSOTopicCandidate(cso_topic_id=cso_b, label="B"),
-        ],
+        cso_candidate_pool=CSOTopicCandidatePool(
+            fusion=[
+                CSOTopicCandidate(cso_topic_id=cso_a, label="A"),
+                CSOTopicCandidate(cso_topic_id=cso_b, label="B"),
+            ],
+            deepening=[
+                CSOTopicCandidate(cso_topic_id=cso_a, label="A"),
+                CSOTopicCandidate(cso_topic_id=cso_b, label="B"),
+            ],
+            broadening=[
+                CSOTopicCandidate(cso_topic_id=cso_a, label="A"),
+                CSOTopicCandidate(cso_topic_id=cso_b, label="B"),
+            ],
+        ),
     )
 
 

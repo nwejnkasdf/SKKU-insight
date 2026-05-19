@@ -863,9 +863,10 @@ function DocumentView({
 
   return (
     <section>
-      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatDate(detail.published_at)}`}>
-        <button className="iconButton" title="뒤로" onClick={() => setView({ name: "dashboard" })}><ArrowLeft size={17} /></button>
-      </Header>
+      <button className="backLink" onClick={() => setView({ name: "dashboard" })}>
+        <ArrowLeft size={17} /> 추천으로 돌아가기
+      </button>
+      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatDate(detail.published_at)}`} />
       <div className="documentShell">
         <section className="panel documentHero">
           <div className={`docCover ${sourceTone}`} aria-hidden="true">
@@ -951,9 +952,10 @@ function TopicView({ api, topicId, label, setView }: { api: InsightApi; topicId:
 
   return (
     <section>
-      <Header title={label} subtitle="관련 최신 문서">
-        <button className="iconButton" title="뒤로" onClick={() => setView({ name: "dashboard" })}><ArrowLeft size={17} /></button>
-      </Header>
+      <button className="backLink" onClick={() => setView({ name: "dashboard" })}>
+        <ArrowLeft size={17} /> 추천으로 돌아가기
+      </button>
+      <Header title={label} subtitle="관련 최신 문서" />
       {error && <Empty title="토픽 정보를 불러오지 못했습니다" body={error} />}
       {!error && !topic && <Loading label="토픽 문서를 불러오는 중" />}
       {topic && topic.items.length === 0 && <Empty title="관련 최신 문서가 아직 없습니다" body="인접 토픽이나 대시보드 추천을 확인해보세요." />}

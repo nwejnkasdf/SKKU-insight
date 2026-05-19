@@ -201,6 +201,26 @@ nav button.active::before {
   font-size: 15px;
 }
 
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: 0 0 10px;
+  padding: 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 800;
+  background: transparent;
+  border: 0;
+}
+
+.backLink:hover {
+  color: #183f39;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
 .dashboardStack {
   display: grid;
   gap: 14px;

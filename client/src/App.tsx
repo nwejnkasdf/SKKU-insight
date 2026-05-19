@@ -694,6 +694,35 @@ function DocumentView({
 
   const visibleTopics = detail.related_topics.slice(0, 3);
   const sourceTone = detail.source_type;
+  const externalUrl = getExternalUrl(detail.canonical_url ?? detail.url);
+
+  function openOriginal() {
+    if (!externalUrl) {
+      showToast({ tone: "error", text: "열 수 있는 원문 URL이 없습니다." });
+      return;
+    }
+
+    void api.postEvent({
+      event_type: "open_external",
+      document_id: documentId,
+      occurred_at: new Date().toISOString(),
+      client_request_id: crypto.randomUUID()
+    }).catch(() => undefined);
+
+    if (window.insightShell) {
+      void window.insightShell.openExternal(externalUrl).catch(() => {
+        showToast({ tone: "error", text: "원문을 열지 못했습니다." });
+      });
+      return;
+    }
+
+    const opened = window.open(externalUrl, "_blank");
+    if (opened) {
+      opened.opener = null;
+    } else {
+      showToast({ tone: "error", text: "팝업 차단을 해제한 뒤 다시 시도해주세요." });
+    }
+  }
 
   return (
     <section>
@@ -749,7 +778,7 @@ function DocumentView({
           </article>
           <aside className="documentRail">
             <div className="panel documentActions">
-              <button className="primary" onClick={() => void window.insightShell?.openExternal(detail.url)}>
+              <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
                 <ExternalLink size={17} /> 원문 열기
               </button>
               <button onClick={() => void api.saveDocument(documentId).then(() => showToast({ tone: "ok", text: "저장했습니다." }))}><Bookmark size={16} /> 저장</button>
@@ -1203,6 +1232,16 @@ function percent(value: number, total: number): number {
 
 function bucketLabel(bucket: string): string {
   return { high: "높음", medium: "보통", low: "낮음", neutral: "중립" }[bucket] ?? bucket;
+}
+
+function getExternalUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatDate(value: string): string {

@@ -56,7 +56,7 @@ type TopicRank = { topicId: UUID; label: string; count: number; rawLabel?: strin
 type FeedbackAction = "save" | "hide" | "not_interested";
 type FeedbackState = { saved: boolean; hidden: boolean; notInterested: boolean };
 type DisplayLabel = { label: string; rawLabel: string };
-type ModelNode = { label: string; tone: string; meta?: string; rawLabel?: string };
+type ModelNode = { label: string; tone: string; meta?: string; rawLabel?: string; badge?: string };
 type ModelLayer = { key: string; title: string; kicker: string; nodes: ModelNode[] };
 type DisplayTopic<T extends { label: string }> = T & { rawLabel: string };
 
@@ -693,7 +693,7 @@ function InterestStructurePanel({
           <div className="modelNodes">
             {layer.nodes.slice(0, 4).map((node) => (
               <span key={`${layer.key}-${node.rawLabel ?? node.label}`} className={node.tone} title={node.rawLabel ?? node.label}>
-                <i>{compactTopicLabel(node.label)}</i>
+                <i>{node.badge ?? compactTopicLabel(node.label)}</i>
                 <b>{node.label}</b>
                 {node.meta && <em>{node.meta}</em>}
               </span>
@@ -1450,6 +1450,20 @@ function slotLabel(slot: string): string {
   }[slot] ?? slot;
 }
 
+function slotBadge(slot: string): string {
+  return {
+    core: "중",
+    adjacent: "인",
+    discovery: "탐",
+    fallback_adjacent: "대",
+    fallback_trend: "T"
+  }[slot] ?? compactTopicLabel(slot);
+}
+
+function slotMeta(actualCount: number, targetCount: number): string {
+  return targetCount > 0 ? `${actualCount}/${targetCount}` : `${actualCount}개`;
+}
+
 function sourceTypeLabel(sourceType: string): string {
   return {
     academic: "논문",
@@ -1552,7 +1566,8 @@ function buildInterestModelLayers(
         .map((slot) => ({
           label: slotLabel(slot.slot_type),
           tone: slot.slot_type,
-          meta: `${slot.actual_count}/${slot.target_count}`
+          badge: slotBadge(slot.slot_type),
+          meta: slotMeta(slot.actual_count, slot.target_count)
         }))
     }
   ].map((layer) => ({

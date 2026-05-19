@@ -535,12 +535,15 @@ nav button.active::before {
   place-items: center;
   width: 30px;
   height: 30px;
+  overflow: hidden;
   color: #ffffff;
   background: var(--accent);
   border-radius: 999px;
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .modelNodes b,

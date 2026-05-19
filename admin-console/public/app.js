@@ -13,6 +13,26 @@ const state = {
 };
 
 const root = document.querySelector("#root");
+const brandIcon = `
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M6 3v11" />
+    <path d="M18 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+    <path d="M6 14a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+    <path d="M6 14c0-4 3-6 9-6" />
+  </svg>
+`;
+
+function brandBlock(subtitle = "관리자 콘솔") {
+  return `
+    <div class="brand">
+      <div class="brandMark">${brandIcon}</div>
+      <div>
+        <strong>SKKU InSight</strong>
+        <span>${subtitle}</span>
+      </div>
+    </div>
+  `;
+}
 
 function setTokens(pair, email = state.adminEmail) {
   state.accessToken = pair.access_token;
@@ -199,13 +219,7 @@ function loginView() {
   return `
     <section class="loginWrap">
       <form class="loginCard form" id="loginForm">
-        <div class="brand">
-          <div class="brandMark">IN</div>
-          <div>
-            <strong>SKKU InSight</strong>
-            <div class="muted">관리자 콘솔</div>
-          </div>
-        </div>
+        ${brandBlock()}
         <label>
           <span class="meta">관리자 이메일</span>
           <input name="email" type="email" value="admin@skkuinsight.org" autocomplete="username" required />
@@ -250,13 +264,7 @@ function shellView() {
   return `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brandMark">IN</div>
-          <div>
-            <strong>SKKU InSight</strong>
-            <div class="muted">관리자 콘솔</div>
-          </div>
-        </div>
+        ${brandBlock()}
         <nav class="nav">
           ${navButton("operations", "운영")}
           ${navButton("account", "내 계정")}
@@ -286,6 +294,7 @@ function operationsView() {
   const inactiveUsers = state.users.length - activeUsers;
   const pendingDeletion = state.users.filter((user) => user.deletion_pending).length;
   const consentRate = state.users.length === 0 ? 0 : Math.round((activeUsers / state.users.length) * 100);
+  const healthy = state.health === "정상";
   return `
     <section class="grid">
       ${metricCard("사용자", state.users.length, "등록 계정")}
@@ -314,6 +323,17 @@ function operationsView() {
           ${barRow("활성", activeUsers, state.users.length, "")}
           ${barRow("비활성", inactiveUsers, state.users.length, "warn")}
           ${barRow("삭제 대기", pendingDeletion, state.users.length, "danger")}
+        </div>
+      </div>
+      <div class="card">
+        <div class="cardHead">
+          <h2>운영 체크리스트</h2>
+          <span class="status ${healthy && activeUsers > 0 && pendingDeletion === 0 ? "" : "warn"}">${healthy ? "확인" : "점검"}</span>
+        </div>
+        <div class="checkList">
+          ${checkItem("API 응답", healthy ? "정상" : "점검 필요", healthy)}
+          ${checkItem("추천 가능 사용자", `${activeUsers}명`, activeUsers > 0)}
+          ${checkItem("삭제 대기", `${pendingDeletion}건`, pendingDeletion === 0)}
         </div>
       </div>
     </section>
@@ -379,6 +399,15 @@ function barRow(label, value, total, tone) {
       <b>${label}</b>
       <i><em class="${tone}" style="width: ${width}%"></em></i>
       <strong>${value}</strong>
+    </span>
+  `;
+}
+
+function checkItem(label, value, ok) {
+  return `
+    <span class="${ok ? "" : "warn"}">
+      <b>${label}</b>
+      <em>${value}</em>
     </span>
   `;
 }

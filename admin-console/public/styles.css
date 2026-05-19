@@ -87,11 +87,11 @@ input {
   left: 0;
   display: grid;
   align-content: start;
-  gap: 26px;
+  gap: 24px;
   width: 248px;
   height: 100vh;
-  padding: 28px 22px;
-  background: #fbfcf8;
+  padding: 22px 16px;
+  background: #fafaf6;
   border-right: 1px solid var(--line);
 }
 
@@ -104,19 +104,30 @@ input {
 .brandMark {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
+  width: 38px;
+  height: 38px;
   color: var(--accent);
-  font-weight: 900;
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
 
+.brandMark svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
 .brand strong,
+.brand span,
 .pageTitle h1,
 .card h2,
 .panelTitle {
+  display: block;
   margin: 0;
 }
 
@@ -211,7 +222,7 @@ input {
 
 .opsGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -370,6 +381,36 @@ button.iconRefresh {
 
 .barRow strong {
   text-align: right;
+}
+
+.checkList {
+  display: grid;
+  gap: 8px;
+}
+
+.checkList span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.checkList b {
+  color: var(--muted);
+}
+
+.checkList em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.checkList span.warn em {
+  color: var(--warn);
 }
 
 .table {

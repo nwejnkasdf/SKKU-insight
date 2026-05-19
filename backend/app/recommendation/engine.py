@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 
 import networkx as nx
 import redis.asyncio as aioredis
-from sqlalchemy import func, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,11 +33,13 @@ from app.contracts import (
     TopicChip,
 )
 from app.db.models import (
+    ClickbaitResult,
     CSOTopic,
     Document,
     DocumentTopic,
     DynamicLeafTopic,
     HiddenDocument,
+    NotInterestedTopic,
     Recommendation,
     RecommendationSlot,
     SavedDocument,
@@ -134,7 +136,10 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
 
 
 async def _load_cold_start_dashboard(
-    db: AsyncSession, user: User
+    db: AsyncSession,
+    user: User,
+    params: InterestParams,
+    config: RecommendationConfig,
 ) -> DashboardResponse:
     """이미 cold-start 완료된 사용자 — 저장된 Recommendation rows 를 serialize."""
     today_recs = await _select_today_recommendations(db, user.user_id)
@@ -144,8 +149,22 @@ async def _load_cold_start_dashboard(
         db, user.user_id, [r.document_id for r in today_recs]
     )
     visible_recs = [r for r in today_recs if r.document_id not in hidden_docs]
+    backfill_cards: list[RecommendationCard] = []
+    backfill_recs: list[Recommendation] = []
+    if len(visible_recs) < config.slot_targets.total:
+        backfill_recs, backfill_cards = await _backfill_cold_start_dashboard(
+            db,
+            user,
+            visible_recs=visible_recs,
+            hidden_docs=hidden_docs,
+            params=params,
+            config=config,
+        )
     cards = await _materialize_cards(db, visible_recs, user.user_id)
-    slot_summaries = _serialize_slot_summaries_from_recs(visible_recs)
+    cards.extend(backfill_cards)
+    slot_summaries = _serialize_slot_summaries_from_recs(
+        visible_recs + backfill_recs
+    )
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -154,6 +173,178 @@ async def _load_cold_start_dashboard(
         cache="miss",
         cold_start=True,
     )
+
+
+async def _backfill_cold_start_dashboard(
+    db: AsyncSession,
+    user: User,
+    *,
+    visible_recs: list[Recommendation],
+    hidden_docs: set[UUID],
+    params: InterestParams,
+    config: RecommendationConfig,
+) -> tuple[list[Recommendation], list[RecommendationCard]]:
+    """cold-start 저장 추천이 숨김 처리로 10개 미만이면 일반 문서로 보충.
+
+    cold-start 추천은 기존 Recommendation row 를 복원하는 경로라 사용자가 1~2개 숨기면
+    응답에서만 빠지고 부족분이 생길 수 있다. UI-02 의 "항상 10 카드" 계약을 지키기
+    위해 이미 보이는 문서와 숨김 문서를 제외하고 문서 풀에서 fallback_trend 를 채운다.
+    """
+    deficit = config.slot_targets.total - len(visible_recs)
+    if deficit <= 0:
+        return [], []
+
+    excluded = {r.document_id for r in visible_recs} | hidden_docs
+    state_index = await _fetch_state_index(db, user.user_id)
+    rows = await build_trend_fallback(
+        db, user.user_id, excluded, deficit, cfg=config.fallback
+    )
+    if len(rows) < deficit:
+        rows.extend(
+            await _query_any_backfill_documents(
+                db,
+                user.user_id,
+                exclude_ids=excluded | {r.document_id for r in rows},
+                limit=deficit - len(rows),
+            )
+        )
+    if not rows:
+        return [], []
+
+    scored = score_candidates(
+        rows,
+        state_index,
+        params,
+        config.ranking_weights,
+        config.freshness,
+        config.trust_level_weights,
+        config.bucket_score,
+    )
+    scored = diversify(scored, config.diversification)[:deficit]
+    reasons = {
+        c.document_id: "숨긴 문서를 제외하고 최근 신뢰도 높은 자료로 보충했습니다."
+        for c in scored
+    }
+    doc_to_rec_id = await _persist_backfill_recommendations(
+        db, user.user_id, scored, reasons
+    )
+    chips = await _fetch_topic_chips(db, list(doc_to_rec_id.keys()))
+    filled = FilledSlots(fallback_trend=scored)
+    cards = _filled_slots_to_cards(
+        filled, doc_to_rec_id, reasons, chips=chips
+    )
+    recs = [
+        Recommendation(
+            recommendation_id=rec_id,
+            user_id=user.user_id,
+            document_id=doc_id,
+            slot_type=SlotType.FALLBACK_TREND.value,
+            reason=reasons.get(doc_id),
+            score=next((c.score for c in scored if c.document_id == doc_id), None),
+        )
+        for doc_id, rec_id in doc_to_rec_id.items()
+    ]
+    return recs, cards
+
+
+async def _query_any_backfill_documents(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    exclude_ids: set[UUID],
+    limit: int,
+) -> list[CandidateRow]:
+    """최근 trend fallback 이 부족할 때 쓰는 넓은 보충 후보.
+
+    시연 데이터는 published_at 이 오래됐거나 trust_level 이 high 가 아닐 수 있어,
+    숨김/저장/관심없음/clickbait 제외 조건은 유지하면서 전체 문서 풀까지 넓힌다.
+    """
+    if limit <= 0:
+        return []
+    stmt = (
+        select(
+            Document.document_id,
+            Document.title,
+            Document.source_id,
+            Source.name.label("source_name"),
+            Source.source_type.label("source_type"),
+            Source.trust_level.label("trust_level"),
+            Document.published_at,
+            Document.created_at,
+            DocumentTopic.cso_topic_id,
+            DocumentTopic.leaf_topic_id,
+            DocumentTopic.confidence.label("topic_confidence"),
+            DynamicLeafTopic.status.label("leaf_status"),
+            DynamicLeafTopic.label.label("leaf_label"),
+            CSOTopic.label.label("cso_label"),
+        )
+        .join(DocumentTopic, DocumentTopic.document_id == Document.document_id)
+        .join(Source, Source.source_id == Document.source_id)
+        .outerjoin(
+            DynamicLeafTopic,
+            DynamicLeafTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
+        )
+        .outerjoin(CSOTopic, CSOTopic.cso_topic_id == DocumentTopic.cso_topic_id)
+        .where(
+            ~exists().where(
+                SavedDocument.user_id == user_id,
+                SavedDocument.document_id == Document.document_id,
+            ),
+            ~exists().where(
+                HiddenDocument.user_id == user_id,
+                HiddenDocument.document_id == Document.document_id,
+            ),
+            ~exists().where(
+                NotInterestedTopic.user_id == user_id,
+                or_(
+                    and_(
+                        NotInterestedTopic.cso_topic_id.is_not(None),
+                        NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
+                    ),
+                    and_(
+                        NotInterestedTopic.leaf_topic_id.is_not(None),
+                        NotInterestedTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
+                    ),
+                ),
+            ),
+            ~exists().where(
+                ClickbaitResult.document_id == Document.document_id,
+                ClickbaitResult.decision == "clickbait",
+            ),
+        )
+        .order_by(
+            Document.published_at.desc().nulls_last(),
+            Document.created_at.desc(),
+        )
+        .limit(limit * 4)
+    )
+    rows_raw = (await db.execute(stmt)).all()
+    seen: set[UUID] = set()
+    result: list[CandidateRow] = []
+    for r in rows_raw:
+        if r.document_id in exclude_ids or r.document_id in seen:
+            continue
+        seen.add(r.document_id)
+        result.append(
+            CandidateRow(
+                document_id=r.document_id,
+                title=r.title,
+                source_id=r.source_id,
+                source_name=r.source_name,
+                source_type=r.source_type,
+                trust_level=r.trust_level,
+                published_at=r.published_at or r.created_at,
+                cso_topic_id=r.cso_topic_id,
+                leaf_topic_id=r.leaf_topic_id,
+                leaf_status=r.leaf_status,
+                leaf_label=r.leaf_label,
+                cso_label=r.cso_label,
+                topic_confidence=float(r.topic_confidence),
+            )
+        )
+        if len(result) >= limit:
+            break
+    return result
 
 
 async def _select_today_recommendations(
@@ -555,6 +746,53 @@ async def _persist_recommendations(
     return doc_to_rec_id
 
 
+async def _persist_backfill_recommendations(
+    db: AsyncSession,
+    user_id: UUID,
+    cards: list[ScoredCandidate],
+    reasons: dict[UUID, str],
+) -> dict[UUID, UUID]:
+    """cold-start 부족분 보충용 fallback_trend Recommendation INSERT."""
+    doc_to_rec_id: dict[UUID, UUID] = {}
+    for c in cards:
+        new_id = uuid4()
+        reason = reasons.get(c.document_id, "")
+        stmt = (
+            pg_insert(Recommendation)
+            .values(
+                recommendation_id=new_id,
+                user_id=user_id,
+                document_id=c.document_id,
+                slot_type=SlotType.FALLBACK_TREND.value,
+                reason=reason[:255] if reason else None,
+                score=c.score,
+            )
+            .on_conflict_do_nothing()
+            .returning(Recommendation.recommendation_id)
+        )
+        result = await db.execute(stmt)
+        inserted = result.scalar_one_or_none()
+        if inserted is not None:
+            doc_to_rec_id[c.document_id] = inserted
+            continue
+        lookup = (
+            await db.execute(
+                select(Recommendation.recommendation_id)
+                .where(
+                    Recommendation.user_id == user_id,
+                    Recommendation.document_id == c.document_id,
+                    Recommendation.slot_type == SlotType.FALLBACK_TREND.value,
+                    func.date(func.timezone("UTC", Recommendation.created_at))
+                    == func.date(func.timezone("UTC", func.now())),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if lookup is not None:
+            doc_to_rec_id[c.document_id] = lookup
+    return doc_to_rec_id
+
+
 def _filled_slots_to_cards(
     filled: FilledSlots,
     doc_to_rec_id: dict[UUID, UUID],
@@ -788,7 +1026,9 @@ async def build_dashboard(
     DB commit 은 caller (service.get_dashboard) 가 책임 (§11.#1 cache-before-commit 회피).
     """
     if await _is_cold_start(db, user):
-        return DashboardBuildResult(response=await _load_cold_start_dashboard(db, user))
+        return DashboardBuildResult(
+            response=await _load_cold_start_dashboard(db, user, params, config)
+        )
 
     # 1. 후보 query base.
     current_csos = await trav_queries.get_current_topics(db, user.user_id)

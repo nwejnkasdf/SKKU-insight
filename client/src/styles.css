@@ -2438,7 +2438,7 @@ select:focus {
 
 .libraryHero {
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 56px 1fr auto;
   gap: 16px;
   align-items: center;
   background: var(--surface-subtle);
@@ -2458,9 +2458,27 @@ select:focus {
   color: var(--muted);
 }
 
+.libraryHiddenTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.libraryHiddenTrigger:hover {
+  border-color: var(--accent);
+}
+
 .libraryColumns {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(260px, 0.8fr);
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
 }
@@ -2478,9 +2496,37 @@ select:focus {
 }
 
 .libraryHiddenPanel {
-  position: sticky;
-  top: 24px;
-  background: var(--surface-subtle);
+  display: none;
+}
+
+.libraryModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(29 34 31 / 34%);
+}
+
+.libraryModal {
+  width: min(720px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  background: var(--surface);
+  box-shadow: 0 20px 60px rgb(18 27 22 / 18%);
+}
+
+.libraryModalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.libraryModalHead h2 {
+  margin: 0 0 6px;
 }
 
 .libraryHiddenPanel .docList {
@@ -2602,9 +2648,14 @@ select:focus {
   .onboardingLayout,
   .topicScreen,
   .rankScreen,
+  .libraryHero,
   .libraryColumns,
   .clusterGrid {
     grid-template-columns: 1fr;
+  }
+
+  .libraryHiddenTrigger {
+    width: 100%;
   }
 
   .insightRail,

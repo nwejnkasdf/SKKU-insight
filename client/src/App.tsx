@@ -1183,6 +1183,7 @@ function RankingView({ api, setView }: { api: InsightApi; setView: (view: View) 
 function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) => void }) {
   const [saved, setSaved] = useState<DocumentSummary[]>([]);
   const [hidden, setHidden] = useState<DocumentSummary[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
     void api.savedDocuments().then((res) => setSaved(res.items)).catch(() => undefined);
@@ -1197,8 +1198,12 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
           <Bookmark size={26} />
           <div>
             <h2>{saved.length}개 저장됨</h2>
-            <p>숨긴 문서 {hidden.length}건은 오른쪽 복구 목록에서 다시 열 수 있습니다.</p>
+            <p>숨긴 문서 {hidden.length}건은 버튼을 눌러 복구할 수 있습니다.</p>
           </div>
+          <button className="libraryHiddenTrigger" onClick={() => setShowHidden(true)}>
+            <EyeOff size={17} />
+            숨긴 문서 {hidden.length}개
+          </button>
         </div>
         <div className="libraryColumns">
           <div className="panel librarySavedPanel">
@@ -1214,6 +1219,20 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
           </aside>
         </div>
       </div>
+      {showHidden && (
+        <div className="libraryModalBackdrop" role="presentation" onClick={() => setShowHidden(false)}>
+          <section className="libraryModal panel" role="dialog" aria-modal="true" aria-label="숨긴 문서 복구" onClick={(event) => event.stopPropagation()}>
+            <div className="libraryModalHead">
+              <div>
+                <h2>숨긴 문서 복구</h2>
+                <p className="muted">문서를 열어 숨김 상태를 해제할 수 있습니다.</p>
+              </div>
+              <button className="ghostButton" onClick={() => setShowHidden(false)}>닫기</button>
+            </div>
+            {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
+          </section>
+        </div>
+      )}
     </section>
   );
 }

@@ -132,11 +132,14 @@ trace 자체의 operation은 **룰 기반**. LLM은 operation에 수반되는 dy
 
 ```
 1. trace.status = archived
-2. trace.path 위 모든 노드 매핑 leaf들에 대해 leaf.status = archived (기존 leaf-topic-lifecycle 룰 적용)
-3. 추천 후보·대시보드에서 제외, history 보존
+2. trace.archived_at_active_day = user.active_day_counter (C-44 P2-27, 2026-05-19)
+3. trace.path 위 모든 노드 매핑 leaf들에 대해 leaf.status = archived (기존 leaf-topic-lifecycle 룰 적용)
+4. 추천 후보·대시보드에서 제외, history 보존
 ```
 
 **LLM 호출**: ❌ (룰만).
+
+> **C-44 P2-27 (2026-05-19) `archived_at_active_day` 분리**: 직전 라운드까지 `last_activity_active_day` 만 갱신됐는데 archive 직후 본 값과 archive 시점 차이가 0 — A8-v2 discovery reincarnation 의 `gap_days_min` 가드 의미 약화. 본 라운드 fix 로 archive 진입 시점 user.active_day_counter 별도 컬럼 저장. `queries.get_top_archived_trace` + `get_archived_traces_with_score` 가 `COALESCE(archived_at_active_day, last_activity_active_day)` fallback (backward-compat — alembic 0008 이전 archived row 는 last_activity 사용). `operations.execute_archive(active_day_counter)` + `execute_merge` 의 loser archive 두 진입점 모두 동일 컬럼 저장.
 
 ### 3.5 stale 마킹 (3단계 강등의 1단계)
 

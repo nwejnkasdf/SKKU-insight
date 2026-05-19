@@ -385,7 +385,7 @@ nav button.active::before {
   display: flex;
   align-items: end;
   justify-content: center;
-  gap: 14px;
+  gap: 12px;
   height: 76px;
   padding-top: 8px;
 }
@@ -406,12 +406,33 @@ nav button.active::before {
   background: var(--accent-3);
 }
 
+.slotColumns span.fallback_adjacent,
+.slotColumns span.fallback_trend {
+  background: #5d6c65;
+}
+
+.slotColumns span.empty {
+  background: #dfe5de;
+}
+
 .slotColumns b {
   position: absolute;
   left: 50%;
-  bottom: -22px;
+  bottom: -20px;
   color: var(--soft);
   font-size: 11px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.slotColumns em {
+  position: absolute;
+  left: 50%;
+  bottom: -38px;
+  color: var(--soft);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
   transform: translateX(-50%);
   white-space: nowrap;
 }
@@ -763,6 +784,11 @@ nav button.active::before {
 
 .barFill.discovery {
   background: var(--accent-3);
+}
+
+.barFill.fallback_adjacent,
+.barFill.fallback_trend {
+  background: #5d6c65;
 }
 
 .traceMap {

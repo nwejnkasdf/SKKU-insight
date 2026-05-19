@@ -60,6 +60,15 @@ type DisplayLabel = { label: string; rawLabel: string };
 type ModelNode = { label: string; tone: string; meta?: string; rawLabel?: string; badge?: string };
 type ModelLayer = { key: string; title: string; kicker: string; nodes: ModelNode[] };
 type DisplayTopic<T extends { label: string }> = T & { rawLabel: string };
+type SlotSummaryItem = DashboardResponse["slots"][number];
+
+const baseSlotTargets = {
+  core: 5,
+  adjacent: 3,
+  discovery: 2
+} as const;
+
+const slotOrder = ["core", "adjacent", "discovery", "fallback_adjacent", "fallback_trend"];
 
 const userClassOptions = [
   { value: "general", label: "일반" },
@@ -630,9 +639,8 @@ function SignalOverview({
   interest: InterestStateResponse | null;
   traces: TraversalTraceSummary[];
 }) {
-  const core = dashboard.slots.find((slot) => slot.slot_type === "core")?.actual_count ?? 0;
-  const adjacent = dashboard.slots.find((slot) => slot.slot_type === "adjacent")?.actual_count ?? 0;
-  const discovery = dashboard.slots.find((slot) => slot.slot_type === "discovery")?.actual_count ?? 0;
+  const visibleSlots = buildVisibleSlots(dashboard.slots, true);
+  const maxSlotCount = Math.max(1, ...visibleSlots.map((slot) => slot.actual_count));
   const visibleInterestTopics = (interest?.topics ?? [])
     .map(displayTopicChip);
   const trackedTopics = visibleInterestTopics.filter((topic) => topic.bucket !== "neutral");
@@ -651,9 +659,17 @@ function SignalOverview({
         ))}
       </div>
       <div className="slotColumns" aria-label="추천 슬롯 분포">
-        <span style={{ height: `${Math.max(18, core * 12)}px` }}><b>중심</b></span>
-        <span className="adjacent" style={{ height: `${Math.max(18, adjacent * 12)}px` }}><b>인접</b></span>
-        <span className="discovery" style={{ height: `${Math.max(18, discovery * 12)}px` }}><b>탐색</b></span>
+        {visibleSlots.map((slot) => (
+          <span
+            key={slot.slot_type}
+            className={`${slot.slot_type} ${slot.actual_count === 0 ? "empty" : ""}`}
+            title={`${slotLabel(slot.slot_type)} ${slotMeta(slot.actual_count, slot.target_count)}`}
+            style={{ height: `${Math.max(18, (slot.actual_count / maxSlotCount) * 64)}px` }}
+          >
+            <b>{slotLabel(slot.slot_type)}</b>
+            <em>{slotMeta(slot.actual_count, slot.target_count)}</em>
+          </span>
+        ))}
       </div>
       <div className="trackedPanel">
         <span className="panelMiniLabel">추적 관심사</span>
@@ -708,16 +724,17 @@ function InterestStructurePanel({
 }
 
 function SlotBars({ dashboard }: { dashboard: DashboardResponse }) {
-  const total = Math.max(1, dashboard.slots.reduce((sum, slot) => sum + slot.actual_count, 0));
+  const slots = buildVisibleSlots(dashboard.slots, true);
+  const total = Math.max(1, slots.reduce((sum, slot) => sum + slot.actual_count, 0));
   return (
     <div className="insightPanel">
       <PanelHeading icon={<BarChart3 size={16} />} title="슬롯 분포" />
       <div className="slotBars">
-        {dashboard.slots.map((slot) => (
+        {slots.map((slot) => (
           <div key={slot.slot_type} className="barRow">
             <div className="barLabel">
               <span>{slotLabel(slot.slot_type)}</span>
-              <b>{slot.actual_count}/{slot.target_count}</b>
+              <b>{slotMeta(slot.actual_count, slot.target_count)}</b>
             </div>
             <div className="barTrack">
               <span className={`barFill ${slot.slot_type}`} style={{ width: `${(slot.actual_count / total) * 100}%` }} />
@@ -1503,7 +1520,25 @@ function slotBadge(slot: string): string {
 }
 
 function slotMeta(actualCount: number, targetCount: number): string {
-  return targetCount > 0 ? `${actualCount}/${targetCount}` : `${actualCount}개`;
+  return `${actualCount}/${targetCount > 0 ? targetCount : "-"}`;
+}
+
+function buildVisibleSlots(slots: SlotSummaryItem[], includeEmptyBase: boolean): SlotSummaryItem[] {
+  const byType = new Map(slots.map((slot) => [slot.slot_type, slot]));
+  const baseSlots = Object.entries(baseSlotTargets)
+    .map(([slotType, targetCount]) => {
+      const typedSlot = slotType as SlotSummaryItem["slot_type"];
+      return byType.get(typedSlot) ?? {
+        slot_type: typedSlot,
+        actual_count: 0,
+        target_count: targetCount,
+        fallback_reason: null
+      };
+    })
+    .filter((slot) => includeEmptyBase || slot.actual_count > 0);
+  const fallbackSlots = slots.filter((slot) => slot.slot_type.startsWith("fallback_") && slot.actual_count > 0);
+  return [...baseSlots, ...fallbackSlots]
+    .sort((a, b) => slotOrder.indexOf(a.slot_type) - slotOrder.indexOf(b.slot_type));
 }
 
 function sourceTypeLabel(sourceType: string): string {
@@ -1603,8 +1638,7 @@ function buildInterestModelLayers(
       key: "slots",
       kicker: "4",
       title: "추천 슬롯",
-      nodes: dashboard.slots
-        .filter((slot) => slot.actual_count > 0)
+      nodes: buildVisibleSlots(dashboard.slots, true)
         .map((slot) => ({
           label: slotLabel(slot.slot_type),
           tone: slot.slot_type,

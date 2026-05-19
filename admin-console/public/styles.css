@@ -1,13 +1,15 @@
 :root {
-  --bg: #f6f7f3;
+  --bg: #f6f6f1;
   --surface: #ffffff;
-  --surface-soft: #eef1ec;
-  --line: #d8ded6;
-  --ink: #1f2522;
-  --muted: #707a74;
-  --accent: #2f6f62;
-  --accent-2: #40547d;
-  --warn: #94661f;
+  --surface-soft: #f2f4f1;
+  --line: #d9dfd7;
+  --line-strong: #b9c5bd;
+  --ink: #202523;
+  --muted: #656c68;
+  --soft: #7b8580;
+  --accent: #1f6b5c;
+  --accent-2: #314d73;
+  --warn: #99651d;
   --danger: #8d392f;
 }
 
@@ -19,7 +21,7 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--bg);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Inter, Pretendard, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: 0;
 }
 
@@ -92,7 +94,7 @@ input {
   color: var(--accent);
   font-weight: 900;
   background: var(--surface);
-  border: 1px solid #cbd5ce;
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
 
@@ -116,6 +118,7 @@ input {
 }
 
 .nav a {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: 42px;
@@ -127,6 +130,20 @@ input {
 
 .nav a:hover {
   background: var(--surface-soft);
+}
+
+.nav a.active {
+  color: #183f39;
+  background: #ecefe9;
+}
+
+.nav a.active::before {
+  content: "";
+  width: 3px;
+  height: 18px;
+  margin-right: 10px;
+  background: var(--accent);
+  border-radius: 99px;
 }
 
 .main {
@@ -150,6 +167,11 @@ input {
   place-items: center;
   min-height: 100vh;
   padding: 32px;
+  background:
+    linear-gradient(90deg, rgba(31, 107, 92, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(31, 107, 92, 0.06) 1px, transparent 1px),
+    var(--bg);
+  background-size: 56px 56px;
 }
 
 .loginCard {
@@ -159,7 +181,7 @@ input {
   padding: 28px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .form {

@@ -75,8 +75,8 @@ async function login(event) {
     const pair = await request("/admin/auth/login", {
       method: "POST",
       body: JSON.stringify({
-        email: data.get("email"),
-        password: data.get("password")
+        email: String(data.get("email") || "").trim(),
+        password: String(data.get("password") || "")
       })
     }, false);
     setTokens(pair);
@@ -202,13 +202,13 @@ function loginView() {
         <div class="brand">
           <div class="brandMark">IN</div>
           <div>
-            <strong>SKKU InSight Admin</strong>
-            <div class="muted">운영 모니터링 콘솔</div>
+            <strong>SKKU InSight</strong>
+            <div class="muted">관리자 콘솔</div>
           </div>
         </div>
         <label>
           <span class="meta">관리자 이메일</span>
-          <input name="email" type="email" value="admin@insight.test" autocomplete="username" required />
+          <input name="email" type="email" value="admin@skkuinsight.org" autocomplete="username" required />
         </label>
         <label>
           <span class="meta">비밀번호</span>
@@ -255,11 +255,11 @@ function shellView() {
           <div class="brandMark">IN</div>
           <div>
             <strong>SKKU InSight</strong>
-            <div class="muted">Admin Console</div>
+            <div class="muted">관리자 콘솔</div>
           </div>
         </div>
         <nav class="nav">
-          <a href="#overview">운영 요약</a>
+          <a href="#overview" class="active">운영 요약</a>
           <a href="#users">사용자</a>
           <a href="#jobs">작업 상태</a>
         </nav>

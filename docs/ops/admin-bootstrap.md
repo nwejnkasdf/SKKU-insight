@@ -18,7 +18,7 @@ flowchart LR
 
 | Var | 예시 |
 |---|---|
-| `ADMIN_BOOTSTRAP_EMAIL` | `admin@insight.test` |
+| `ADMIN_BOOTSTRAP_EMAIL` | `admin@skkuinsight.org` |
 | `ADMIN_BOOTSTRAP_PASSWORD` | `Bootstrap-Initial-2026-Strong!` (decision-backlog C-22 — 옛 default `Admin-Bootstrap-2026!` 은 정책 위반 — "admin" 금칙어 + email local part 포함) |
 | `ADMIN_BOOTSTRAP_ROLE` | `super` |
 

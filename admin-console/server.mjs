@@ -33,7 +33,8 @@ const server = createServer(async (req, res) => {
     const filePath = resolvePublicPath(urlPath);
     const body = await readFile(filePath);
     res.writeHead(200, {
-      "Content-Type": mimeTypes.get(extname(filePath)) || "application/octet-stream"
+      "Content-Type": mimeTypes.get(extname(filePath)) || "application/octet-stream",
+      "Cache-Control": "no-store"
     });
     res.end(body);
   } catch {

@@ -70,7 +70,7 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `ADMIN_BOOTSTRAP_EMAIL` | `admin@insight.test` | 첫 관리자 이메일 |
+| `ADMIN_BOOTSTRAP_EMAIL` | `admin@skkuinsight.org` | 첫 관리자 이메일 |
 | `ADMIN_BOOTSTRAP_PASSWORD` | (강력 비밀번호) | 첫 로그인 시 강제 변경 |
 | `ADMIN_BOOTSTRAP_ROLE` | `super` | super | operator | read_only |
 
@@ -328,7 +328,7 @@ CLICKBAIT_MODEL_NAME=ax-4.0-light-dora-clickbait-v1
 CLICKBAIT_ENABLED=false
 
 # === Admin bootstrap ===
-ADMIN_BOOTSTRAP_EMAIL=admin@insight.test
+ADMIN_BOOTSTRAP_EMAIL=admin@skkuinsight.org
 ADMIN_BOOTSTRAP_PASSWORD=Bootstrap-Initial-2026-Strong!
 ADMIN_BOOTSTRAP_ROLE=super
 

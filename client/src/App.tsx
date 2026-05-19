@@ -52,11 +52,13 @@ type View =
   | { name: "settings" };
 
 type Toast = { tone: "ok" | "error"; text: string } | null;
-type TopicRank = { topicId: UUID; label: string; count: number };
+type TopicRank = { topicId: UUID; label: string; count: number; rawLabel?: string };
 type FeedbackAction = "save" | "hide" | "not_interested";
 type FeedbackState = { saved: boolean; hidden: boolean; notInterested: boolean };
-type ModelNode = { label: string; tone: string; meta?: string };
+type DisplayLabel = { label: string; rawLabel: string };
+type ModelNode = { label: string; tone: string; meta?: string; rawLabel?: string };
 type ModelLayer = { key: string; title: string; kicker: string; nodes: ModelNode[] };
+type DisplayTopic<T extends { label: string }> = T & { rawLabel: string };
 
 const userClassOptions = [
   { value: "general", label: "일반" },
@@ -511,8 +513,10 @@ function RecommendationCardView({
   setView: (view: View) => void;
   showToast: (toast: Toast) => void;
 }) {
-  const visibleTopics = card.related_topics.slice(0, 2);
-  const hiddenTopicCount = Math.max(0, card.related_topics.length - visibleTopics.length);
+  const displayTopics = card.related_topics
+    .map(displayTopicChip);
+  const visibleTopics = displayTopics.slice(0, 2);
+  const hiddenTopicCount = Math.max(0, displayTopics.length - visibleTopics.length);
   const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
 
@@ -528,23 +532,42 @@ function RecommendationCardView({
 
   async function applyFeedback(action: FeedbackAction) {
     const previous = feedback;
+    const active =
+      action === "save" ? feedback.saved :
+      action === "hide" ? feedback.hidden :
+      feedback.notInterested;
     setBusyAction(action);
     setFeedback({
-      saved: action === "save" ? true : feedback.saved,
-      hidden: action === "hide" ? true : feedback.hidden,
-      notInterested: action === "not_interested" ? true : feedback.notInterested
+      saved: action === "save" ? !feedback.saved : feedback.saved,
+      hidden: action === "hide" ? !feedback.hidden : feedback.hidden,
+      notInterested: action === "not_interested" ? !feedback.notInterested : feedback.notInterested
     });
 
     try {
       if (action === "save") {
-        await api.saveDocument(card.document_id);
-        showToast({ tone: "ok", text: "저장했습니다." });
+        if (active) {
+          await api.deleteSaved(card.document_id);
+          showToast({ tone: "ok", text: "저장을 해제했습니다." });
+        } else {
+          await api.saveDocument(card.document_id);
+          showToast({ tone: "ok", text: "저장했습니다." });
+        }
       } else if (action === "hide") {
-        await api.hideDocument(card.document_id);
-        showToast({ tone: "ok", text: "숨김 처리했습니다." });
+        if (active) {
+          await api.deleteHidden(card.document_id);
+          showToast({ tone: "ok", text: "숨김을 해제했습니다." });
+        } else {
+          await api.hideDocument(card.document_id);
+          showToast({ tone: "ok", text: "숨김 처리했습니다." });
+        }
       } else {
-        await api.notInterestedDocument(card.document_id);
-        showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+        if (active) {
+          await api.deleteNotInterested(card.document_id);
+          showToast({ tone: "ok", text: "관심 없음 표시를 해제했습니다." });
+        } else {
+          await api.notInterestedDocument(card.document_id);
+          showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+        }
       }
     } catch (err) {
       setFeedback(previous);
@@ -576,7 +599,7 @@ function RecommendationCardView({
       </button>
       <div className="chips">
         {visibleTopics.map((topic) => (
-          <button key={`${topic.type}-${topic.topic_id}`} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
+          <button key={`${topic.type}-${topic.topic_id}`} title={topic.rawLabel} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
         ))}
         {hiddenTopicCount > 0 && <span className="chipMore">+{hiddenTopicCount}</span>}
       </div>
@@ -609,18 +632,20 @@ function SignalOverview({
   const core = dashboard.slots.find((slot) => slot.slot_type === "core")?.actual_count ?? 0;
   const adjacent = dashboard.slots.find((slot) => slot.slot_type === "adjacent")?.actual_count ?? 0;
   const discovery = dashboard.slots.find((slot) => slot.slot_type === "discovery")?.actual_count ?? 0;
-  const trackedTopics = (interest?.topics ?? []).filter((topic) => topic.bucket !== "neutral");
-  const trackedNodes = buildTrackedNodes(dashboard, interest, traces);
+  const visibleInterestTopics = (interest?.topics ?? [])
+    .map(displayTopicChip);
+  const trackedTopics = visibleInterestTopics.filter((topic) => topic.bucket !== "neutral");
+  const trackedNodes = buildTrackedNodeItems(dashboard, interest, traces);
   const activeTraceCount = traces.filter((trace) => trace.status === "active").length;
   return (
     <div className="signalOverview">
       <div className="signalMap" aria-label="추적 관심사 그래프">
         {trackedNodes.slice(1).map((node, index) => (
-          <i key={`line-${node}-${index}`} className={`mapLine line${index + 1}`} />
+          <i key={`line-${node.rawLabel}-${index}`} className={`mapLine line${index + 1}`} />
         ))}
         {trackedNodes.map((node, index) => (
-          <span key={`${node}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node}>
-            {compactTopicLabel(node)}
+          <span key={`${node.rawLabel}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node.rawLabel}>
+            {compactTopicLabel(node.label)}
           </span>
         ))}
       </div>
@@ -632,8 +657,8 @@ function SignalOverview({
       <div className="trackedPanel">
         <span className="panelMiniLabel">추적 관심사</span>
         <div className="trackedChips">
-          {(trackedTopics.length ? trackedTopics : interest?.topics.slice(0, 3) ?? []).slice(0, 5).map((topic) => (
-            <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}-${topic.label}`} className={topic.bucket}>{topic.label}</span>
+          {(trackedTopics.length ? trackedTopics : visibleInterestTopics.slice(0, 3)).slice(0, 5).map((topic) => (
+            <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}-${topic.rawLabel}`} className={topic.bucket} title={topic.rawLabel}>{topic.label}</span>
           ))}
         </div>
         <small>{activeTraceCount > 0 ? `${activeTraceCount}개 trace 활성` : "trace 생성 대기"} · {interest?.updated_at ? formatDate(interest.updated_at) : "초기 상태"}</small>
@@ -667,7 +692,7 @@ function InterestStructurePanel({
           </div>
           <div className="modelNodes">
             {layer.nodes.slice(0, 4).map((node) => (
-              <span key={`${layer.key}-${node.label}`} className={node.tone} title={node.label}>
+              <span key={`${layer.key}-${node.rawLabel ?? node.label}`} className={node.tone} title={node.rawLabel ?? node.label}>
                 <i>{compactTopicLabel(node.label)}</i>
                 <b>{node.label}</b>
                 {node.meta && <em>{node.meta}</em>}
@@ -727,7 +752,7 @@ function TopicRanks({ ranks, setView }: { ranks: TopicRank[]; setView: (view: Vi
       <PanelHeading icon={<TrendingUp size={16} />} title="토픽 순위" />
       <div className="topicRanks">
         {ranks.slice(0, 6).map((rank, index) => (
-          <button key={rank.topicId} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
+          <button key={rank.topicId} title={rank.rawLabel ?? rank.label} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
             <b>{index + 1}</b>
             <span>{rank.label}</span>
             <i style={{ width: `${(rank.count / max) * 100}%` }} />
@@ -801,7 +826,9 @@ function DocumentView({
   if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;
   if (!detail) return <Loading label="문서를 불러오는 중" />;
 
-  const visibleTopics = detail.related_topics.slice(0, 3);
+  const visibleTopics = detail.related_topics
+    .map(displayTopicChip)
+    .slice(0, 3);
   const sourceTone = detail.source_type;
   const externalUrl = getExternalUrl(detail.canonical_url ?? detail.url);
 
@@ -835,23 +862,42 @@ function DocumentView({
 
   async function applyFeedback(action: FeedbackAction) {
     const previous = feedback;
+    const active =
+      action === "save" ? feedback.saved :
+      action === "hide" ? feedback.hidden :
+      feedback.notInterested;
     setBusyAction(action);
     setFeedback({
-      saved: action === "save" ? true : feedback.saved,
-      hidden: action === "hide" ? true : feedback.hidden,
-      notInterested: action === "not_interested" ? true : feedback.notInterested
+      saved: action === "save" ? !feedback.saved : feedback.saved,
+      hidden: action === "hide" ? !feedback.hidden : feedback.hidden,
+      notInterested: action === "not_interested" ? !feedback.notInterested : feedback.notInterested
     });
 
     try {
       if (action === "save") {
-        await api.saveDocument(documentId);
-        showToast({ tone: "ok", text: "저장했습니다." });
+        if (active) {
+          await api.deleteSaved(documentId);
+          showToast({ tone: "ok", text: "저장을 해제했습니다." });
+        } else {
+          await api.saveDocument(documentId);
+          showToast({ tone: "ok", text: "저장했습니다." });
+        }
       } else if (action === "hide") {
-        await api.hideDocument(documentId);
-        showToast({ tone: "ok", text: "숨김 처리했습니다." });
+        if (active) {
+          await api.deleteHidden(documentId);
+          showToast({ tone: "ok", text: "숨김을 해제했습니다." });
+        } else {
+          await api.hideDocument(documentId);
+          showToast({ tone: "ok", text: "숨김 처리했습니다." });
+        }
       } else {
-        await api.notInterestedDocument(documentId);
-        showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+        if (active) {
+          await api.deleteNotInterested(documentId);
+          showToast({ tone: "ok", text: "관심 없음 표시를 해제했습니다." });
+        } else {
+          await api.notInterestedDocument(documentId);
+          showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+        }
       }
     } catch (err) {
       setFeedback(previous);
@@ -887,7 +933,7 @@ function DocumentView({
             <p>{summary?.reason_short ?? detail.summary_short}</p>
             <div className="docTopicStrip">
               {visibleTopics.map((topic) => (
-                <button key={topic.topic_id} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
+                <button key={topic.topic_id} title={topic.rawLabel} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
               ))}
             </div>
           </div>
@@ -975,16 +1021,20 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
 
   const ranks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
   const bucketRows = useMemo(() => {
-    if (interest?.topics.length) {
-      return interest.topics.slice(0, 5).map((topic) => ({
+    const topics = (interest?.topics ?? [])
+      .map(displayTopicChip);
+    if (topics.length) {
+      return topics.slice(0, 5).map((topic) => ({
         id: `${topic.cso_topic_id ?? topic.leaf_topic_id}`,
         label: topic.label,
+        rawLabel: topic.rawLabel,
         value: bucketLabel(topic.bucket)
       }));
     }
     return ranks.slice(0, 5).map((rank) => ({
       id: rank.topicId,
       label: rank.label,
+      rawLabel: rank.rawLabel ?? rank.label,
       value: String(rank.count)
     }));
   }, [interest, ranks]);
@@ -999,7 +1049,7 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
             <PanelHeading icon={<Activity size={16} />} title="Interest buckets" />
             <div className="interestList">
               {bucketRows.map((topic) => (
-                <span key={topic.id}>
+                <span key={topic.id} title={topic.rawLabel}>
                   {topic.label}<b>{topic.value}</b>
                 </span>
               ))}
@@ -1022,11 +1072,12 @@ function TraceBoard({
   setView: (view: View) => void;
 }) {
   const trace = (ranks.length ? ranks.slice(0, 5) : [
-    { topicId: "seed-1", label: "operating systems", count: 2 },
-    { topicId: "seed-2", label: "automata theory", count: 2 },
-    { topicId: "seed-3", label: "software engineering", count: 1 }
+    { topicId: "seed-1", label: "operating systems", count: 2, rawLabel: "operating systems" },
+    { topicId: "seed-2", label: "automata theory", count: 2, rawLabel: "automata theory" },
+    { topicId: "seed-3", label: "software engineering", count: 1, rawLabel: "software engineering" }
   ]).map((rank, index) => ({
     label: rank.label,
+    rawLabel: rank.rawLabel ?? rank.label,
     short: compactTopicLabel(rank.label),
     tone: index === 0 ? "active" : index < 3 ? "core" : "leaf",
     meta: `${rank.count}`,
@@ -1041,7 +1092,7 @@ function TraceBoard({
         <div className="traceSummaryHead">
           <div>
             <span className="eyebrow">현재 토픽 신호</span>
-            <h2>{activeLeaf.label}</h2>
+            <h2 title={activeLeaf.rawLabel}>{activeLeaf.label}</h2>
           </div>
           <div className="leafBadge">
             <span>top topic</span>
@@ -1050,7 +1101,7 @@ function TraceBoard({
         </div>
         <div className="tracePath topicConstellation">
           {trace.map((node) => (
-            <div key={node.label} className={`traceStep ${node.tone}`}>
+            <div key={`${node.rawLabel}-${node.label}`} className={`traceStep ${node.tone}`} title={node.rawLabel}>
               <div className="traceStepMain">
                 <span>{node.meta}</span>
                 <strong>{node.short}</strong>
@@ -1075,7 +1126,7 @@ function TraceBoard({
                   <strong>{card.title}</strong>
                   <small>{card.source_name} · {slotLabel(card.slot_type)} · {formatPublishedDate(card.published_at, card.source_name)}</small>
                 </span>
-                <em>{card.related_topics.slice(0, 2).map((topic) => topic.label).join(" / ")}</em>
+                <em title={card.related_topics.map((topic) => topic.label).join(" / ")}>{displayTopicLabels(card.related_topics.map((topic) => topic.label)).slice(0, 2).join(" / ")}</em>
               </button>
             ))}
           </div>
@@ -1085,7 +1136,7 @@ function TraceBoard({
           <PanelHeading icon={<Network size={16} />} title="인접 후보" />
           <div className="adjacentList">
             {adjacent.map((rank) => (
-              <button key={rank.topicId} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
+              <button key={rank.topicId} title={rank.rawLabel ?? rank.label} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
                 <span>{rank.label}</span>
                 <b>{rank.count}</b>
               </button>
@@ -1418,6 +1469,14 @@ function buildTrackedNodes(
   interest: InterestStateResponse | null,
   traces: TraversalTraceSummary[]
 ): string[] {
+  return buildTrackedNodeItems(dashboard, interest, traces).map((node) => node.label);
+}
+
+function buildTrackedNodeItems(
+  dashboard: DashboardResponse,
+  interest: InterestStateResponse | null,
+  traces: TraversalTraceSummary[]
+): DisplayLabel[] {
   const labels: string[] = [];
   for (const trace of traces.filter((item) => item.status === "active")) {
     labels.push(...trace.path_labels);
@@ -1433,11 +1492,7 @@ function buildTrackedNodes(
     )
   );
 
-  const unique = labels
-    .map((label) => label.trim())
-    .filter(Boolean)
-    .filter((label, index, arr) => arr.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index);
-  return unique.slice(0, 5);
+  return displayTopicNodes(labels).slice(0, 5);
 }
 
 function buildInterestModelLayers(
@@ -1445,22 +1500,22 @@ function buildInterestModelLayers(
   interest: InterestStateResponse | null,
   traces: TraversalTraceSummary[]
 ): ModelLayer[] {
-  const interestTopics = interest?.topics ?? [];
+  const interestTopics = (interest?.topics ?? [])
+    .map(displayTopicChip);
   const trackedTopics = interestTopics.filter((topic) => topic.bucket !== "neutral");
-  const fallbackTopics = uniqueLabels(
+  const fallbackTopics = displayTopicNodes(
     dashboard.cards.flatMap((card) => card.related_topics.map((topic) => topic.label))
   );
   const activeTraces = traces.filter((trace) => trace.status === "active");
-  const traceLabels = uniqueLabels(activeTraces.flatMap((trace) => trace.path_labels));
 
   return [
     {
       key: "prior",
       kicker: "1",
       title: "초기 seed",
-      nodes: (trackedTopics.length ? trackedTopics.map((topic) => topic.label) : fallbackTopics)
+      nodes: (trackedTopics.length ? trackedTopics : fallbackTopics)
         .slice(0, 3)
-        .map((label) => ({ label, tone: "prior", meta: "CSO seed" }))
+        .map((topic) => ({ label: topic.label, rawLabel: topic.rawLabel, tone: "prior", meta: "CSO seed" }))
     },
     {
       key: "bayes",
@@ -1468,7 +1523,7 @@ function buildInterestModelLayers(
       title: "Bayesian 신호",
       nodes: (trackedTopics.length ? trackedTopics : interestTopics.slice(0, 4))
         .slice(0, 4)
-        .map((topic) => ({ label: topic.label, tone: topic.bucket, meta: bucketLabel(topic.bucket) }))
+        .map((topic) => ({ label: topic.label, rawLabel: topic.rawLabel, tone: topic.bucket, meta: bucketLabel(topic.bucket) }))
     },
     {
       key: "trace",
@@ -1476,13 +1531,14 @@ function buildInterestModelLayers(
       title: "활성 trace",
       nodes: activeTraces.length
         ? activeTraces.slice(0, 4).map((trace) => ({
-            label: trace.path_labels.join(" > "),
+            label: displayTopicLabels(trace.path_labels).join(" > "),
+            rawLabel: trace.path_labels.join(" > "),
             tone: "trace",
             meta: trace.path_labels.length > 1 ? `${trace.path_labels.length} nodes` : "단일 노드"
-          }))
+          })).filter((node) => node.label.length > 0)
         : buildTrackedNodes(dashboard, interest, traces)
             .slice(0, 4)
-            .map((label) => ({ label, tone: "trace", meta: "생성 대기" }))
+            .map((label) => ({ label, rawLabel: label, tone: "trace", meta: "생성 대기" }))
     },
     {
       key: "slots",
@@ -1509,9 +1565,42 @@ function uniqueLabels(labels: string[]): string[] {
     .filter((label, index, arr) => arr.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index);
 }
 
+function cleanTopicLabel(label: string): string {
+  const stripped = label
+    .trim()
+    .replace(/^\([^)]{1,40}\)\s*/, "")
+    .replace(/^[^0-9A-Za-z가-힣]+/, "")
+    .trim();
+  const alphaCount = (stripped.match(/[A-Za-z가-힣]/g) ?? []).length;
+  if (alphaCount < 2) return "수식 토픽";
+  return stripped;
+}
+
+function displayTopicLabels(labels: string[]): string[] {
+  return displayTopicNodes(labels).map((node) => node.label);
+}
+
+function displayTopicNodes(labels: string[]): DisplayLabel[] {
+  const seen = new Set<string>();
+  const out: DisplayLabel[] = [];
+  for (const rawLabel of labels) {
+    const label = cleanTopicLabel(rawLabel);
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ label, rawLabel });
+  }
+  return out;
+}
+
+function displayTopicChip<T extends { label: string }>(topic: T): DisplayTopic<T> {
+  return { ...topic, label: cleanTopicLabel(topic.label), rawLabel: topic.label };
+}
+
 function compactTopicLabel(label: string): string {
-  const words = label.split(/[\s/.-]+/).filter(Boolean);
-  if (words.length === 0) return label.slice(0, 3).toUpperCase();
+  const cleanLabel = cleanTopicLabel(label) ?? label;
+  const words = cleanLabel.split(/[\s/.-]+/).filter(Boolean);
+  if (words.length === 0) return cleanLabel.slice(0, 3).toUpperCase();
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
@@ -1520,13 +1609,16 @@ function buildTopicRanks(cards: RecommendationCard[]): TopicRank[] {
   const map = new Map<UUID, TopicRank>();
   for (const card of cards) {
     for (const topic of card.related_topics) {
+      const label = cleanTopicLabel(topic.label);
+      if (!label) continue;
       const current = map.get(topic.topic_id);
       map.set(topic.topic_id, {
-        topicId: topic.topic_id,
-        label: topic.label,
-        count: (current?.count ?? 0) + 1
-      });
-    }
+      topicId: topic.topic_id,
+      label,
+      rawLabel: topic.label,
+      count: (current?.count ?? 0) + 1
+    });
+  }
   }
   return [...map.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }

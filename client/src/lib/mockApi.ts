@@ -357,6 +357,14 @@ export class MockInsightApi implements Partial<InsightApi> {
     saved.delete(documentId);
   }
 
+  async deleteHidden(documentId: UUID): Promise<void> {
+    hidden.delete(documentId);
+  }
+
+  async deleteNotInterested(documentId: UUID): Promise<void> {
+    hidden.delete(documentId);
+  }
+
   private ensureUser(): MockUser {
     user ??= {
       userId: mockId("user-demo"),

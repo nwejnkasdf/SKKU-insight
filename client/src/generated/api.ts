@@ -436,6 +436,14 @@ export class InsightApi {
   deleteSaved(documentId: UUID): Promise<void> {
     return this.request(`/feedback/saved/${documentId}`, { method: "DELETE" });
   }
+
+  deleteHidden(documentId: UUID): Promise<void> {
+    return this.request(`/feedback/hidden/${documentId}`, { method: "DELETE" });
+  }
+
+  deleteNotInterested(documentId: UUID): Promise<void> {
+    return this.request(`/feedback/not-interested/${documentId}`, { method: "DELETE" });
+  }
 }
 
 async function parseError(res: Response): Promise<ErrorResponse> {

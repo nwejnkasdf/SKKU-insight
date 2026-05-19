@@ -10,7 +10,7 @@ export function getApi(): Promise<InsightApi> {
 }
 
 async function resolveApi(): Promise<InsightApi> {
-  if (import.meta.env.VITE_USE_MOCK_API !== "false") {
+  if (import.meta.env.VITE_USE_MOCK_API === "true") {
     return new MockInsightApi() as unknown as InsightApi;
   }
   const baseUrl =

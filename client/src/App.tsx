@@ -569,7 +569,7 @@ function RecommendationCardView({
           <span className={`slot ${card.slot_type}`}>{slotLabel(card.slot_type)}</span>
         </div>
         <h2>{card.title}</h2>
-        <span className="sourceLine">{card.source_name} · {formatDate(card.published_at)}</span>
+        <span className="sourceLine">{card.source_name} · {formatPublishedDate(card.published_at, card.source_name)}</span>
         <span className={`cardSignal ${card.slot_type}`} aria-hidden="true">
           <i style={{ width: `${Math.max(28, 96 - rank * 7)}%` }} />
         </span>
@@ -866,7 +866,7 @@ function DocumentView({
       <button className="backLink" onClick={() => setView({ name: "dashboard" })}>
         <ArrowLeft size={17} /> 추천으로 돌아가기
       </button>
-      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatDate(detail.published_at)}`} />
+      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`} />
       <div className="documentShell">
         <section className="panel documentHero">
           <div className={`docCover ${sourceTone}`} aria-hidden="true">
@@ -881,7 +881,7 @@ function DocumentView({
           <div className="docHeroCopy">
             <div className="docMetaLine">
               <span>{detail.source_name}</span>
-              <span>{formatDate(detail.published_at)}</span>
+              <span>{formatPublishedDate(detail.published_at, detail.source_name)}</span>
             </div>
             <h2>{detail.title}</h2>
             <p>{summary?.reason_short ?? detail.summary_short}</p>
@@ -1073,7 +1073,7 @@ function TraceBoard({
                 <b>{String(index + 1).padStart(2, "0")}</b>
                 <span>
                   <strong>{card.title}</strong>
-                  <small>{card.source_name} · {slotLabel(card.slot_type)} · {formatDate(card.published_at)}</small>
+                  <small>{card.source_name} · {slotLabel(card.slot_type)} · {formatPublishedDate(card.published_at, card.source_name)}</small>
                 </span>
                 <em>{card.related_topics.slice(0, 2).map((topic) => topic.label).join(" / ")}</em>
               </button>
@@ -1115,7 +1115,7 @@ function RankingView({ api, setView }: { api: InsightApi; setView: (view: View) 
                 <b>{String(index + 1).padStart(2, "0")}</b>
                 <span className={`slot ${card.slot_type}`}>{slotLabel(card.slot_type)}</span>
                 <strong>{card.title}</strong>
-                <small>{card.source_name} · {formatDate(card.published_at)}</small>
+                <small>{card.source_name} · {formatPublishedDate(card.published_at, card.source_name)}</small>
               </button>
             ))}
           </div>
@@ -1293,7 +1293,7 @@ function DocumentList({ items, setView }: { items: DocumentSummary[]; setView: (
       {items.map((item) => (
         <button key={item.document_id} onClick={() => setView({ name: "document", documentId: item.document_id })}>
           <strong>{item.title}</strong>
-          <span>{item.source_name} · {formatDate(item.published_at)}</span>
+          <span>{item.source_name} · {formatPublishedDate(item.published_at, item.source_name)}</span>
         </button>
       ))}
     </div>
@@ -1565,4 +1565,12 @@ function getExternalUrl(value: string | null): string | null {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function formatPublishedDate(value: string, sourceName: string): string {
+  const date = new Date(value);
+  if (sourceName === "cold_start_pseudo" && date.getUTCMonth() === 0 && date.getUTCDate() === 1) {
+    return `${date.getUTCFullYear()}년`;
+  }
+  return formatDate(value);
 }

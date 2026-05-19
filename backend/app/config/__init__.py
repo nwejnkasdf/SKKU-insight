@@ -309,7 +309,9 @@ class Settings(BaseSettings):
     CSO_DOWNLOAD_URL: str = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv"
 
     # === CORS / hosts / logging ===
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:3001,app://insight"
+    CORS_ALLOWED_ORIGINS: str = (
+        "http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight"
+    )
     API_PUBLIC_BASE: str = "http://localhost:8000"
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     STRUCTLOG_RENDER: Literal["json", "console"] = "json"

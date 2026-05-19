@@ -236,7 +236,7 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3001,app://insight` | admin-console + electron app |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight` | admin-console + electron app |
 | `API_PUBLIC_BASE` | `http://localhost:8000` | 클라이언트가 호출 |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING |
 | `STRUCTLOG_RENDER` | `json` | json | console |
@@ -433,7 +433,7 @@ SEMANTIC_SCHOLAR_API_KEY=
 CSO_DOWNLOAD_URL=https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv
 
 # === CORS / hosts ===
-CORS_ALLOWED_ORIGINS=http://localhost:3001,app://insight
+CORS_ALLOWED_ORIGINS=http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight
 API_PUBLIC_BASE=http://localhost:8000
 LOG_LEVEL=INFO
 STRUCTLOG_RENDER=json

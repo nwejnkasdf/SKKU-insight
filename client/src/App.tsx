@@ -644,7 +644,7 @@ function SignalOverview({
           <i key={`line-${node.rawLabel}-${index}`} className={`mapLine line${index + 1}`} />
         ))}
         {trackedNodes.map((node, index) => (
-          <span key={`${node.rawLabel}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node.rawLabel}>
+          <span key={`${node.rawLabel}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node.rawLabel} data-full-label={node.rawLabel}>
             {compactTopicLabel(node.label)}
           </span>
         ))}
@@ -1605,11 +1605,10 @@ function uniqueLabels(labels: string[]): string[] {
 function cleanTopicLabel(label: string): string {
   const stripped = label
     .trim()
-    .replace(/^\([^)]{1,40}\)\s*/, "")
-    .replace(/^[^0-9A-Za-z가-힣]+/, "")
+    .replace(/^[^\p{L}\p{N}(+]+/u, "")
     .trim();
-  const alphaCount = (stripped.match(/[A-Za-z가-힣]/g) ?? []).length;
-  if (alphaCount < 2) return "수식 토픽";
+  const alphaCount = (stripped.match(/\p{L}/gu) ?? []).length;
+  if (alphaCount < 2 && !/[0-9+]/.test(stripped)) return "수식 토픽";
   return stripped;
 }
 
@@ -1636,7 +1635,8 @@ function displayTopicChip<T extends { label: string }>(topic: T): DisplayTopic<T
 
 function compactTopicLabel(label: string): string {
   const cleanLabel = cleanTopicLabel(label) ?? label;
-  const words = cleanLabel.split(/[\s/.-]+/).filter(Boolean);
+  const graphLabel = cleanLabel.replace(/^\(([^)]{1,40})\)\s*/, "$1 ").trim();
+  const words = graphLabel.split(/[\s/.,()+-]+/).filter((word) => /\p{L}|\p{N}/u.test(word));
   if (words.length === 0) return cleanLabel.slice(0, 3).toUpperCase();
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();

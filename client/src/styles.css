@@ -327,6 +327,28 @@ nav button.active::before {
   font-weight: 900;
 }
 
+.mapNode[data-full-label]:hover::after,
+.mapNode[data-full-label]:focus-visible::after {
+  content: attr(data-full-label);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  width: max-content;
+  max-width: 260px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgb(18 27 22 / 14%);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
+}
+
 .node1 {
   left: 6%;
   top: 57%;

@@ -85,11 +85,33 @@ class DashboardBuildResult:
     response: DashboardResponse
 
 
+async def _has_only_cold_start_recommendations(
+    db: AsyncSession, user_id: UUID
+) -> bool:
+    content_counts_stmt = (
+        select(Document.content_type, func.count(Recommendation.recommendation_id))
+        .join(Document, Document.document_id == Recommendation.document_id)
+        .where(Recommendation.user_id == user_id)
+        .group_by(Document.content_type)
+    )
+    content_counts = {
+        str(row.content_type): int(row[1])
+        for row in await db.execute(content_counts_stmt)
+    }
+    pseudo_count = content_counts.get("pseudo_cold_start", 0)
+    non_pseudo_count = sum(
+        count
+        for content_type, count in content_counts.items()
+        if content_type != "pseudo_cold_start"
+    )
+    return pseudo_count > 0 and non_pseudo_count == 0
+
+
 async def _is_cold_start(db: AsyncSession, user: User) -> bool:
     """active trace 0개 AND UserInterestState 행동 신호 0 (alpha_prior 만)."""
     active_count = await trav_queries.count_active_traces(db, user.user_id)
     if active_count > 0:
-        return False
+        return await _has_only_cold_start_recommendations(db, user.user_id)
     # boost_applied_at_active_day 가 있는 row 는 onboarding boost — 행동 신호 X.
     # 행동 신호 = boost 없이 long_alpha 가 prior 보다 큰 row.
     stmt = select(func.count(UserInterestState.state_id)).where(
@@ -99,7 +121,16 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
         UserInterestState.long_alpha > 2.0,
     )
     behavioral_count = (await db.execute(stmt)).scalar_one()
-    return behavioral_count == 0
+    if behavioral_count == 0:
+        return True
+
+    # A9 demo guard: save/hide/not-interested feedback creates behavioral
+    # interest rows before A7/A8 can generate normal, non-pseudo candidates.
+    # Keep serving the cold-start recommendation set until real recommendation
+    # rows exist, otherwise one feedback action flips the dashboard to an empty
+    # normal-ranking result because pseudo_cold_start documents are excluded
+    # from the regular candidate path.
+    return await _has_only_cold_start_recommendations(db, user.user_id)
 
 
 async def _load_cold_start_dashboard(
@@ -109,8 +140,12 @@ async def _load_cold_start_dashboard(
     today_recs = await _select_today_recommendations(db, user.user_id)
     if not today_recs:
         today_recs = await _select_latest_recommendations(db, user.user_id)
-    cards = await _materialize_cards(db, today_recs, user.user_id)
-    slot_summaries = _serialize_slot_summaries_from_recs(today_recs)
+    hidden_docs = await _fetch_hidden_documents(
+        db, user.user_id, [r.document_id for r in today_recs]
+    )
+    visible_recs = [r for r in today_recs if r.document_id not in hidden_docs]
+    cards = await _materialize_cards(db, visible_recs, user.user_id)
+    slot_summaries = _serialize_slot_summaries_from_recs(visible_recs)
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,

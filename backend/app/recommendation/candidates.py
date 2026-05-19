@@ -234,16 +234,19 @@ async def query_adjacent(
     return [_row_to_candidate(r) for r in rows]
 
 
-async def query_discovery(
+async def query_discovery_trend(
     db: AsyncSession,
     user_id: UUID,
     excluded_trace_path_csos: list[UUID],
     *,
     limit: int = _CANDIDATE_LIMIT_PER_SLOT,
 ) -> list[CandidateRow]:
-    """discovery slot 후보 — 사용자 어떤 active trace path 에도 없는 영역 + trust=high.
+    """discovery slot fallback 룰 — 사용자 trace path 에 없는 trust=high trend.
 
-    proactive 카테고리 (recommendation-ranking.md §Discovery FR-41).
+    A8-v2 (2026-05-19) 이전 본 함수가 discovery slot 전부였음. 이제 fallback chain 의
+    마지막 단계 — UserProfile 부재 또는 fusion/reincarnation/seeds 모두 비었을 때만.
+
+    proactive 카테고리 (recommendation-ranking.md §Discovery FR-41 fallback).
     """
     base = _build_base_select().where(
         Source.trust_level == "high",
@@ -257,6 +260,90 @@ async def query_discovery(
     stmt = base.order_by(Document.published_at.desc().nulls_last()).limit(limit)
     rows = (await db.execute(stmt)).all()
     return [_row_to_candidate(r) for r in rows]
+
+
+async def query_discovery_fusion(
+    db: AsyncSession,
+    user_id: UUID,
+    bridge_cso_topic_id: UUID,
+    *,
+    limit: int = _CANDIDATE_LIMIT_PER_SLOT,
+) -> list[CandidateRow]:
+    """A9 discovery slot 1 (Fusion) — UserProfile.fusion_candidates[0].bridge_cso_topic_id
+    로 SELECT. bridge 가 archive x current cross-product 의 새 영역.
+
+    AntiJoin 6종 + leaf_status 가드 + freshness DESC. trust_level filter 없음
+    (fusion 은 적합도 우선 — trust 는 ranking 의 w_trust=0.1 만).
+
+    decisions.md §15 + algorithms/recommendation-ranking.md §Discovery.
+    """
+    stmt = (
+        _build_base_select()
+        .where(
+            DocumentTopic.cso_topic_id == bridge_cso_topic_id,
+            _filter_leaf_status_valid(),
+            *_antijoin_clauses(user_id),
+        )
+        .order_by(Document.published_at.desc().nulls_last())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [_row_to_candidate(r) for r in rows]
+
+
+async def query_discovery_reincarnation(
+    db: AsyncSession,
+    user_id: UUID,
+    path_tail_cso_topic_id: UUID,
+    archived_leaf_ids: list[UUID],
+    *,
+    limit: int = _CANDIDATE_LIMIT_PER_SLOT,
+) -> list[CandidateRow]:
+    """A9 discovery slot 2 (Reincarnation) — score_tail >= 0.6 archived trace 의 path
+    끝 CSO + 산하 archived leaf 매핑 Document.
+
+    `archived_leaf_ids` 는 traversal.get_descendant_archived_leaves 결과.
+    가드: AntiJoin 6종 동일 + leaf_status 룰은 본 query 에서는 archived/merged 도 허용
+    (`_filter_leaf_status_valid()` 와 다르게 archived leaf 도 후보) — Reincarnation 의
+    핵심은 archive 부활이므로.
+
+    decisions.md §15 + What Is Serendipity? (RecSys '25) "taste reincarnation".
+    """
+    leaf_filter: ColumnElement[bool]
+    if archived_leaf_ids:
+        leaf_filter = or_(
+            DocumentTopic.cso_topic_id == path_tail_cso_topic_id,
+            DocumentTopic.leaf_topic_id.in_(archived_leaf_ids),
+        )
+    else:
+        leaf_filter = DocumentTopic.cso_topic_id == path_tail_cso_topic_id
+    stmt = (
+        _build_base_select()
+        .where(
+            leaf_filter,
+            *_antijoin_clauses(user_id),
+        )
+        .order_by(Document.published_at.desc().nulls_last())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [_row_to_candidate(r) for r in rows]
+
+
+# Backward-compat alias — 기존 caller (cold-start path) 가 호출 가능.
+# A8-v2 본문 갱신으로 engine.build_dashboard 는 명시적으로 query_discovery_trend 호출하며,
+# 본 alias 는 외부 import (예: tests) 호환만 유지.
+async def query_discovery(
+    db: AsyncSession,
+    user_id: UUID,
+    excluded_trace_path_csos: list[UUID],
+    *,
+    limit: int = _CANDIDATE_LIMIT_PER_SLOT,
+) -> list[CandidateRow]:
+    """Deprecated — `query_discovery_trend` 직접 호출 권장."""
+    return await query_discovery_trend(
+        db, user_id, excluded_trace_path_csos, limit=limit
+    )
 
 
 async def query_emerging_leaf_documents(
@@ -286,6 +373,9 @@ __all__ = [
     "CandidateRow",
     "query_adjacent",
     "query_core",
-    "query_discovery",
+    "query_discovery",  # deprecated alias
+    "query_discovery_fusion",
+    "query_discovery_reincarnation",
+    "query_discovery_trend",
     "query_emerging_leaf_documents",
 ]

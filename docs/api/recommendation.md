@@ -107,3 +107,12 @@ class DocumentSummaryResponse(BaseModel):
 | `recommendation.cold_start_in_progress` | 202 | LLM 호출 중 (클라이언트는 폴링) |
 | `document.not_found` | 404 | |
 | `document.summary_unavailable` | 503 | LLM 실패, 출처 abstract 사용 권유 |
+
+### A8-v2 UserProfile cron 내부 ErrorCode (endpoint 부재)
+
+본 두 코드는 daily user_profile cron ([`../../backend/app/worker/jobs/user_profile.py`](../../backend/app/worker/jobs/user_profile.py)) 내부 오류로, 사용자 응답 path 없음. worker 로그 + Prometheus metric + `tests/regressions/test_a9_anti_patterns.py` 회귀 가드에서만 사용. discovery slot 은 본 코드 발생 시 fallback chain (broadening seeds → deepening seeds → 기존 trust=high trend) 으로 자동 진입.
+
+| code | HTTP | 의미 |
+|---|---|---|
+| `profile.llm_output_invalid` | — | LLM 응답 JSON parse 실패 또는 Pydantic schema 검증 실패. cron 본 사용자 profile 갱신 skip. |
+| `profile.bridge_cso_not_found` | — | LLM 응답의 `bridge_cso_topic_id` 가 cso_graph 에 부재. 해당 fusion candidate 만 제거, 다른 candidates 는 유지. 전체 매핑 실패 시 본 코드 + profile.llm_output_invalid 와 함께 skip. |

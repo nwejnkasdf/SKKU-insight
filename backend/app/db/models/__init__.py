@@ -12,6 +12,7 @@
 - 0004: A6 — UserEvent, UserInterestState, SavedDocument, HiddenDocument, NotInterestedTopic, SystemConfig
 - 0005: A7 — UserCSOTraversal.merged_into_trace_id 컬럼 (테이블 자체는 0001)
 - 0006: A8 — Recommendation, RecommendationSlot, DocumentSummaryCache
+- 0007: A9 — UserProfile (1:1 user, daily LLM cron 생성, discovery slot input SOR)
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ from app.db.models.user_consent import UserConsent
 from app.db.models.user_cso_traversal import UserCSOTraversal
 from app.db.models.user_event import UserEvent
 from app.db.models.user_interest_state import UserInterestState
+from app.db.models.user_profile import UserProfile
 
 __all__ = [
     "AdminUser",
@@ -65,4 +67,5 @@ __all__ = [
     "UserConsent",
     "UserEvent",
     "UserInterestState",
+    "UserProfile",
 ]

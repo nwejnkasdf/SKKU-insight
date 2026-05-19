@@ -325,7 +325,7 @@
 | 1 | PR-stack 패턴 | A7형 7-commit + 3 라운드 (PR-1 alembic+ORM / PR-2 본문 / PR-3 tests / R1 fix / R2 재감사 / docs drift / R3 통합 시연) |
 | 2 | Document 섹션형 LLM 요약 캐시 위치 | **신규 테이블 `DocumentSummaryCache`** (alembic 0006). document_id PK + sections JSONB + reason_short + generator CHECK ('llm' | 'source_abstract'). DB 가 1차 SOR — Redis 보조 캐시 없음 |
 | 3 | Cold-start 후 첫 trace 생성 hook | **A8 cold_start orchestrator + click hook 협업** (A7 결정 #6 plan TBD 완성). cold_start orchestrator 가 pseudo Document INSERT 시 mark. 첫 click 이벤트가 들어와 `app/interest/service.py:ingest_event_atomic` 의 traversal_lock 보유 구간 안 `mark_stale_if_idle` hook 옆에서 `DefaultTraversalEngine.ingest_event()` 위임 — 매칭 trace 있으면 last_activity 갱신, 없으면 새 trace |
-| 4 | PUT /onboarding/interests (FR-55) | **A8 범위 외 — stub 유지** (현재 cluster 검증 + 202). 데모 시나리오 §1·§2 에 없고 settings 화면 (UI-05) 은 A9 (electron-client) 범위. prior boost 갱신은 A6 bootstrap 협업, stale 마킹은 A7 evaluate_retract |
+| 4 | PUT /onboarding/interests (FR-55) | **A8 범위 외 — stub 유지** (현재 cluster 검증 + 202). 데모 시나리오 §1·§2 에 없고 settings 화면 (UI-05) 은 A8-v2 (electron-client) 범위. prior boost 갱신은 A6 bootstrap 협업, stale 마킹은 A7 evaluate_retract |
 | 5 | sentinel `cold_start_pseudo` 활성화 | A2 alembic 0001 시드 행 (`name="cold_start_pseudo"`, `enabled=false`, `trust_level="low"`) 을 A8 가 본격 사용. cold_start orchestrator 가 pseudo Document INSERT 시 본 source_id FK 사용. `content_type='pseudo_cold_start'` enum (contracts.ContentType) 도 활성화 — candidates SQL AntiJoin 6번째 (일반 추천 경로 제외) |
 | 6 | emerging quota 정책 | core 5 중 **1개는 emerging leaf 우선** (recommendation.toml `core_slot_quota.emerging_leaf_quota_in_core = 1`). emerging 후보 부재 시 active leaf 로 자동 회수 (recommendation-ranking.md §1.3). emerging vs active 구분은 candidates SQL 단일 호출로 `leaf.status` 컬럼 함께 fetch — race 차단 (§11.#3 사전 방어) |
 | 7 | NFR-04 score 마스킹 정책 | Recommendation 테이블 `score` 컬럼 nullable Float **영속** (admin 노출용). 일반 사용자 응답 schema `RecommendationCard` 에는 score field **부재**. 응답 변환 (`engine._filled_slots_to_cards`, `engine._materialize_cards`) 시 명시 field 매핑만 (no `**row`) — `**ORM_row` 패턴이 우연한 leak 위험 (§11.#4 사전 방어) |
@@ -393,7 +393,7 @@ fix: `model_name.lower().startswith("gpt-5")` 분기 — temperature payload omi
 | 파일 | 갱신 내용 |
 |---|---|
 | 본 파일 §13 | 본 절 (결정 매트릭스 7건 + §11 사전 방어 + R1 fix) |
-| `decision-backlog.md` | C-40 신규 + 카운트 39→40 + 다음 진입 = A9 (또는 A8 R2/R3 별도) |
+| `decision-backlog.md` | C-40 신규 + 카운트 39→40 + 다음 진입 = A8-v2 (또는 A8 R2/R3 별도) |
 | `sdd/contracts.md` | 신규 enum/error code/Redis key 0 (모두 기존) |
 | `sdd/agent-orchestration.md` | Phase 표 A8 ⬜ → ✅ + 다음 진입 A9 + Ownership 표 cold_start_job A8 ✅ |
 | `data/schema.md` | Recommendation·RecommendationSlot "(A8 ⬜)" 마커 제거 + DocumentSummaryCache § 신규 추가 + daily UNIQUE 표현 정정 |
@@ -476,4 +476,124 @@ fix: `model_name.lower().startswith("gpt-5")` 분기 — temperature payload omi
 - §3 LLM 어댑터 표의 "CodexOAuth (local experimental) — 로컬 실험·개인 토이 빌드에만 권장하고 배포·시연 환경의 기본값이 아니다" → **본 라운드로 정정** — subprocess wrap 본문 완성 + 시연 default 권고
 - 직전 v13 round 2 (2026-05-16) "reasoning 파라미터 미전송 — OpenAI default 위임" → 본 라운드 reasoning_effort fix 로 폐기. 사용자 원래 결정 (high/medium 분리) 이 코드에 반영
 - `CODEX_OAUTH_TOKEN` env → legacy 표시. codex CLI 가 `~/.codex/auth.json` 으로 자체 관리
+
+## 15. A8-v2 라운드 — UserProfile + Discovery Fusion + Reincarnation Pivot (2026-05-19)
+
+본 라운드는 discovery slot 2의 본질을 **사용자 흥미 *궤적의 교차점*에서 새 방향성을 발굴**로 pivot. 기존 구현 (`Source.trust_level='high' + cso_topic NOT IN trace_path + freshness DESC` 정렬) 이 SRS FR-41 "**잠재적으로 관심 있을 수 있는** 새 주제" 의 의도를 약하게 해석한 상태였음 — 개인화 신호가 0이고 사실상 "신뢰성 있는 최신 트렌드 노출". 본 라운드 후 discovery slot 1 = Fusion (archive × current cross-product) + slot 2 = Reincarnation (`score_tail >= 0.6` archived trace 부활). core 5 + adjacent 3 은 안정성 base 로 그대로 유지.
+
+### 배경 — 학술 trend + 본 라운드 고유 angle
+
+조사한 5종 paper (PersonaX ACL'25 / LettinGo KDD'25 / PURE / Guided Profile Generation NAACL'24 / Temporal Profiling) 가 모두 "행동 시퀀스 → offline LLM cron → 자유 텍스트 페르소나 캐시 + online 캐시 사용" 패턴으로 수렴 — 우리 daily cron + DB 영속 모델과 정확히 일치. Serendipity 인터뷰 연구 (RecSys-related '25, 17명 grounded theory) 의 3-dimension framework (Fortuitous + Refreshing + Enriching) 에서 "taste reincarnation" 이 reincarnation slot 의 직접 근거. **archive × current cross-product 융합** 은 paper 들이 못 본 본 라운드 고유 angle — 두 시점 표현을 cross-product 해서 새 영역을 추론.
+
+### 시스템 정체성
+
+> AI 가 매일 사용자의 archived trace 와 active trace 를 cross-product 해서, **두 영역이 만나는 새 학습 path** — 예: Graph Algorithms (과거) × Memory Management (현재) = **Memory-bounded Algorithms** — 를 discovery 카드로 제시한다. 학문이 가장 크게 도약하는 지점 (ML+Systems=MLSys, HCI+AI=대화형 AI) 의 메커니즘을 개인 추천 차원에서 구현한다.
+
+### 사용자 결정 매트릭스 (11건)
+
+| # | 영역 | 결정 |
+|---|---|---|
+| 1 | Discovery slot 본질 | slot 1 = Fusion (archive × current cross-product), slot 2 = Reincarnation (`score_tail >= 0.6` archived trace 부활) |
+| 2 | core / adjacent 변경 | 없음 (안정성 base 유지) |
+| 3 | 비율 5:3:2 | SRS FR-38 그대로 유지 |
+| 4 | UserProfile 노출 정책 | **ORM/schema 만**, endpoint·UI 없음 (향후 노출 결정 시 추가) |
+| 5 | UserProfile schema | 구조화 6 필드 (3 텍스트 + 3 JSONB) + 메타 컬럼 |
+| 6 | LLM input archive 범위 | `score_tail >= 0.6` archived trace 만 (강한 신호로 종료된 것만) |
+| 7 | LLM cron 시각 | daily 19 UTC (A6/A7 18 UTC 와 분리) |
+| 8 | LLM provider | 기존 `LLM_PROVIDER` env 재사용 (시연 default `codex_oauth`, CI `mock`) |
+| 9 | Reasoning effort | high (추론 깊이 필요) |
+| 10 | Cold-start (archive 0건) | 다중 active trace 시 cross-trace fusion 시도, 단일 trace 시 기존 trust=high trend fallback |
+| 11 | LLM output | `--output-schema` (codex_oauth) / `response_format=json_schema` (openai) strict 강제 + CSO 노드 ID 매핑 강제 |
+
+### 자체 결정 (구현 세부, 10건)
+
+| # | 영역 | 결정 |
+|---|---|---|
+| 1 | Lock 키 | `RedisKey.user_profile_generation_lock(user_id)` = `lock:user_profile_gen:{user_id}`, TTL 180s |
+| 2 | Cache 키 | `RedisKey.user_profile_cache(user_id)` = `user_profile:{user_id}`, TTL 1h (SETEX, daily cron 후 DEL) |
+| 3 | Profile upsert | 단일 `pg_insert(UserProfile).on_conflict_do_update(index_elements=["user_id"])` — PK 만이라 partial unique 불필요 |
+| 4 | Reincarnation gap | `USER_PROFILE_REINCARNATION_GAP_DAYS_MIN=7` — 너무 최근 archive 제외 (자연 망각 시간 부재) |
+| 5 | Input archive cap | `USER_PROFILE_INPUT_ARCHIVE_MAX=8` — token 폭주 가드, score_tail DESC 정렬 상위 N |
+| 6 | Pydantic strict | `extra="forbid"` + `additionalProperties=False` 강제 (codex `--output-schema` 호환) |
+| 7 | Lua atomic release | uuid4 token CAS DEL — A7 R2-RG-3 패턴 답습 |
+| 8 | Per-user try/except | 사용자별 commit (batch 통째 rollback 회피 — A6 C-03 lesson) |
+| 9 | cache-before-commit 회피 | `db.commit() → redis.delete(recommendation_cache)` 순서 |
+| 10 | Bridge CSO 매핑 가드 | LLM 응답의 `bridge_cso_topic_id` ∈ `cso_graph` 검증, 위반 candidate 제거 + 전체 매핑 실패 시 `None` 반환 |
+
+### Discovery slot 본문 fallback chain (engine.build_dashboard)
+
+```
+profile = await get_user_profile(...)
+pool = []
+
+# slot 1 (Fusion)
+if profile.fusion_candidates 의 valid bridge ∈ cso_graph:
+    pool += query_discovery_fusion(bridge_cso)
+elif profile.broadening_seeds[0]:
+    pool += query_discovery_fusion(seed_cso)
+
+# slot 2 (Reincarnation)
+archived_trace = get_top_archived_trace(score_tail_min=0.6, gap_days_min=7)
+if archived_trace:
+    pool += query_discovery_reincarnation(tail_cso, archived_leaves)
+elif profile.deepening_seeds[0]:
+    pool += query_discovery_fusion(seed_cso)
+
+# 모든 경로 빈 list 시
+if not pool:
+    pool = query_discovery_trend(list(trace_path_csos))   # 기존 rule
+```
+
+### SRS 정합 (3 박스)
+
+- **FR-41 "잠재적으로 관심 있을 수 있는"** — 원문 의도 회복. 본 라운드 변경이 FR-41 정합 강화 (해석 박스: [`srs/02-functional-requirements.md`](srs/02-functional-requirements.md)).
+- **04-data-model.md Table 7** — UserProfile 부재 정합 박스. SRS 표는 원형 보존하되 본 라운드 신규 entity 가 [`data/schema.md`](data/schema.md) 에서 SOR (헌법 §3 SRS 식별자 보존 + decisions 우선).
+- **NFR-04** — discovery 카드 `reason_short` 한 줄 노출 룰 정합 박스. UserProfile 자체 비노출 (admin / 일반 사용자 UI 모두), 시간/강도 추상화 표현만 카드 옆 표시.
+
+### Anti-pattern 회피 (A6/A7/A8 lesson 누적, 9건)
+
+| # | Anti-pattern | 회피 |
+|---|---|---|
+| 1 | Cache-before-commit (A4 C-02, A6 C-02, A8 §11 #1) | `db.commit() → redis.delete(recommendation_cache)` 순서 강제 |
+| 2 | Read-then-write race (A6 C-01) | UserProfile upsert = `pg_insert.on_conflict_do_update` 단일 SQL |
+| 3 | Batch IntegrityError rollback (A6 C-03) | per-user try/except + 사용자별 commit |
+| 4 | Lock release race (A7 R2-RG-3) | Lua atomic `GET+DEL` CAS (uuid4 token), `_RELEASE_LOCK_LUA` 상수 |
+| 5 | Daily UNIQUE race (A8 §11 #2) | UserProfile PK=user_id 만이라 N/A |
+| 6 | NFR-04 score leakage (A8 §11 #4) | discovery 카드 명시 필드 매핑 (no `**row`), reason_short 거부 키워드 강화 |
+| 7 | LLM provider 분기 lifespan 가드 (C-41) | 기존 `_SUPPORTED_A4_PROVIDERS` 재사용 (codex_oauth 포함) |
+| 8 | LLM hallucination — CSO 그래프 부재 ID | `bridge_cso_topic_id ∈ cso_graph` 매핑 가드, 위반 candidate 제거 + 전체 실패 시 None |
+| 9 | 토큰 폭주 (활성 사용자 archive 누적) | `USER_PROFILE_INPUT_ARCHIVE_MAX=8` cap + `score_tail DESC` 정렬 |
+
+### 본 라운드가 만들거나 갱신하는 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/app/db/models/user_profile.py` | 신규 (~70줄 ORM) |
+| `backend/alembic/versions/0007_a9_user_profile.py` | 신규 (~130줄 DDL + ck_collection_job_type 7-value 갱신) |
+| `backend/app/db/models/__init__.py` | UserProfile export 추가 |
+| `backend/app/contracts.py` | JobType.DAILY_USER_PROFILE_GENERATION + RedisKey.user_profile_generation_lock + RedisKey.user_profile_cache + ErrorCode 2종 |
+| `backend/app/config/__init__.py` | Settings 7 신규 env (USER_PROFILE_*) |
+| `backend/app/profile/__init__.py` + `schemas.py` + `config_loader.py` + `prompt_builder.py` + `service.py` | 신규 5 파일 (~900줄) |
+| `backend/app/worker/jobs/user_profile.py` | 신규 (~150줄 daily cron) |
+| `backend/app/scheduler.py` | JOB_REGISTRATIONS A8-v2 entry 추가 (6 → 7 cron) |
+| `backend/app/recommendation/candidates.py` | `query_discovery_fusion` / `query_discovery_reincarnation` / `query_discovery_trend` 신규, 기존 `query_discovery` deprecated alias |
+| `backend/app/recommendation/engine.py` | `_build_discovery_pool_raw` helper + build_dashboard 의 discovery 분기 본문 교체 |
+| `backend/app/recommendation/reasons.py` | NFR-04 거부 키워드 강화 (버킷 / score_tail / 신뢰도 추가) |
+| `backend/app/traversal/queries.py` | `get_archived_traces_with_score` / `get_top_archived_trace` / `get_descendant_archived_leaves` 신규 |
+| `.env.example` + `backend/.env.example` | USER_PROFILE_* 7 env 추가 |
+| `docs/decisions.md §15` | 본 절 신규 |
+| `docs/decision-backlog.md C-42` | A8-v2 라운드 entry 신규 |
+| `docs/sdd/contracts.md` | JobType / RedisKey / ErrorCode 표 갱신 |
+| `docs/data/schema.md` UserProfile § | 신규 |
+| `docs/algorithms/recommendation-ranking.md §Discovery` | 본문 pivot (fusion / reincarnation / fallback chain 룰) |
+| `docs/srs/02-functional-requirements.md` | FR-41 정합 박스 |
+| `docs/srs/04-data-model.md` | UserProfile 부재 정합 박스 |
+| `docs/srs/03-nonfunctional-requirements.md` | NFR-04 정합 박스 |
+| `docs/ops/env-vars.md` | A9 § + 7 env 행 + 골격 갱신 |
+| `docs/api/recommendation.md` | A8-v2 cron 내부 ErrorCode 표 추가 (endpoint 부재 명시) |
+
+### 폐기 또는 의미 변경 항목
+
+- §4 추천 슬롯 "discovery 2" 의미 — 기존 "trust=high trend" → "Fusion 1 (archive × current cross-product) + Reincarnation 1 (score_tail >= 0.6 archive)". core 5 + adjacent 3 의미는 그대로.
+- §13 A8 라운드 결정 #7 (NFR-04 score 마스킹 정책) — 본 라운드 reason_short 거부 키워드 강화로 확장 적용 (UserProfile context).
 

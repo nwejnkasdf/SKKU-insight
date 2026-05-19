@@ -210,6 +210,13 @@
 | FR-39 | 시스템은 `core` 슬롯에 이미 강한 관심이 확인된 주제 기반 추천을 배치해야 한다. |
 | FR-40 | 시스템은 `adjacent` 슬롯에 현재 관심과 인접한 주제 기반 추천을 배치해야 한다. |
 | FR-41 | 시스템은 `discovery` 슬롯에 아직 확신은 낮지만 잠재적으로 관심 있을 수 있는 새 주제 기반 추천을 배치해야 한다. |
+
+> **A8-v2 라운드 해석 박스 (2026-05-19)** — FR-41 의 "**잠재적으로 관심 있을 수 있는**" 의도를 회복하는 본문 변경. 직전 구현 (A8) 은 `Source.trust_level='high' + cso_topic NOT IN trace_path + freshness DESC` 로 사실상 "신뢰성 있는 최신 트렌드 노출" 이었음 — 개인화 신호 0. A8-v2 본문 ([`decisions.md §15`](../decisions.md)) 으로 discovery slot 2 의 본질이 갱신:
+> - **slot 1 (Fusion)**: 사용자 active trace × archived trace (`score_tail >= 0.6`) cross-product 교차점에서 LLM 이 추론한 새 영역 (`UserProfile.fusion_candidates[0].bridge_cso_topic_id`).
+> - **slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 의 부활 — "과거 강한 신호로 종료된 영역에서 새 자료" (Serendipity 3-dim "taste reincarnation").
+> - **Fallback chain**: fusion 부재 시 `broadening_seeds` → reincarnation 부재 시 `deepening_seeds` → 모두 부재 시 기존 trust=high trend (cold-start 직후 또는 archive 0건 사용자).
+>
+> FR-41 식별자 보존, "잠재적 관심" 의 의미가 "trust=high trend" → "사용자 흥미 궤적의 교차점" 으로 갱신 (개인화 신호 기반). core 5 + adjacent 3 은 변경 없음.
 | FR-42 | 시스템은 특정 슬롯 후보가 부족할 경우 저신뢰 후보를 강제로 보충하지 않고 신뢰도 기준을 만족하는 다른 슬롯 후보로 대체하며, 실제 슬롯 수와 fallback 사유를 기록해야 한다. |
 | FR-43 | 시스템은 전체 개인화 후보가 10개보다 부족할 경우 상위 토픽 인접 범위와 신뢰 소스 전체 트렌드로 fallback을 확장하여 학술 소스, 빅테크 공식 채널, 낚시성 필터를 통과한 테크 뉴스 후보로 총 10개를 보충해야 한다. |
 | FR-44 | 시스템은 대시보드 카드에 제목, 출처, 소스 유형, 관련 토픽, 간단한 추천 이유를 표시해야 한다. |

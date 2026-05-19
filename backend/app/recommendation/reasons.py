@@ -27,6 +27,7 @@ from .ranking import ScoredCandidate
 logger = logging.getLogger(__name__)
 
 # 거부 키워드 — 점수·알고리즘 노출 차단 (NFR-04).
+# A9 추가 (2026-05-19): score_tail / 버킷 / 신뢰도 — UserProfile 의 raw 값 노출 차단.
 _REJECTED_KEYWORDS = (
     "bucket",
     "score",
@@ -36,6 +37,9 @@ _REJECTED_KEYWORDS = (
     "ranking",
     "랭킹",
     "확률",
+    "버킷",
+    "score_tail",
+    "신뢰도",
 )
 _MAX_REASON_LENGTH = 80
 

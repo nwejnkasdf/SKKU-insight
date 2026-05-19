@@ -177,11 +177,15 @@ class UserCSOTraversal(Base):
         ForeignKey("user_cso_traversal.trace_id", ondelete="SET NULL"),
         nullable=True,
     )
+    # C-44 P2-27 신규 (alembic 0008, 2026-05-19). archive 진입 시점 user.active_day_counter.
+    # last_activity 와 분리 — A8-v2 reincarnation 의 gap_days_min 가드 정확성. NULL = 0008
+    # 이전 archived row (시연 0건). queries.get_top_archived_trace 가 COALESCE fallback.
+    archived_at_active_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 ```
 
-CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용), **`merged_into_trace_id` partial index (A7 0005, WHERE NOT NULL)** — merge audit 빠른 lookup. path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
+CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 1`) — `array_length` 은 빈 배열에 NULL 을 반환해 CHECK 가 통과되므로 `cardinality` 사용 (decision-backlog C-12, codex C-5). 인덱스: `(user_id, status)`, `GIN(path)` (path 위 cso_topic 검색용), **`merged_into_trace_id` partial index (A7 0005, WHERE NOT NULL)** — merge audit 빠른 lookup. **`archived_at_active_day` 인덱스 (C-44 0008, 2026-05-19)** — reincarnation gap_days 비교 성능. path 최대 길이는 앱 레벨 cap 8 ([`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §11).
 
 > **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split/**merge**)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. merge 의 경우 loser.status='archived' + loser.merged_into_trace_id=winner_id 동시. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3 (operation 5 종 — A7 가 merge 신규 도입).
 
@@ -447,12 +451,20 @@ class UserProfile(Base):
     deepening_seeds: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default="'[]'::jsonb")
     broadening_seeds: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default="'[]'::jsonb")
     #   [{cso_topic_id: uuid, label: str}] (0-3개)
+    # C-44 P2-28 신규 (alembic 0008, 2026-05-19). LLM 이 사용한 카테고리별 후보 풀의 UUID list.
+    # 구조: {"fusion": [uuid_str, ...], "deepening": [...], "broadening": [...]}.
+    # generate_profile_payload validation 이 응답 각 카테고리 ID 가 자기 풀 안에 있는지 검증 —
+    # LLM hallucination (graph 의 임의 노드 선택) 차단. 서버 default '{}' 로 alembic 0008 이전
+    # row 안전 (시연 0건).
+    candidate_pool_ids: Mapped[dict[str, list[str]]] = mapped_column(JSONB, nullable=False, server_default="'{}'::jsonb")
     generator_version: Mapped[str] = mapped_column(String(20), nullable=False)    # prompt template 버전 추적
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
 
 인덱스: `ix_user_profile_generated_at` (cron 진행률 모니터링). UPSERT 패턴: 단일 `pg_insert(UserProfile).on_conflict_do_update(index_elements=["user_id"], set_={...})` — PK 만이라 partial unique 분기 불필요. A6 `_atomic_upsert_interest_state` 패턴 단순화. NFR-04 정합: 본 테이블은 사용자 화면에 노출 안 됨, discovery 카드의 `reason_short` 한 줄만 시간/강도 추상화 형태로 노출.
+
+> **C-44 P2-28 (2026-05-19) candidate_pool_ids 분리 강제**: 직전(A8-v2 R1) 라운드에서 LLM `bridge_cso_topic_id` 매핑 가드가 cso_graph 전체 멤버십만 검사했음 — LLM 이 prompt 안 cso_candidate_pool 외 graph 노드 선택해도 통과. 본 라운드 fix 로 카테고리별 풀 (fusion / deepening / broadening) 영속화 + `generate_profile_payload` validation 이 응답 카테고리별 자기 풀 멤버십 확인. prompt 도 `cso_candidate_pool.fusion` / `.deepening` / `.broadening` 명시.
 
 ### UserEvent
 

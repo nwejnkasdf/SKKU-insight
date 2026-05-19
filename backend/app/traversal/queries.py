@@ -17,7 +17,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import networkx as nx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import LeafTopicStatus, TraversalStatus
@@ -229,9 +229,17 @@ async def get_archived_traces_with_score(
     A8-v2 daily user_profile cron 의 LLM input 풀. 강한 신호로 종료된 archive 만 fusion /
     reincarnation 의 source. 자연 둔화 archive (score_tail < 임계) 는 노이즈로 제외.
 
-    정렬 — score_tail DESC, last_activity_active_day DESC. limit 적용 (token 폭주 가드).
+    정렬 — score_tail DESC, archive 시점 DESC. limit 적용 (token 폭주 가드).
     `merged_into_trace_id IS NULL` 인 archive 만 (winner 로 흡수된 loser 는 제외).
+
+    (C-44 P2-27 fix, 2026-05-19) 정렬 키가 `COALESCE(archived_at_active_day,
+    last_activity_active_day)` — 신규 archive 는 archived_at, alembic 0008 이전
+    row 는 last_activity fallback (backward-compat).
     """
+    archive_sort_key = func.coalesce(
+        UserCSOTraversal.archived_at_active_day,
+        UserCSOTraversal.last_activity_active_day,
+    )
     stmt = (
         select(UserCSOTraversal)
         .where(
@@ -242,7 +250,7 @@ async def get_archived_traces_with_score(
         )
         .order_by(
             UserCSOTraversal.score_tail.desc(),
-            UserCSOTraversal.last_activity_active_day.desc(),
+            archive_sort_key.desc(),
         )
         .limit(limit)
     )
@@ -257,13 +265,22 @@ async def get_top_archived_trace(
     gap_days_min: int,
     current_active_day: int,
 ) -> UserCSOTraversal | None:
-    """discovery reincarnation 후보 — score_tail >= 임계 + last_activity 가 gap_days 전.
+    """discovery reincarnation 후보 — score_tail >= 임계 + archive 시점이 gap_days 전.
 
     PR-5 (recommendation engine) 가 discovery slot 2 reincarnation 분기에서 호출.
     가장 강한 신호 (score_tail DESC) + 충분한 시간 지난 (gap_days_min) archive 1건.
     `merged_into_trace_id IS NULL` 강제.
+
+    (C-44 P2-27 fix, 2026-05-19) gap_days 비교가 `COALESCE(archived_at_active_day,
+    last_activity_active_day) <= cutoff` — fix 전: last_activity 만 비교 (archive
+    직후 동일 값이라 gap_days 의미 약화). fix 후: 신규 archive 는 archived_at 기준,
+    옛 archive 는 fallback. A8-v2 P2-27 회복.
     """
     cutoff_active_day = current_active_day - gap_days_min
+    archive_sort_key = func.coalesce(
+        UserCSOTraversal.archived_at_active_day,
+        UserCSOTraversal.last_activity_active_day,
+    )
     stmt = (
         select(UserCSOTraversal)
         .where(
@@ -271,11 +288,11 @@ async def get_top_archived_trace(
             UserCSOTraversal.status == TraversalStatus.ARCHIVED.value,
             UserCSOTraversal.score_tail >= score_tail_min,
             UserCSOTraversal.merged_into_trace_id.is_(None),
-            UserCSOTraversal.last_activity_active_day <= cutoff_active_day,
+            archive_sort_key <= cutoff_active_day,
         )
         .order_by(
             UserCSOTraversal.score_tail.desc(),
-            UserCSOTraversal.last_activity_active_day.desc(),
+            archive_sort_key.desc(),
         )
         .limit(1)
     )

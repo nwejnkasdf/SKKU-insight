@@ -16,6 +16,7 @@ from app.profile.schemas import (
     ActiveTraceSummary,
     ArchivedTraceSummary,
     CSOTopicCandidate,
+    CSOTopicCandidatePool,
     ProfileLLMInput,
 )
 
@@ -51,10 +52,19 @@ def _make_input() -> ProfileLLMInput:
         recent_saved_topic_labels=["RLHF"],
         recent_hidden_topic_labels=[],
         not_interested_topic_labels=[],
-        cso_candidate_pool=[
-            CSOTopicCandidate(cso_topic_id=cso_a, label="Systems"),
-            CSOTopicCandidate(cso_topic_id=cso_b, label="OS"),
-        ],
+        cso_candidate_pool=CSOTopicCandidatePool(
+            fusion=[
+                CSOTopicCandidate(cso_topic_id=cso_a, label="Systems"),
+                CSOTopicCandidate(cso_topic_id=cso_b, label="OS"),
+            ],
+            deepening=[
+                CSOTopicCandidate(cso_topic_id=cso_b, label="OS"),
+                CSOTopicCandidate(cso_topic_id=cso_c, label="Memory Mgmt"),
+            ],
+            broadening=[
+                CSOTopicCandidate(cso_topic_id=cso_a, label="Systems"),
+            ],
+        ),
     )
 
 
@@ -104,7 +114,15 @@ class TestPayloadSerialization:
 
     def test_to_input_payload_includes_cso_pool(self) -> None:
         payload = to_input_payload(_make_input())
-        assert len(payload["cso_candidate_pool"]) == 2
+        # 카테고리별 3 키 (C-44 P2-28).
+        pool = payload["cso_candidate_pool"]
+        assert isinstance(pool, dict)
+        assert "fusion" in pool
+        assert "deepening" in pool
+        assert "broadening" in pool
+        assert len(pool["fusion"]) == 2
+        assert len(pool["deepening"]) == 2
+        assert len(pool["broadening"]) == 1
 
 
 class TestTokenBudget:

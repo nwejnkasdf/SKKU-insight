@@ -115,10 +115,13 @@ async def _run() -> int:
                     )
                     total_skipped_llm += 1
                     continue
+                # (C-44 P2-28, 2026-05-19) candidate_pool 영속화 — LLM 이 사용한
+                # 카테고리별 풀의 ID list 를 UserProfile.candidate_pool_ids JSONB 저장.
                 await upsert_user_profile(
                     db,
                     user_id=user.user_id,
                     payload=payload,
+                    candidate_pool=llm_input.cso_candidate_pool,
                     generator_version=config.generator_version,
                 )
                 # cache-before-commit 회피 — commit 후 DEL.

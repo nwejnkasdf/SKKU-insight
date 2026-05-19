@@ -75,16 +75,20 @@ input {
 
 .shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 1fr;
   min-height: 100vh;
+  padding-left: 248px;
 }
 
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  bottom: 0;
+  left: 0;
   display: grid;
   align-content: start;
   gap: 26px;
+  width: 248px;
   height: 100vh;
   padding: 28px 22px;
   background: #fbfcf8;
@@ -201,7 +205,20 @@ input {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.opsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.accountGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
 }
 
@@ -278,6 +295,83 @@ button.iconRefresh {
   background: #f3e4e1;
 }
 
+.statusList {
+  display: grid;
+  gap: 8px;
+}
+
+.statusList span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.statusList b {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.statusList em {
+  min-width: 0;
+  color: var(--ink);
+  font-style: normal;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.warnText {
+  color: var(--warn) !important;
+}
+
+.barBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 36px;
+  gap: 10px;
+  align-items: center;
+  min-height: 32px;
+}
+
+.barRow b {
+  color: var(--muted);
+}
+
+.barRow i {
+  height: 8px;
+  overflow: hidden;
+  background: #e5ebe4;
+  border-radius: 999px;
+}
+
+.barRow em {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+.barRow em.warn {
+  background: var(--warn);
+}
+
+.barRow em.danger {
+  background: var(--danger);
+}
+
+.barRow strong {
+  text-align: right;
+}
+
 .table {
   display: grid;
   gap: 8px;
@@ -322,14 +416,18 @@ button.iconRefresh {
 @media (max-width: 1040px) {
   .shell {
     grid-template-columns: 1fr;
+    padding-left: 0;
   }
 
   .sidebar {
     position: static;
+    width: auto;
     height: auto;
   }
 
   .grid,
+  .opsGrid,
+  .accountGrid,
   .contentStack {
     grid-template-columns: 1fr;
   }

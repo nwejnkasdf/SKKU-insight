@@ -3,31 +3,36 @@ const apiBase = window.__ADMIN_CONFIG__?.apiBase || "http://localhost:8000";
 const state = {
   accessToken: localStorage.getItem("admin_access") || "",
   refreshToken: localStorage.getItem("admin_refresh") || "",
+  adminEmail: localStorage.getItem("admin_email") || "admin@skkuinsight.org",
   mustChangePassword: localStorage.getItem("admin_must_change") === "true",
   loading: false,
   error: "",
   users: [],
   health: null,
-  view: window.location.hash === "#users" ? "users" : "overview"
+  view: window.location.hash === "#account" ? "account" : "operations"
 };
 
 const root = document.querySelector("#root");
 
-function setTokens(pair) {
+function setTokens(pair, email = state.adminEmail) {
   state.accessToken = pair.access_token;
   state.refreshToken = pair.refresh_token;
+  state.adminEmail = email;
   state.mustChangePassword = Boolean(pair.must_change_password);
   localStorage.setItem("admin_access", state.accessToken);
   localStorage.setItem("admin_refresh", state.refreshToken);
+  localStorage.setItem("admin_email", state.adminEmail);
   localStorage.setItem("admin_must_change", String(state.mustChangePassword));
 }
 
 function clearTokens() {
   state.accessToken = "";
   state.refreshToken = "";
+  state.adminEmail = "admin@skkuinsight.org";
   state.mustChangePassword = false;
   localStorage.removeItem("admin_access");
   localStorage.removeItem("admin_refresh");
+  localStorage.removeItem("admin_email");
   localStorage.removeItem("admin_must_change");
 }
 
@@ -73,14 +78,15 @@ async function login(event) {
   state.error = "";
   render();
   try {
+    const email = String(data.get("email") || "").trim();
     const pair = await request("/admin/auth/login", {
       method: "POST",
       body: JSON.stringify({
-        email: String(data.get("email") || "").trim(),
+        email,
         password: String(data.get("password") || "")
       })
     }, false);
-    setTokens(pair);
+    setTokens(pair, email);
     await loadDashboard();
   } catch (error) {
     state.error = messageForError(error);
@@ -240,6 +246,7 @@ function changePasswordView() {
 }
 
 function shellView() {
+  const isAccount = state.view === "account";
   return `
     <div class="shell">
       <aside class="sidebar">
@@ -251,20 +258,20 @@ function shellView() {
           </div>
         </div>
         <nav class="nav">
-          ${navButton("overview", "운영 요약")}
-          ${navButton("users", "사용자 관리")}
+          ${navButton("operations", "운영")}
+          ${navButton("account", "내 계정")}
         </nav>
         <button class="secondary" id="logoutButton">로그아웃</button>
       </aside>
       <section class="main">
         <header class="pageTitle">
           <div>
-            <h1>관리자 콘솔</h1>
-            <p>사용자 동의 상태와 운영 흐름을 확인합니다.</p>
+            <h1>${isAccount ? "내 계정" : "운영"}</h1>
+            <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
           </div>
         </header>
         ${state.error ? `<p class="notice">${state.error}</p>` : ""}
-        ${state.view === "users" ? usersView() : overviewView()}
+        ${isAccount ? accountView() : operationsView()}
       </section>
     </div>
   `;
@@ -274,44 +281,73 @@ function navButton(view, label) {
   return `<button class="${state.view === view ? "active" : ""}" type="button" data-view="${view}">${label}</button>`;
 }
 
-function overviewView() {
+function operationsView() {
   const activeUsers = state.users.filter((user) => user.consent_active).length;
+  const inactiveUsers = state.users.length - activeUsers;
   const pendingDeletion = state.users.filter((user) => user.deletion_pending).length;
+  const consentRate = state.users.length === 0 ? 0 : Math.round((activeUsers / state.users.length) * 100);
   return `
     <section class="grid">
       ${metricCard("사용자", state.users.length, "등록 계정")}
       ${metricCard("동의 활성", activeUsers, "추천 가능")}
+      ${metricCard("동의율", `${consentRate}%`, "활성 비율")}
       ${metricCard("삭제 대기", pendingDeletion, "예약 계정")}
     </section>
-    <section class="contentStack">
+    <section class="opsGrid">
       <div class="card">
         <div class="cardHead">
-          <h2>시스템 상태</h2>
+          <h2>상태 점검</h2>
           <button class="iconRefresh" type="button" title="시스템 상태 새로고침" data-refresh>↻</button>
         </div>
-        <span class="status ${state.health === "정상" ? "" : "warn"}">${state.health || "확인 중"}</span>
-        <p class="muted">API health check 기준으로 운영 가능 여부를 확인합니다.</p>
+        <div class="statusList">
+          ${statusRow("API", state.health || "확인 중", state.health === "정상")}
+          ${statusRow("사용자 조회", `${state.users.length}건`, true)}
+          ${statusRow("관리자 세션", state.accessToken ? "활성" : "없음", Boolean(state.accessToken))}
+        </div>
       </div>
+      <div class="card">
+        <div class="cardHead">
+          <h2>동의 분포</h2>
+          <button class="iconRefresh" type="button" title="동의 분포 새로고침" data-refresh>↻</button>
+        </div>
+        <div class="barBlock">
+          ${barRow("활성", activeUsers, state.users.length, "")}
+          ${barRow("비활성", inactiveUsers, state.users.length, "warn")}
+          ${barRow("삭제 대기", pendingDeletion, state.users.length, "danger")}
+        </div>
+      </div>
+    </section>
+    <section class="contentStack">
       <div class="card">
         <div class="cardHead">
           <h2>최근 사용자</h2>
           <button class="iconRefresh" type="button" title="최근 사용자 새로고침" data-refresh>↻</button>
         </div>
-        ${usersTable(state.users.slice(0, 5))}
+        ${usersTable(state.users.slice(0, 8))}
       </div>
     </section>
   `;
 }
 
-function usersView() {
+function accountView() {
+  const session = readSession();
   return `
-    <section class="contentStack">
+    <section class="accountGrid">
       <div class="card">
         <div class="cardHead">
-          <h2>사용자 관리</h2>
-          <button class="iconRefresh" type="button" title="사용자 관리 새로고침" data-refresh>↻</button>
+          <h2>관리자 계정</h2>
+          <span class="status">활성</span>
         </div>
-        ${usersTable(state.users)}
+        <div class="statusList">
+          ${statusRow("이메일", state.adminEmail, true)}
+          ${statusRow("권한", "관리자", true)}
+          ${statusRow("토큰 만료", session.expiresAt, session.valid)}
+        </div>
+      </div>
+      <div class="card">
+        <h2>계정 작업</h2>
+        <p class="muted">현재 세션을 종료하면 관리자 로그인 화면으로 돌아갑니다.</p>
+        <button type="button" id="accountLogoutButton">로그아웃</button>
       </div>
     </section>
   `;
@@ -324,6 +360,26 @@ function metricCard(title, value, caption) {
       <strong class="metric">${value}</strong>
       <span class="muted">${caption}</span>
     </div>
+  `;
+}
+
+function statusRow(label, value, ok) {
+  return `
+    <span>
+      <b>${label}</b>
+      <em class="${ok ? "" : "warnText"}">${escapeHtml(value)}</em>
+    </span>
+  `;
+}
+
+function barRow(label, value, total, tone) {
+  const width = total === 0 ? 0 : Math.max(6, Math.round((value / total) * 100));
+  return `
+    <span class="barRow">
+      <b>${label}</b>
+      <i><em class="${tone}" style="width: ${width}%"></em></i>
+      <strong>${value}</strong>
+    </span>
   `;
 }
 
@@ -358,8 +414,8 @@ function bindPasswordChange() {
 function bindApp() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.view = button.getAttribute("data-view") || "overview";
-      window.location.hash = state.view === "users" ? "users" : "overview";
+      state.view = button.getAttribute("data-view") || "operations";
+      window.location.hash = state.view === "account" ? "account" : "operations";
       render();
     });
   });
@@ -367,6 +423,22 @@ function bindApp() {
     button.addEventListener("click", loadDashboard);
   });
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
+  document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);
+}
+
+function readSession() {
+  try {
+    const [, payload] = state.accessToken.split(".");
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const parsed = JSON.parse(atob(padded));
+    const expiresAt = parsed.exp
+      ? new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(parsed.exp * 1000))
+      : "-";
+    return { expiresAt, valid: Boolean(parsed.exp && parsed.exp * 1000 > Date.now()) };
+  } catch {
+    return { expiresAt: "-", valid: false };
+  }
 }
 
 function escapeHtml(value) {

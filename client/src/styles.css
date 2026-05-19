@@ -442,6 +442,137 @@ nav button.active::before {
   font-size: 12px;
 }
 
+.interestStructure {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+
+.modelLayer {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--surface-subtle);
+  border: 1px solid #e0e5df;
+  border-radius: 8px;
+}
+
+.modelLayerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.modelLayerHead span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.modelLayerHead b {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.modelNodes {
+  display: grid;
+  gap: 7px;
+}
+
+.modelNodes span {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 6px 8px;
+  color: #244b43;
+  background: #ffffff;
+  border: 1px solid #dce5dd;
+  border-radius: 8px;
+}
+
+.modelNodes i {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.modelNodes b,
+.modelNodes em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelNodes b {
+  font-size: 12px;
+}
+
+.modelNodes em {
+  grid-column: 2;
+  color: var(--soft);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.modelNodes .medium i,
+.modelNodes .adjacent i {
+  background: var(--accent-2);
+}
+
+.modelNodes .low i,
+.modelNodes .neutral i,
+.modelNodes .discovery i {
+  background: var(--accent-3);
+}
+
+.modelNodes .trace i {
+  background: #5d6c65;
+}
+
+.modelArrow {
+  position: absolute;
+  top: 50%;
+  right: -14px;
+  z-index: 2;
+  width: 14px;
+  height: 2px;
+  background: #b7c3bb;
+}
+
+.modelArrow::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -4px;
+  width: 9px;
+  height: 9px;
+  border-top: 2px solid #b7c3bb;
+  border-right: 2px solid #b7c3bb;
+  transform: rotate(45deg);
+}
+
 .signalStats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2222,6 +2353,7 @@ select:focus {
   .settingsGrid,
   .dashboardGrid,
   .signalOverview,
+  .interestStructure,
   .onboardingLayout,
   .topicScreen,
   .rankScreen,
@@ -2242,6 +2374,10 @@ select:focus {
 
   .settingsGrid .sidePanel {
     grid-column: auto;
+  }
+
+  .modelArrow {
+    display: none;
   }
 }
 

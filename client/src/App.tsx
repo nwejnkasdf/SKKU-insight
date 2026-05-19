@@ -55,6 +55,8 @@ type Toast = { tone: "ok" | "error"; text: string } | null;
 type TopicRank = { topicId: UUID; label: string; count: number };
 type FeedbackAction = "save" | "hide" | "not_interested";
 type FeedbackState = { saved: boolean; hidden: boolean; notInterested: boolean };
+type ModelNode = { label: string; tone: string; meta?: string };
+type ModelLayer = { key: string; title: string; kicker: string; nodes: ModelNode[] };
 
 const userClassOptions = [
   { value: "general", label: "일반" },
@@ -468,6 +470,7 @@ function DashboardView({
       {!loading && dashboard && (
         <div className="dashboardStack">
           <SignalOverview dashboard={dashboard} topicCount={topicRanks.length} interest={interest} traces={traces} />
+          <InterestStructurePanel dashboard={dashboard} interest={interest} traces={traces} />
           <div className="dashboardMain">
             <div className="sectionTitle">
               <div>
@@ -640,6 +643,40 @@ function SignalOverview({
         <span><b>{trackedTopics.length || topicCount}</b> 관심</span>
         <span><b>{dashboard.cold_start ? "활성" : "종료"}</b> 초기</span>
       </div>
+    </div>
+  );
+}
+
+function InterestStructurePanel({
+  dashboard,
+  interest,
+  traces
+}: {
+  dashboard: DashboardResponse;
+  interest: InterestStateResponse | null;
+  traces: TraversalTraceSummary[];
+}) {
+  const layers = buildInterestModelLayers(dashboard, interest, traces);
+  return (
+    <div className="interestStructure panel" aria-label="관심 구조 시각화">
+      {layers.map((layer, index) => (
+        <div key={layer.key} className={`modelLayer ${layer.key}`}>
+          <div className="modelLayerHead">
+            <span>{layer.kicker}</span>
+            <b>{layer.title}</b>
+          </div>
+          <div className="modelNodes">
+            {layer.nodes.slice(0, 4).map((node) => (
+              <span key={`${layer.key}-${node.label}`} className={node.tone} title={node.label}>
+                <i>{compactTopicLabel(node.label)}</i>
+                <b>{node.label}</b>
+                {node.meta && <em>{node.meta}</em>}
+              </span>
+            ))}
+          </div>
+          {index < layers.length - 1 && <i className="modelArrow" aria-hidden="true" />}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1328,6 +1365,69 @@ function buildTrackedNodes(
     .filter(Boolean)
     .filter((label, index, arr) => arr.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index);
   return unique.slice(0, 5);
+}
+
+function buildInterestModelLayers(
+  dashboard: DashboardResponse,
+  interest: InterestStateResponse | null,
+  traces: TraversalTraceSummary[]
+): ModelLayer[] {
+  const interestTopics = interest?.topics ?? [];
+  const trackedTopics = interestTopics.filter((topic) => topic.bucket !== "neutral");
+  const fallbackTopics = uniqueLabels(
+    dashboard.cards.flatMap((card) => card.related_topics.map((topic) => topic.label))
+  );
+  const activeTraces = traces.filter((trace) => trace.status === "active");
+  const traceLabels = uniqueLabels(activeTraces.flatMap((trace) => trace.path_labels));
+
+  return [
+    {
+      key: "prior",
+      kicker: "1",
+      title: "초기 prior",
+      nodes: (trackedTopics.length ? trackedTopics.map((topic) => topic.label) : fallbackTopics)
+        .slice(0, 3)
+        .map((label) => ({ label, tone: "prior", meta: "onboarding" }))
+    },
+    {
+      key: "bayes",
+      kicker: "2",
+      title: "Bayesian 상태",
+      nodes: (trackedTopics.length ? trackedTopics : interestTopics.slice(0, 4))
+        .slice(0, 4)
+        .map((topic) => ({ label: topic.label, tone: topic.bucket, meta: bucketLabel(topic.bucket) }))
+    },
+    {
+      key: "trace",
+      kicker: "3",
+      title: "Traversal trace",
+      nodes: (traceLabels.length ? traceLabels : buildTrackedNodes(dashboard, interest, traces))
+        .slice(0, 4)
+        .map((label) => ({ label, tone: "trace", meta: activeTraces.length ? "active" : "대기" }))
+    },
+    {
+      key: "slots",
+      kicker: "4",
+      title: "추천 슬롯",
+      nodes: dashboard.slots
+        .filter((slot) => slot.actual_count > 0)
+        .map((slot) => ({
+          label: slotLabel(slot.slot_type),
+          tone: slot.slot_type,
+          meta: `${slot.actual_count}/${slot.target_count}`
+        }))
+    }
+  ].map((layer) => ({
+    ...layer,
+    nodes: layer.nodes.length ? layer.nodes : [{ label: "대기 중", tone: "neutral", meta: "none" }]
+  }));
+}
+
+function uniqueLabels(labels: string[]): string[] {
+  return labels
+    .map((label) => label.trim())
+    .filter(Boolean)
+    .filter((label, index, arr) => arr.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index);
 }
 
 function compactTopicLabel(label: string): string {

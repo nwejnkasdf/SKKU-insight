@@ -188,13 +188,19 @@ function AuthView({
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
+    const normalizedEmail = email.trim().toLowerCase();
+    const validationError = mode === "signup" ? validateSignupForm(normalizedEmail, password) : validateLoginForm(normalizedEmail, password);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       if (mode === "signup") {
-        await api.signup(email, password);
+        await api.signup(normalizedEmail, password);
       }
-      const tokens = await api.login(email, password);
+      const tokens = await api.login(normalizedEmail, password);
       await tokenStore.setTokens(tokens);
       const me = await api.me();
       setView(!me.consent_active || !me.onboarding_complete ? { name: "onboarding", me } : { name: "dashboard" });
@@ -1068,7 +1074,71 @@ function toggleSet<T>(set: Set<T>, setter: (next: Set<T>) => void, value: T) {
 
 function messageForError(err: unknown): string {
   const maybe = err as Partial<ApiError>;
+  if (maybe.status === 429) {
+    return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (maybe.code === "auth.weak_password") {
+    const subCode = (maybe.details?.sub_code as string | undefined) ?? "";
+    return passwordPolicyMessage(subCode);
+  }
+  if (maybe.code === "auth.email_taken") {
+    return "이미 가입된 이메일입니다.";
+  }
+  if (maybe.code === "auth.invalid_credentials") {
+    return "이메일 또는 비밀번호가 올바르지 않습니다.";
+  }
+  if (maybe.code === "validation_error" || maybe.status === 422) {
+    return "입력값을 확인해주세요. 이메일 형식과 비밀번호 규칙을 맞춰야 합니다.";
+  }
   return maybe.message || "처리 중 문제가 발생했습니다.";
+}
+
+function validateLoginForm(email: string, password: string): string | null {
+  if (!isValidEmail(email)) {
+    return "올바른 이메일 주소를 입력해주세요.";
+  }
+  if (!password) {
+    return "비밀번호를 입력해주세요.";
+  }
+  return null;
+}
+
+function validateSignupForm(email: string, password: string): string | null {
+  const loginError = validateLoginForm(email, password);
+  if (loginError) return loginError;
+  if (password.trim() !== password) {
+    return passwordPolicyMessage("whitespace");
+  }
+  if (password.length < 12) {
+    return passwordPolicyMessage("too_short");
+  }
+  if (password.length > 128) {
+    return passwordPolicyMessage("too_long");
+  }
+  const lowered = password.toLowerCase();
+  const localPart = email.split("@", 1)[0]?.toLowerCase() ?? "";
+  if (localPart.length >= 4 && lowered.includes(localPart)) {
+    return passwordPolicyMessage("contains_user_info");
+  }
+  if (["insight", "skku", "admin", "password", "qwerty"].some((term) => lowered.includes(term))) {
+    return passwordPolicyMessage("forbidden_term");
+  }
+  return null;
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function passwordPolicyMessage(subCode: string): string {
+  return {
+    whitespace: "비밀번호 앞뒤에는 공백을 넣을 수 없습니다.",
+    too_short: "비밀번호는 12자 이상이어야 합니다.",
+    too_long: "비밀번호는 128자 이하여야 합니다.",
+    common: "너무 흔한 비밀번호입니다. 다른 비밀번호를 사용해주세요.",
+    contains_user_info: "비밀번호에 이메일 아이디를 포함할 수 없습니다.",
+    forbidden_term: "비밀번호에 insight, skku, admin, password, qwerty 같은 금칙어를 포함할 수 없습니다."
+  }[subCode] ?? "비밀번호 정책을 확인해주세요. 12자 이상, 금칙어와 이메일 아이디 제외, 앞뒤 공백 없음.";
 }
 
 function slotLabel(slot: string): string {

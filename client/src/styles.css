@@ -633,10 +633,15 @@ nav button.active::before {
 }
 
 .insightRail {
-  position: sticky;
-  top: 24px;
+  position: fixed;
+  top: 116px;
+  right: 34px;
+  z-index: 3;
   display: grid;
   gap: 12px;
+  width: 338px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
 }
 
 .insightPanel {
@@ -2283,10 +2288,13 @@ select:focus {
 
 .rankTable button {
   display: grid;
-  grid-template-columns: 42px 86px minmax(0, 1fr) 160px;
+  grid-template-columns: 42px 86px minmax(0, 1fr);
+  grid-template-areas:
+    "rank slot title"
+    "rank slot meta";
   gap: 12px;
   align-items: center;
-  min-height: 62px;
+  min-height: 72px;
   padding: 10px 12px;
   text-align: left;
   background: var(--surface-subtle);
@@ -2300,18 +2308,26 @@ select:focus {
 }
 
 .rankTable b {
+  grid-area: rank;
   color: var(--accent);
   font-size: 16px;
 }
 
+.rankTable .slot {
+  grid-area: slot;
+  justify-self: start;
+}
+
 .rankTable strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  grid-area: title;
+  overflow-wrap: anywhere;
+  line-height: 1.32;
 }
 
 .rankTable small {
+  grid-area: meta;
   color: var(--soft);
+  line-height: 1.35;
 }
 
 .libraryScreen {
@@ -2460,6 +2476,7 @@ select:focus {
     position: static;
   }
 
+  .insightRail,
   .topicSide {
     width: auto;
     max-height: none;

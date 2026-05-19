@@ -1996,6 +1996,11 @@ select:focus {
   gap: 8px;
 }
 
+.topicConstellation {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .traceStep {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr) 128px;
@@ -2008,8 +2013,37 @@ select:focus {
   border-radius: 8px;
 }
 
+.topicConstellation .traceStep {
+  position: relative;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  min-height: 132px;
+  padding: 12px 8px;
+}
+
+.topicConstellation .traceStep::after {
+  content: "";
+  position: absolute;
+  top: 42px;
+  right: -10px;
+  width: 20px;
+  height: 2px;
+  background: #c8d2cb;
+}
+
+.topicConstellation .traceStep:last-child::after {
+  display: none;
+}
+
 .traceStepMain {
   display: contents;
+}
+
+.topicConstellation .traceStepMain {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .traceStepMain span {
@@ -2023,10 +2057,36 @@ select:focus {
   font-weight: 900;
 }
 
+.topicConstellation .traceStepMain span {
+  order: 3;
+  color: var(--soft);
+  background: transparent;
+  border: 0;
+}
+
 .traceStepMain strong {
   color: var(--text);
   font-size: 16px;
   line-height: 1.18;
+}
+
+.topicConstellation .traceStepMain strong {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 999px;
+  font-size: 14px;
+}
+
+.topicConstellation .traceStep.core .traceStepMain strong {
+  background: var(--accent-2);
+}
+
+.topicConstellation .traceStep.leaf .traceStepMain strong {
+  background: var(--accent-3);
 }
 
 .traceStepMain small {
@@ -2035,6 +2095,15 @@ select:focus {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.topicConstellation .traceStepMain small {
+  display: -webkit-box;
+  min-height: 32px;
+  text-align: center;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .traceStep.core {
@@ -2057,6 +2126,11 @@ select:focus {
   height: 6px;
   background: #e3e9e5;
   border-radius: 999px;
+}
+
+.topicConstellation .traceWeight {
+  width: 100%;
+  max-width: 86px;
 }
 
 .traceWeight i {
@@ -2091,8 +2165,8 @@ select:focus {
     "rank topics";
   gap: 8px 12px;
   align-items: start;
-  min-height: 0;
-  padding: 14px;
+  min-height: 58px;
+  padding: 10px 12px;
   text-align: left;
   background: var(--surface-subtle);
   border: 1px solid transparent;
@@ -2127,11 +2201,11 @@ select:focus {
   overflow: hidden;
   color: var(--text);
   max-width: 100%;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.28;
   text-overflow: ellipsis;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .evidenceRows small {
@@ -2160,7 +2234,7 @@ select:focus {
 }
 
 .adjacentList {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .adjacentList button {
@@ -2169,7 +2243,7 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
   min-height: 42px;
-  padding: 0 11px;
+  padding: 0 10px;
   color: #293431;
   text-align: left;
   background: var(--surface-subtle);
@@ -2184,7 +2258,13 @@ select:focus {
 }
 
 .adjacentList b {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
   color: var(--accent);
+  background: #e8f0ec;
+  border-radius: 999px;
   font-size: 13px;
 }
 

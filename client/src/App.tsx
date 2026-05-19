@@ -982,7 +982,7 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
           <div className="insightPanel">
             <PanelHeading icon={<Activity size={16} />} title="Interest buckets" />
             <div className="interestList">
-              {(interest?.topics ?? []).slice(0, 7).map((topic) => (
+              {(interest?.topics ?? []).slice(0, 5).map((topic) => (
                 <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}`}>
                   {topic.label}<b>{bucketLabel(topic.bucket)}</b>
                 </span>
@@ -1005,30 +1005,34 @@ function TraceBoard({
   cards: RecommendationCard[];
   setView: (view: View) => void;
 }) {
-  const trace = [
-    { label: "Computer Science", short: "CS", tone: "root", meta: "기준", weight: 0.32 },
-    { label: "Artificial Intelligence", short: "AI", tone: "core", meta: "현재", weight: 0.82 },
-    { label: "Information Retrieval", short: "IR", tone: "core", meta: "활성", weight: 0.71 },
-    { label: "Retrieval-Augmented Generation", short: "RAG", tone: "leaf", meta: "리프", weight: 0.64 },
-    { label: "Agentic Search", short: "Agentic Search", tone: "active", meta: "확장", weight: 0.58 }
-  ];
-  const adjacent = ranks.slice(0, 4);
-  const activeLeaf = trace[trace.length - 1];
+  const trace = (ranks.length ? ranks.slice(0, 5) : [
+    { topicId: "seed-1", label: "operating systems", count: 2 },
+    { topicId: "seed-2", label: "automata theory", count: 2 },
+    { topicId: "seed-3", label: "software engineering", count: 1 }
+  ]).map((rank, index) => ({
+    label: rank.label,
+    short: compactTopicLabel(rank.label),
+    tone: index === 0 ? "active" : index < 3 ? "core" : "leaf",
+    meta: `${rank.count}`,
+    weight: Math.min(1, 0.36 + rank.count * 0.16)
+  }));
+  const adjacent = ranks.slice(0, 6);
+  const activeLeaf = trace[0];
 
   return (
     <div className="traceBoard">
       <div className="traceSummary panel">
         <div className="traceSummaryHead">
           <div>
-            <span className="eyebrow">현재 경로</span>
-            <h2>AI 기반 검색 에이전트</h2>
+            <span className="eyebrow">현재 토픽 신호</span>
+            <h2>{activeLeaf.label}</h2>
           </div>
           <div className="leafBadge">
-            <span>활성 리프</span>
+            <span>top topic</span>
             <strong>{activeLeaf.short}</strong>
           </div>
         </div>
-        <div className="tracePath">
+        <div className="tracePath topicConstellation">
           {trace.map((node) => (
             <div key={node.label} className={`traceStep ${node.tone}`}>
               <div className="traceStepMain">
@@ -1048,7 +1052,7 @@ function TraceBoard({
         <div className="panel traceEvidence">
           <PanelHeading icon={<BarChart3 size={16} />} title="추천 근거" />
           <div className="evidenceRows">
-            {cards.slice(0, 4).map((card, index) => (
+            {cards.slice(0, 3).map((card, index) => (
               <button key={card.recommendation_id} onClick={() => setView({ name: "document", documentId: card.document_id })}>
                 <b>{String(index + 1).padStart(2, "0")}</b>
                 <span>

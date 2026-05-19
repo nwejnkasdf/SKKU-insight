@@ -1729,7 +1729,7 @@ select:focus {
 
 .docSectionGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -1737,9 +1737,8 @@ select:focus {
   position: relative;
   display: grid;
   gap: 10px;
-  min-height: 176px;
+  min-height: 0;
   padding: 18px;
-  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
   border-top: 4px solid var(--accent);
@@ -1769,14 +1768,9 @@ select:focus {
 }
 
 .docSectionCard p {
-  display: -webkit-box;
   margin: 0;
-  overflow: hidden;
   color: var(--muted);
   line-height: 1.62;
-  text-overflow: ellipsis;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
 }
 
 .documentRail {

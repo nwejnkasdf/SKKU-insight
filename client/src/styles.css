@@ -1897,6 +1897,64 @@ select:focus {
   grid-column: span 2;
 }
 
+.settingsCard {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+
+.settingsStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settingsStats span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  color: var(--soft);
+  background: var(--surface-subtle);
+  border: 1px solid #e1e7e0;
+  border-radius: 8px;
+}
+
+.settingsStats b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsPreview {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsPreview span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--surface-subtle);
+  border-radius: 8px;
+}
+
+.settingsPreview span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.settingsPreview b {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
 .interestList {
   display: grid;
   gap: 8px;

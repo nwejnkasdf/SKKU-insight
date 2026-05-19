@@ -116,7 +116,7 @@ export default function App() {
       {view.name === "topic" && (
         <TopicView api={api} topicId={view.topicId} label={view.label} setView={setView} />
       )}
-      {view.name === "settings" && <SettingsView api={api} setView={setView} showToast={showToast} />}
+      {view.name === "settings" && <SettingsPanel api={api} setView={setView} showToast={showToast} />}
     </Shell>
   );
 }
@@ -1162,15 +1162,15 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
   );
 }
 
-function SettingsView({ api, setView, showToast }: { api: InsightApi; setView: (view: View) => void; showToast: (toast: Toast) => void }) {
+function SettingsPanel({ api, setView, showToast }: { api: InsightApi; setView: (view: View) => void; showToast: (toast: Toast) => void }) {
   const [interest, setInterest] = useState<InterestStateResponse | null>(null);
   const [saved, setSaved] = useState<DocumentSummary[]>([]);
   const [hidden, setHidden] = useState<DocumentSummary[]>([]);
 
   useEffect(() => {
     void api.interestState().then(setInterest).catch(() => undefined);
-    void api.savedDocuments().then((res) => setSaved(res.items)).catch(() => undefined);
-    void api.hiddenDocuments().then((res) => setHidden(res.items)).catch(() => undefined);
+    void api.savedDocuments().then((data) => setSaved(data.items)).catch(() => undefined);
+    void api.hiddenDocuments().then((data) => setHidden(data.items)).catch(() => undefined);
   }, [api]);
 
   async function logout() {
@@ -1180,32 +1180,85 @@ function SettingsView({ api, setView, showToast }: { api: InsightApi; setView: (
     setView({ name: "auth" });
   }
 
+  const activeTopics = (interest?.topics ?? []).filter((topic) => topic.bucket !== "neutral");
+  const previewTopics = activeTopics.slice(0, 4);
+  const updatedAt = interest?.updated_at ? new Date(interest.updated_at).toLocaleDateString("ko-KR") : "아직 없음";
+
   return (
     <section>
-      <Header title="설정과 피드백" subtitle="관심 상태, 저장/숨김 문서, 동의 상태를 관리합니다." />
+      <Header title="설정" subtitle="추천 상태와 계정 관리를 확인합니다." />
       <div className="settingsGrid">
-        <div className="panel">
-          <h2>관심 상태</h2>
-          {!interest || interest.topics.length === 0 ? <p className="muted">아직 관심 상태가 쌓이지 않았습니다.</p> : (
-            <div className="interestList">
-              {interest.topics.map((topic) => <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}`}>{topic.label}<b>{bucketLabel(topic.bucket)}</b></span>)}
+        <div className="panel settingsCard">
+          <PanelHeading icon={<Activity size={16} />} title="추천 상태" />
+          <div className="settingsStats">
+            <span>
+              <b>{activeTopics.length}</b>
+              활성 관심사
+            </span>
+            <span>
+              <b>{interest?.topics.length ?? 0}</b>
+              전체 버킷
+            </span>
+            <span>
+              <b>{updatedAt}</b>
+              갱신일
+            </span>
+          </div>
+          {previewTopics.length === 0 ? (
+            <p className="muted">아직 추적 중인 관심사가 없습니다.</p>
+          ) : (
+            <div className="settingsPreview">
+              {previewTopics.map((topic) => (
+                <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id ?? topic.label}`}>
+                  {topic.label}
+                  <b>{bucketLabel(topic.bucket)}</b>
+                </span>
+              ))}
             </div>
           )}
+          <button className="ghostButton" onClick={() => setView({ name: "topics" })}>
+            <Network size={16} /> 토픽 맵에서 보기
+          </button>
         </div>
-        <div className="panel">
-          <h2>저장한 문서</h2>
-          {saved.length === 0 ? <p className="muted">저장한 문서가 없습니다.</p> : <DocumentList items={saved} setView={setView} />}
+
+        <div className="panel settingsCard">
+          <PanelHeading icon={<Library size={16} />} title="보관함 요약" />
+          <p className="muted">저장과 숨김 목록은 보관함 화면에서 한 번에 관리합니다.</p>
+          <div className="settingsStats">
+            <span>
+              <b>{saved.length}</b>
+              저장
+            </span>
+            <span>
+              <b>{hidden.length}</b>
+              숨김
+            </span>
+            <span>
+              <b>{saved.length + hidden.length}</b>
+              전체
+            </span>
+          </div>
+          <button className="ghostButton" onClick={() => setView({ name: "library" })}>
+            <Bookmark size={16} /> 보관함 열기
+          </button>
         </div>
-        <div className="panel">
-          <h2>숨긴 문서</h2>
-          {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
-        </div>
-        <div className="panel sidePanel">
-          <h2>동의 관리</h2>
-          <button onClick={() => void api.revokeConsent().then(() => { showToast({ tone: "ok", text: "동의가 철회되었습니다." }); setView({ name: "onboarding", me: null }); })}>
+
+        <div className="panel sidePanel settingsCard">
+          <PanelHeading icon={<Settings size={16} />} title="계정 관리" />
+          <p className="muted">동의 철회는 추천 흐름을 멈추고 온보딩으로 돌아갑니다.</p>
+          <button
+            onClick={() =>
+              void api.revokeConsent().then(() => {
+                showToast({ tone: "ok", text: "동의가 철회되었습니다." });
+                setView({ name: "onboarding", me: null });
+              })
+            }
+          >
             <Trash2 size={16} /> 동의 철회
           </button>
-          <button onClick={() => void logout()}><LogOut size={16} /> 로그아웃</button>
+          <button onClick={() => void logout()}>
+            <LogOut size={16} /> 로그아웃
+          </button>
         </div>
       </div>
     </section>

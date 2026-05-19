@@ -52,6 +52,8 @@ type View =
 
 type Toast = { tone: "ok" | "error"; text: string } | null;
 type TopicRank = { topicId: UUID; label: string; count: number };
+type FeedbackAction = "save" | "hide" | "not_interested";
+type FeedbackState = { saved: boolean; hidden: boolean; notInterested: boolean };
 
 const userClassOptions = [
   { value: "general", label: "일반" },
@@ -498,6 +500,8 @@ function RecommendationCardView({
 }) {
   const visibleTopics = card.related_topics.slice(0, 2);
   const hiddenTopicCount = Math.max(0, card.related_topics.length - visibleTopics.length);
+  const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
+  const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
 
   async function eventAndOpen() {
     await api.postEvent({
@@ -507,6 +511,34 @@ function RecommendationCardView({
       client_request_id: crypto.randomUUID()
     }).catch(() => undefined);
     setView({ name: "document", documentId: card.document_id });
+  }
+
+  async function applyFeedback(action: FeedbackAction) {
+    const previous = feedback;
+    setBusyAction(action);
+    setFeedback({
+      saved: action === "save" ? true : feedback.saved,
+      hidden: action === "hide" ? true : feedback.hidden,
+      notInterested: action === "not_interested" ? true : feedback.notInterested
+    });
+
+    try {
+      if (action === "save") {
+        await api.saveDocument(card.document_id);
+        showToast({ tone: "ok", text: "저장했습니다." });
+      } else if (action === "hide") {
+        await api.hideDocument(card.document_id);
+        showToast({ tone: "ok", text: "숨김 처리했습니다." });
+      } else {
+        await api.notInterestedDocument(card.document_id);
+        showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+      }
+    } catch (err) {
+      setFeedback(previous);
+      showToast({ tone: "error", text: messageForError(err) });
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   return (
@@ -536,9 +568,15 @@ function RecommendationCardView({
         {hiddenTopicCount > 0 && <span className="chipMore">+{hiddenTopicCount}</span>}
       </div>
       <div className="cardActions">
-        <button title="저장" onClick={() => void api.saveDocument(card.document_id).then(() => showToast({ tone: "ok", text: "저장했습니다." }))}><Bookmark size={16} /></button>
-        <button title="숨김" onClick={() => void api.hideDocument(card.document_id).then(() => showToast({ tone: "ok", text: "숨김 처리했습니다." }))}><EyeOff size={16} /></button>
-        <button title="관심 없음" onClick={() => void api.notInterestedDocument(card.document_id).then(() => showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." }))}><HeartCrack size={16} /></button>
+        <button className={feedback.saved ? "isActive" : ""} aria-pressed={feedback.saved} title={feedback.saved ? "저장됨" : "저장"} disabled={busyAction !== null} onClick={() => void applyFeedback("save")}>
+          {feedback.saved ? <CheckCircle2 size={16} /> : <Bookmark size={16} />}
+        </button>
+        <button className={feedback.hidden ? "isActive" : ""} aria-pressed={feedback.hidden} title={feedback.hidden ? "숨김됨" : "숨김"} disabled={busyAction !== null} onClick={() => void applyFeedback("hide")}>
+          {feedback.hidden ? <CheckCircle2 size={16} /> : <EyeOff size={16} />}
+        </button>
+        <button className={feedback.notInterested ? "isActive danger" : ""} aria-pressed={feedback.notInterested} title={feedback.notInterested ? "관심 없음 반영됨" : "관심 없음"} disabled={busyAction !== null} onClick={() => void applyFeedback("not_interested")}>
+          {feedback.notInterested ? <CheckCircle2 size={16} /> : <HeartCrack size={16} />}
+        </button>
       </div>
     </article>
   );
@@ -681,6 +719,8 @@ function DocumentView({
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
+  const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
 
   useEffect(() => {
     startDwell(documentId);
@@ -688,6 +728,11 @@ function DocumentView({
     void api.documentSummary(documentId).then(setSummary).catch(() => undefined);
     return stopDwell;
   }, [api, documentId]);
+
+  useEffect(() => {
+    if (!detail) return;
+    setFeedback({ saved: detail.saved, hidden: detail.hidden, notInterested: false });
+  }, [detail]);
 
   if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;
   if (!detail) return <Loading label="문서를 불러오는 중" />;
@@ -721,6 +766,34 @@ function DocumentView({
       opened.opener = null;
     } else {
       showToast({ tone: "error", text: "팝업 차단을 해제한 뒤 다시 시도해주세요." });
+    }
+  }
+
+  async function applyFeedback(action: FeedbackAction) {
+    const previous = feedback;
+    setBusyAction(action);
+    setFeedback({
+      saved: action === "save" ? true : feedback.saved,
+      hidden: action === "hide" ? true : feedback.hidden,
+      notInterested: action === "not_interested" ? true : feedback.notInterested
+    });
+
+    try {
+      if (action === "save") {
+        await api.saveDocument(documentId);
+        showToast({ tone: "ok", text: "저장했습니다." });
+      } else if (action === "hide") {
+        await api.hideDocument(documentId);
+        showToast({ tone: "ok", text: "숨김 처리했습니다." });
+      } else {
+        await api.notInterestedDocument(documentId);
+        showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+      }
+    } catch (err) {
+      setFeedback(previous);
+      showToast({ tone: "error", text: messageForError(err) });
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -781,9 +854,15 @@ function DocumentView({
               <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
                 <ExternalLink size={17} /> 원문 열기
               </button>
-              <button onClick={() => void api.saveDocument(documentId).then(() => showToast({ tone: "ok", text: "저장했습니다." }))}><Bookmark size={16} /> 저장</button>
-              <button onClick={() => void api.hideDocument(documentId).then(() => showToast({ tone: "ok", text: "숨김 처리했습니다." }))}><EyeOff size={16} /> 숨김</button>
-              <button onClick={() => void api.notInterestedDocument(documentId).then(() => showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." }))}><HeartCrack size={16} /> 관심 없음</button>
+              <button className={feedback.saved ? "isActive" : ""} aria-pressed={feedback.saved} disabled={busyAction !== null} onClick={() => void applyFeedback("save")}>
+                {feedback.saved ? <CheckCircle2 size={16} /> : <Bookmark size={16} />} {feedback.saved ? "저장됨" : "저장"}
+              </button>
+              <button className={feedback.hidden ? "isActive" : ""} aria-pressed={feedback.hidden} disabled={busyAction !== null} onClick={() => void applyFeedback("hide")}>
+                {feedback.hidden ? <CheckCircle2 size={16} /> : <EyeOff size={16} />} {feedback.hidden ? "숨김됨" : "숨김"}
+              </button>
+              <button className={feedback.notInterested ? "isActive danger" : ""} aria-pressed={feedback.notInterested} disabled={busyAction !== null} onClick={() => void applyFeedback("not_interested")}>
+                {feedback.notInterested ? <CheckCircle2 size={16} /> : <HeartCrack size={16} />} {feedback.notInterested ? "관심 없음 반영됨" : "관심 없음"}
+              </button>
             </div>
             <div className="panel docTraceCard">
               <PanelHeading icon={<GitBranch size={16} />} title="추천 경로" />

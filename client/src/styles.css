@@ -1310,6 +1310,23 @@ select:focus {
   background: #ffffff;
 }
 
+.cardActions button.isActive {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 107, 92, 0.14);
+}
+
+.cardActions button.isActive.danger {
+  background: var(--accent-3);
+  border-color: var(--accent-3);
+  box-shadow: 0 0 0 3px rgba(153, 101, 29, 0.16);
+}
+
+.cardActions button.isActive:hover {
+  color: #ffffff;
+}
+
 .documentLayout,
 .settingsGrid {
   display: grid;
@@ -1570,6 +1587,17 @@ select:focus {
 .documentActions .primary {
   color: #ffffff;
   background: var(--accent);
+}
+
+.documentActions button.isActive {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.documentActions button.isActive.danger {
+  background: var(--accent-3);
+  border-color: var(--accent-3);
 }
 
 .docTraceMini {

@@ -329,19 +329,21 @@ class CodexOAuthProvider:
         # `_` placeholder for unused (signature 호환).
         _ = max_tokens, temperature
 
-        with _maybe_output_schema(response_format) as schema_path:
-            argv = _build_base_argv(
-                model_name=model_name,
-                reasoning_effort=reasoning_effort,
-                output_schema_path=schema_path,
-                enable_search=False,
+        # Codex CLI 0.131.0 exits with code 1 and empty stderr for the generic
+        # open-ended JSON schema. For normal complete(json) calls, rely on the
+        # prompt's JSON-only instruction and parse the final agent message.
+        argv = _build_base_argv(
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            output_schema_path=None,
+            enable_search=False,
+        )
+        async with acquire_slot(user_id):
+            stdout, _stderr = await _run_codex_subprocess(
+                argv,
+                stdin_bytes=prompt.encode("utf-8"),
+                timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
             )
-            async with acquire_slot(user_id):
-                stdout, _stderr = await _run_codex_subprocess(
-                    argv,
-                    stdin_bytes=prompt.encode("utf-8"),
-                    timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
-                )
 
         text, usage = _parse_jsonl_events(stdout)
         prompt_tokens, completion_tokens = _map_usage_to_tokens(usage)

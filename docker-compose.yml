@@ -47,6 +47,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      HOME: /root
       UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
     # Worker 병렬 정책 (decision-backlog C-19, C-20):
     # - UVICORN_WORKERS>1 시 LLM 동시성 가드(MAX_CONCURRENT, PER_USER) 는
@@ -96,6 +97,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       REDIS_URL_QUEUE: ${REDIS_URL_QUEUE}
+      HOME: /root
     volumes:
       # api 와 동일 — worker 잡 (cold_start, collection 등) 도 codex_oauth 호출.
       - ${HOME}/.codex:/root/.codex

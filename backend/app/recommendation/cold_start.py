@@ -503,7 +503,10 @@ async def _upsert_pseudo_document_topic(
         )
         .on_conflict_do_nothing(
             index_elements=["document_id", "cso_topic_id"],
-            index_where=DocumentTopic.leaf_topic_id.is_(None),
+            index_where=(
+                DocumentTopic.leaf_topic_id.is_(None)
+                & DocumentTopic.cso_topic_id.is_not(None)
+            ),
         )
     )
     await db.execute(stmt)

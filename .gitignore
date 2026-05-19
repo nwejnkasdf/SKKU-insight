@@ -112,6 +112,7 @@ redis_data/
 *.tar.gz
 *.bak
 docs.zip
+CSO.*.csv
 
 # --- 시연 fixture 캡처 (의도적으로 commit하는 경우 주석 처리) ---
 # tests/fixtures/mock_llm/captured/

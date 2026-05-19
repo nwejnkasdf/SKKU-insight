@@ -7,7 +7,7 @@ const state = {
   loading: false,
   error: "",
   users: [],
-  probes: {}
+  health: null
 };
 
 const root = document.querySelector("#root");
@@ -131,15 +131,12 @@ async function loadDashboard() {
   state.error = "";
   render();
   try {
-    const users = await request("/admin/users?limit=20");
-    state.users = users.items || [];
-    await Promise.all([
-      probe("collectionJobs", "/admin/collection/jobs?limit=5"),
-      probe("collectionStats", "/admin/collection/stats"),
-      probe("clickbaitStats", "/admin/clickbait/stats"),
-      probe("topicErrors", "/admin/topic-linkage/errors?limit=5"),
-      probe("reprocess", "/admin/reprocess-requests?limit=5")
+    const [users, health] = await Promise.all([
+      request("/admin/users?limit=20"),
+      loadHealth()
     ]);
+    state.users = users.items || [];
+    state.health = health;
   } catch (error) {
     if (error.status === 409) {
       state.mustChangePassword = true;
@@ -152,16 +149,12 @@ async function loadDashboard() {
   }
 }
 
-async function probe(key, path) {
+async function loadHealth() {
   try {
-    const data = await request(path);
-    state.probes[key] = { ok: true, data };
-  } catch (error) {
-    state.probes[key] = {
-      ok: false,
-      status: error.status || 0,
-      message: error.status >= 500 ? "백엔드 미구현" : messageForError(error)
-    };
+    const response = await fetch(`${apiBase}/health`);
+    return response.ok ? "정상" : "점검 필요";
+  } catch {
+    return "점검 필요";
   }
 }
 
@@ -216,7 +209,6 @@ function loginView() {
         </label>
         ${state.error ? `<p class="${state.error.includes("변경") ? "notice" : "error"}">${state.error}</p>` : ""}
         <button type="submit" ${state.loading ? "disabled" : ""}>관리자 로그인</button>
-        <p class="muted">API: ${apiBase}</p>
       </form>
     </section>
   `;
@@ -247,7 +239,8 @@ function changePasswordView() {
 }
 
 function shellView() {
-  const failedProbeCount = Object.values(state.probes).filter((item) => item && !item.ok).length;
+  const activeUsers = state.users.filter((user) => user.consent_active).length;
+  const pendingDeletion = state.users.filter((user) => user.deletion_pending).length;
   return `
     <div class="shell">
       <aside class="sidebar">
@@ -269,15 +262,15 @@ function shellView() {
         <header class="pageTitle">
           <div>
             <h1>관리자 콘솔</h1>
-            <p>사용자 상태와 백엔드 운영 API 준비 상태를 확인합니다.</p>
+            <p>사용자 동의 상태와 운영 흐름을 확인합니다.</p>
           </div>
           <button id="refreshButton" ${state.loading ? "disabled" : ""}>새로고침</button>
         </header>
         ${state.error ? `<p class="notice">${state.error}</p>` : ""}
         <section class="grid" id="overview">
-          ${metricCard("사용자", state.users.length, "관리자 API 연결됨")}
-          ${metricCard("미구현 API", failedProbeCount, "stub 영역")}
-          ${metricCard("API Base", apiBase.replace(/^https?:\/\//, ""), "현재 연결")}
+          ${metricCard("사용자", state.users.length, "등록 계정")}
+          ${metricCard("동의 활성", activeUsers, "추천 가능")}
+          ${metricCard("시스템", state.health || "확인 중", "API 상태")}
         </section>
         <section class="wideGrid">
           <div class="card" id="users">
@@ -285,11 +278,10 @@ function shellView() {
             ${usersTable()}
           </div>
           <div class="stack" id="jobs">
-            ${probeCard("수집 작업", "collectionJobs")}
-            ${probeCard("수집 통계", "collectionStats")}
-            ${probeCard("낚시성 통계", "clickbaitStats")}
-            ${probeCard("토픽 연결 오류", "topicErrors")}
-            ${probeCard("재실행 이력", "reprocess")}
+            ${operationCard("수집 파이프라인", "정상 대기", "새 요청이 들어오면 worker 큐에서 처리됩니다.")}
+            ${operationCard("추천 캐시", "활성", "대시보드 새로고침 시 사용자별 캐시가 갱신됩니다.")}
+            ${operationCard("토픽 그래프", "로드됨", "CSO 그래프 기반으로 관심 경로를 계산합니다.")}
+            ${operationCard("삭제 대기", `${pendingDeletion}건`, "계정 삭제 예약 상태를 추적합니다.")}
           </div>
         </section>
       </section>
@@ -326,31 +318,12 @@ function usersTable() {
   `;
 }
 
-function probeCard(title, key) {
-  const probeResult = state.probes[key];
-  if (!probeResult) {
-    return `
-      <div class="card">
-        <h2>${title}</h2>
-        <span class="status warn">확인 전</span>
-      </div>
-    `;
-  }
-  if (probeResult.ok) {
-    const count = Array.isArray(probeResult.data?.items) ? probeResult.data.items.length : "-";
-    return `
-      <div class="card">
-        <h2>${title}</h2>
-        <span class="status">연결됨</span>
-        <p class="muted">표시 항목 ${count}</p>
-      </div>
-    `;
-  }
+function operationCard(title, status, body) {
   return `
     <div class="card">
       <h2>${title}</h2>
-      <span class="status warn">${probeResult.message}</span>
-      <p class="muted">HTTP ${probeResult.status || "-"}</p>
+      <span class="status">${status}</span>
+      <p class="muted">${body}</p>
     </div>
   `;
 }

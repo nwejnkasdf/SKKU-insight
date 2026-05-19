@@ -1519,8 +1519,8 @@ function slotBadge(slot: string): string {
   }[slot] ?? compactTopicLabel(slot);
 }
 
-function slotMeta(actualCount: number, targetCount: number): string {
-  return `${actualCount}/${targetCount > 0 ? targetCount : "-"}`;
+function slotMeta(actualCount: number, _targetCount: number): string {
+  return `${actualCount}`;
 }
 
 function buildVisibleSlots(slots: SlotSummaryItem[], includeEmptyBase: boolean): SlotSummaryItem[] {

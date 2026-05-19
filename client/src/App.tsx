@@ -1191,24 +1191,27 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
 
   return (
     <section>
-      <Header title="보관함" subtitle="저장한 문서와 숨긴 문서를 추천 큐와 분리해서 관리합니다." />
+      <Header title="보관함" subtitle="저장한 문서를 중심으로 보고, 숨긴 문서는 필요할 때 복구합니다." />
       <div className="libraryScreen">
         <div className="panel libraryHero">
           <Bookmark size={26} />
           <div>
-            <h2>{saved.length} saved · {hidden.length} hidden</h2>
-            <p>명시 피드백은 다음 추천 캐시를 무효화하고 베이지안 관심 상태에 반영됩니다.</p>
+            <h2>{saved.length}개 저장됨</h2>
+            <p>숨긴 문서 {hidden.length}건은 오른쪽 복구 목록에서 다시 열 수 있습니다.</p>
           </div>
         </div>
         <div className="libraryColumns">
-          <div className="panel">
+          <div className="panel librarySavedPanel">
             <h2>저장한 문서</h2>
             {saved.length === 0 ? <p className="muted">저장한 문서가 없습니다. 추천 카드에서 북마크를 눌러보세요.</p> : <DocumentList items={saved} setView={setView} />}
           </div>
-          <div className="panel">
-            <h2>숨긴 문서</h2>
+          <aside className="panel libraryHiddenPanel">
+            <div>
+              <h2>숨김 복구</h2>
+              <p className="muted">문서를 열어 숨김 상태를 해제할 수 있습니다.</p>
+            </div>
             {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
-          </div>
+          </aside>
         </div>
       </div>
     </section>

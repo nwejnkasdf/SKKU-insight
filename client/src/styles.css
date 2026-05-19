@@ -2437,9 +2437,46 @@ select:focus {
 
 .libraryColumns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2.2fr) minmax(260px, 0.8fr);
   gap: 18px;
   align-items: start;
+}
+
+.librarySavedPanel,
+.libraryHiddenPanel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.librarySavedPanel h2,
+.libraryHiddenPanel h2 {
+  margin: 0;
+}
+
+.libraryHiddenPanel {
+  position: sticky;
+  top: 24px;
+  background: var(--surface-subtle);
+}
+
+.libraryHiddenPanel .docList {
+  gap: 6px;
+}
+
+.libraryHiddenPanel .docList button {
+  min-height: 58px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.libraryHiddenPanel .docList strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.libraryHiddenPanel .docList span {
+  font-size: 12px;
 }
 
 .loading,

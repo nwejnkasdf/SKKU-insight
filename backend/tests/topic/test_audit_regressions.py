@@ -109,6 +109,119 @@ def test_audit_a2_reset_delete_order_correct() -> None:
 
 
 # ============================================================
+# P2-16 + P2-10: --reset 가드 (dynamic_leaf_topic / user_cso_traversal 행 존재 시)
+# ============================================================
+
+
+def test_audit_p2_16_p2_10_reset_signature_includes_force_orphan() -> None:
+    """reset_cso_tables 시그니처에 force_orphan 키워드 인자 (P2-16 + P2-10).
+
+    fix 전: reset_cso_tables(session) 단일 인자 — leaf/traversal 있어도 DELETE 강행
+    → leaf 응답 cso_topic_ids=[], traversal.path UUID stale.
+    fix 후: force_orphan=False default + count > 0 이면 RuntimeError.
+    """
+    sig = inspect.signature(cso_importer.reset_cso_tables)
+    assert "force_orphan" in sig.parameters, (
+        "reset_cso_tables 가 force_orphan 인자 누락 (P2-16 + P2-10 회귀)."
+    )
+    assert sig.parameters["force_orphan"].default is False, (
+        "reset_cso_tables.force_orphan default 가 False 가 아님 — "
+        "운영자 명시 없는 reset 이 leaf/traversal orphan 을 강행할 위험."
+    )
+
+
+@pytest.mark.asyncio
+async def test_audit_p2_16_p2_10_reset_raises_when_leaf_or_traversal_exists() -> None:
+    """leaf 또는 traversal row 가 존재 + force_orphan=False → RuntimeError.
+
+    SELECT count(*) 두 번 호출 — 결과를 AsyncMock 으로 1/0 컨트롤.
+    """
+    session_mock = AsyncMock()
+
+    # 두 SELECT count(*) 응답 — leaf=1, traversal=0
+    leaf_result = MagicMock()
+    leaf_result.scalar_one = MagicMock(return_value=1)
+    traversal_result = MagicMock()
+    traversal_result.scalar_one = MagicMock(return_value=0)
+    session_mock.execute = AsyncMock(side_effect=[leaf_result, traversal_result])
+
+    with pytest.raises(RuntimeError) as exc:
+        await cso_importer.reset_cso_tables(session_mock, force_orphan=False)
+    msg = str(exc.value)
+    assert "P2-16" in msg and "P2-10" in msg, (
+        "RuntimeError 메시지에 P2-16 / P2-10 표시 누락 — 운영자 디버깅 어려움."
+    )
+    assert "force-orphan-cso-refs" in msg, (
+        "RuntimeError 메시지에 CLI 플래그 명 누락 — 운영자가 우회 경로 모름."
+    )
+
+    # 실제 DELETE 가 호출되면 안 됨 (count 2회만)
+    assert session_mock.execute.await_count == 2, (
+        f"reset 가드 RuntimeError 후에도 DELETE 가 진행됐음 "
+        f"(execute call count={session_mock.execute.await_count})."
+    )
+
+
+@pytest.mark.asyncio
+async def test_audit_p2_16_p2_10_reset_proceeds_when_force_orphan() -> None:
+    """leaf 1행 + force_orphan=True → 정상 진행 (4 DELETE + 1 flush)."""
+    session_mock = AsyncMock()
+    leaf_result = MagicMock()
+    leaf_result.scalar_one = MagicMock(return_value=1)
+    traversal_result = MagicMock()
+    traversal_result.scalar_one = MagicMock(return_value=0)
+    # 6 execute: 2 SELECT count + 4 DELETE. (flush 는 별도 await)
+    session_mock.execute = AsyncMock(
+        side_effect=[leaf_result, traversal_result] + [MagicMock()] * 4
+    )
+    session_mock.flush = AsyncMock()
+
+    await cso_importer.reset_cso_tables(session_mock, force_orphan=True)
+    assert session_mock.execute.await_count == 6, (
+        "force_orphan=True 인데 DELETE 가 진행되지 않음 "
+        f"(execute call count={session_mock.execute.await_count}, 기대 6)."
+    )
+    session_mock.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_audit_p2_16_p2_10_reset_proceeds_when_empty_tables() -> None:
+    """leaf=0 + traversal=0 + force_orphan=False (default) → 정상 진행.
+
+    가드가 사용자 경험을 망치지 않는지 확인 — 빈 DB 의 fresh import 는 자유롭게.
+    """
+    session_mock = AsyncMock()
+    zero_result = MagicMock()
+    zero_result.scalar_one = MagicMock(return_value=0)
+    session_mock.execute = AsyncMock(
+        side_effect=[zero_result, zero_result] + [MagicMock()] * 4
+    )
+    session_mock.flush = AsyncMock()
+
+    await cso_importer.reset_cso_tables(session_mock, force_orphan=False)
+    assert session_mock.execute.await_count == 6
+    session_mock.flush.assert_awaited_once()
+
+
+def test_audit_p2_16_p2_10_import_cso_cli_exposes_force_orphan_flag() -> None:
+    """scripts/import_cso.py CLI 가 --force-orphan-cso-refs 플래그 노출.
+
+    `_parse_args` 안에 본 플래그 정의 + dest=force_orphan_cso_refs.
+    """
+    from scripts import import_cso as import_cso_script
+
+    src = inspect.getsource(import_cso_script._parse_args)
+    assert "--force-orphan-cso-refs" in src, (
+        "scripts/import_cso.py 가 --force-orphan-cso-refs 플래그 누락 "
+        "(P2-16 + P2-10 회귀). 운영자가 가드 우회 못 함."
+    )
+    assert "force_orphan_cso_refs" in src, (
+        "scripts/import_cso.py 의 dest 가 force_orphan_cso_refs 가 아님 "
+        "(argparse default dest 가 force-orphan-cso-refs 가 아니므로 명시 필요)."
+    )
+
+
+# ============================================================
 # A-3: cso_service.get_adjacent / get_descendants 가 graph 부재 시 404
 # ============================================================
 

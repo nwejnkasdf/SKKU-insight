@@ -99,9 +99,9 @@
 
 ### P1-5. CSO 다운로드 버전
 - **원본**: `data/cso-import.md:227`
-- **default**: **CSO 3.4** (현재 사이트의 안정 stable 다운로드). `make import-cso` 가 fetch URL을 환경변수 `CSO_DOWNLOAD_URL`에서 읽어 변경 가능.
+- **default**: **CSO 3.4.1** (현재 사이트의 안정 stable 다운로드, 2026-05-19 갱신). `make import-cso` 가 fetch URL을 환경변수 `CSO_DOWNLOAD_URL`에서 읽어 변경 가능. 사용자가 호스트에 미리 다운로드 받은 파일은 `make seed-cso-cache FILE=...` 로 컨테이너 `cso_cache` volume 에 카피.
 - **stub**: `scripts/import_cso.py` 가 다운받은 N3/CSV의 hash를 `cso_metadata` 테이블에 기록 → 향후 버전 갱신 시 변경 감지.
-- **튜닝 트리거**: 신버전(3.5+) 출시 시 `CSO_DOWNLOAD_URL`만 교체 후 `make import-cso --refresh`.
+- **튜닝 트리거**: 신버전(3.5+) 출시 시 `CSO_DOWNLOAD_URL`만 교체 후 `make import-cso ARGS="--reset --refresh"`.
 
 ### P1-6. 네이버뉴스 Document 야간 정리 잡 정책 — **무효 + 코드 정리 완료 (v13 라운드 pivot, 2026-05-11 / 2026-05-16)**
 - **원본**: `data/schema.md:352`
@@ -181,11 +181,11 @@
 - **default action**: `order_by(CSOTopic.label)` 또는 입력 순서 유지 `case(...)` 추가.
 - **시점**: A8-v2 (electron-client) UI 정렬 룰 확정 후.
 
-### P2-10. `--reset` 후 stale `user_cso_traversal.path` UUID (자체감사 B-5)
-- **원본**: `backend/app/topic/cso_importer.py:283-294 reset_cso_tables`
-- **현황**: `user_cso_traversal.path` 는 ARRAY[UUID] (FK 없음). `--reset` 후 cso_topic row 삭제 → path UUID 가 stale reference. `_lookup_labels` fallback `str(pid)` UI 노출.
-- **default action**: `--reset` 진행 전 prompt 확인 + 동시에 `UPDATE user_cso_traversal SET status='archived'`. 또는 `--reset --traversal` 명시 플래그.
-- **시점**: 운영 단계 (시연은 traversal 비어 있어 영향 없음).
+### P2-10. `--reset` 후 stale `user_cso_traversal.path` UUID — **해소 (2026-05-19)**
+- **원본**: `backend/app/topic/cso_importer.py::reset_cso_tables`
+- **결과**: P2-16 과 함께 `reset_cso_tables(session, force_orphan=False)` 가드 추가. `dynamic_leaf_topic` 또는 `user_cso_traversal` 행이 존재하면 default 거부 (RuntimeError + 카운트 메시지). 운영자가 의도 명시 시 `scripts/import_cso.py --force-orphan-cso-refs` 플래그로 우회. 시연 환경 (빈 DB) 은 영향 없음.
+- **회귀 가드**: `backend/tests/topic/test_audit_regressions.py` 의 5 신규 테스트 — 정적 시그니처 검증 1 + 동적 mock 분기 3 + CLI 플래그 검증 1.
+- **본 항목은 closed.**
 
 ### P2-11. `find_equivalents` 단방향 매칭 (자체감사 B-7)
 - **원본**: `backend/app/topic/graph.py:143-147`
@@ -211,11 +211,11 @@
 - **default action**: BaseSettings 필드 `CSO_DOWNLOAD_TIMEOUT_SECONDS=60` 노출 (`.env.example` + `env-vars.md` 동시). 또는 hardcoded 유지.
 - **시점**: 운영 회선 측정 후.
 
-### P2-16. `--reset` 후 DynamicLeafTopic.cso_topic_ids 빈 배열 (Codex 감사 B-5)
-- **원본**: `backend/app/topic/cso_importer.py:306 reset_cso_tables` 부작용 (A-2 fix 의 trade-off)
-- **현황**: Codex Critical A-2 fix 가 RESTRICT FK 위반을 막기 위해 `dynamic_leaf_topic_cso_topic` 먼저 DELETE → 기존 DynamicLeafTopic row 의 `cso_topic_ids` 가 leaf endpoint 응답에서 빈 배열로 반환. leaf 자체는 archive 안 됨.
-- **default action**: `--reset` 진행 전 명시 경고 + 영향받는 leaf 수 카운트. 또는 `--reset` 가 모든 DynamicLeafTopic.status='archived' bulk update. 또는 `--reset --leaves` 명시 플래그로 leaf 까지 wipe.
-- **시점**: A7 머지 후 leaf 데이터 채워질 때. 운영자가 `--reset` 호출 전.
+### P2-16. `--reset` 후 DynamicLeafTopic.cso_topic_ids 빈 배열 — **해소 (2026-05-19)**
+- **원본**: `backend/app/topic/cso_importer.py::reset_cso_tables` 부작용 (A-2 fix 의 trade-off)
+- **결과**: `reset_cso_tables(session, force_orphan=False)` 가드 추가. 본 함수 진입 시 `SELECT count(*) FROM dynamic_leaf_topic` + `... user_cso_traversal` 두 카운트 — 둘 중 하나라도 > 0 + `force_orphan=False` 면 RuntimeError (P2-16 + P2-10 메시지 동시). `scripts/import_cso.py` 가 `--force-orphan-cso-refs` CLI 플래그로 우회 노출. 시연 환경 (빈 DB) 은 영향 없음 — 카운트 0 이면 즉시 정상 진행.
+- **회귀 가드**: `backend/tests/topic/test_audit_regressions.py` 의 5 신규 테스트 (P2-10 항목 참고).
+- **본 항목은 closed.**
 
 ### P2-17. inspect.getsource 정적 검증 → DB fixture 통합 테스트 (Codex 감사 E)
 - **원본**: `backend/tests/topic/test_audit_regressions.py` A-1·A-2·B-6·Codex Critical 회귀 테스트
@@ -229,11 +229,10 @@
 - **default action**: `UPDATE cso_topic AS c SET parent_topic_id = v.parent FROM (VALUES (...)) AS v(id, parent) WHERE c.cso_topic_id = v.id` bulk UPDATE. 또는 CASE 표현식 1회 호출.
 - **시점**: import 시간 측정 후 5분 SLA 위배 시 (P2-12 단일 transaction WAL 부담 과 함께 운영 진입 전).
 
-### P2-19. docker-compose `cso_cache` volume 미선언 (Codex 2nd 감사 B-5)
-- **원본**: `docker-compose.yml:123-125` (현재 `pg_data`, `redis_data` 만 선언)
-- **현황**: 컨테이너 재시작 시 `/app/.cache/cso/CSO.3.4.csv` 손실 → `make import-cso` 재실행 시 ~50MB CSO 재다운로드. 시연 환경엔 영향 없으나 운영자 불필요한 트래픽.
-- **default action**: docker-compose.yml `volumes:` 섹션 + api service `volumes:` 에 `cso_cache:/app/.cache/cso` 추가. 또는 docs 를 "재시작 시 재다운로드" 로 명시.
-- **시점**: 운영 단계 또는 docs drift fix.
+### P2-19. docker-compose `cso_cache` volume 미선언 — **해소 (2026-05-19)**
+- **원본**: `docker-compose.yml` volumes 섹션 + api service volumes
+- **결과**: docker-compose.yml `volumes:` 섹션에 `cso_cache: {}` 추가 + api service `volumes:` 에 `cso_cache:/app/.cache/cso` 마운트. 컨테이너 재시작 후에도 CSV 영속화. 동시에 CSO 3.4 → **3.4.1 전환** (URL/캐시 파일명/docs/config 모두 동기). 호스트 사용자 파일을 컨테이너 캐시에 카피하는 `make seed-cso-cache FILE=...` Makefile 타깃 신규 — 오프라인 시연 + KMI 서버 트래픽 절감.
+- **본 항목은 closed.**
 
 ### P2-20. inspect.getsource 정적 audit test → DYNAMIC 전환 (Codex 2nd 감사 E)
 - **원본**: `backend/tests/topic/test_audit_regressions.py` 의 정적 검증 6 테스트
@@ -241,20 +240,18 @@
 - **default action**: A11 (test-ci) 단계에서 DB fixture 통합 테스트로 모두 교체. e.g. active/stale leaf 4개 삽입 → `len(get_trace_detail.leaves) == list_traces.leaf_count` 통합 검증. 본 라운드는 cache hit 부분만 DYNAMIC 으로 전환 완료.
 - **시점**: A11 머지.
 
-### P2-21. alembic 0004 의 `ck_collection_job_type` CHECK 갱신 누락 (audit 발견, 2026-05-17)
+### P2-21. alembic 0004 의 `ck_collection_job_type` CHECK 갱신 누락 — **해소 (2026-05-19 검증)**
 - **원본**: `backend/alembic/versions/0003_a4_collection_tables.py:180-183` + `0004_a6_interest_tables.py` (CHECK 갱신 부재) vs `backend/app/contracts.py::JobType` (interest_decay 포함 5종)
-- **현황**: 0003 의 `ck_collection_job_type` clause = `job_type IN ('daily_collect','leaf_lifecycle','merge_evaluation','summary_generation')` 4종. A6 머지로 `JobType.INTEREST_DECAY` 가 신설됐으나 alembic 0004 가 본 CHECK 를 갱신하지 않음 → `interest_decay` job 을 `collection_job` 테이블에 INSERT 시 CHECK 위반으로 실패.
-- **영향**: 1차 시연 검증 시 decay cron 이 18 UTC (03 KST) 발동 시각 외라서 발견되지 않았으나 운영 진입 시 즉시 노출.
-- **default action**: alembic 0005 (가칭) 로 `ALTER TABLE collection_job DROP CONSTRAINT ck_collection_job_type` + 재생성 (`job_type IN ('daily_collect','leaf_lifecycle','merge_evaluation','summary_generation','interest_decay')`). 또는 worker/jobs/interest_decay.py 가 collection_job 에 INSERT 하지 않는 구조면 본 CHECK 갱신 불필요 (확인 필요).
-- **검증 가드**: `scripts/check_contracts.py` CHECKS 리스트에 JobType 항목 일시 제외 (false-positive FAIL 차단). alembic 갱신 후 재추가.
-- **시점**: A7 머지 직전 (decay cron 안정성 확보).
+- **결과**: alembic 0005 (A7, `0005_a7_traversal_merge.py:65-74`) 가 `ck_collection_job_type` DROP + 6-value 재생성 (`daily_collect, leaf_lifecycle, merge_evaluation, summary_generation, interest_decay, trace_merge`). 추가로 0007 (A8-v2, `0007_a9_user_profile.py:92-103`) 가 `daily_user_profile_generation` 추가 → 현재 7-value. 본 항목 close.
+- **본 항목은 closed.**
 
 ### P2-25. tests/recommendation/ pytest fixture nested connection 충돌 (A8 R3 시연 발견, 2026-05-17)
 - **원본**: `backend/tests/conftest.py:db_session` — function 단위 트랜잭션 (`begin()` + `rollback()`) 안에서 service 함수가 별도 await 시도 시 asyncpg `cannot perform operation: another operation is in progress`.
 - **현황**: pytest tests/recommendation 실행 — 28 passed / 3 failed / 19 errors. errors 모두 fixture race (single connection 안 동시 await). 본 code 자체 결함 X — fixture 결함.
-- **default action**: conftest 의 `db_session` fixture 를 `async_sessionmaker` 별도 session 패턴 (connection-pooled, 각 test 분리 commit/rollback) 으로 교체. A11 (test-ci) 단계에서 처리.
+- **default action**: conftest 의 `db_session` fixture 를 SQLAlchemy 공식 nested transaction (SAVEPOINT) 패턴으로 교체 — outer `connection.begin()` + inner `connection.begin_nested()` + `after_transaction_end` 리스너로 SAVEPOINT 재생성. service 의 `session.commit()` 이 SAVEPOINT release 만 → fixture 종료 시 outer rollback 으로 격리 보장. A11 (test-ci) 단계에서 conftest 전반 정비와 함께.
 - **추가 3 failed test 결함**: test_fr42_slot_short_borrows_from_donor (assertion mismatch) / test_summary_404_when_document_not_exist (fixture 결함 동반) / test_document_topic_cso_ids_empty_for_unknown_doc (assertion mismatch) — A11 에서 fixture fix 후 재검증.
 - **영향**: A8 코드 자체 동작 정합 — R3 시연 검증 통과. tests 통과율 28/31 (fixture errors 제외) = 90%.
+- **본 라운드 (2026-05-19, P2 백로그 검토) 결정**: A11 머지 시점 유지. **부분 fix 회피** — conftest 가 모든 테스트 모듈의 공유 의존성이라 부분 변경이 기존 90% green 테스트를 깨뜨릴 위험. A11 단계에서 conftest 전반 (db_session + redis_client + client + savepoint 재시작 리스너) 일관 정비.
 - **시점**: A11 (test-ci) 머지 직전.
 
 ### P2-22. cold_start_orchestrator concurrent race (R2 Critical #1, 2026-05-17)
@@ -319,10 +316,10 @@
 |---|---|---|---|
 | P0 | 0 (해소됨) | (없음) | 모두 해결 — 모든 에이전트 진행 가능 |
 | P1 | 11 (해결 1, 무효 1 — P1-6 v13 pivot, 활성 9) | (없음) | reasonable default + stub |
-| P2 | 28 (해결 3 — P2-23 A8 R3 시연 검증, 무효 2 — P2-3·P2-4 v13 pivot, 활성 23 — P2-22/24/25 A8 운영·A11 단계 + P2-26/27/28/29 A8-v2 R1 audit P2 backlog 포함) | (없음) | 후속 폴리시 단계 |
-| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit + A6 본문 + Codex 2-라운드 audit + A7 본문 + Codex 3-라운드 audit + A8 본문 + R1 self-review + A8-v2 본문 + Codex R1 audit) | 42 (해결 42 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17, C-37/C-38 A6 본문 + Codex round 1/2 fix 2026-05-17, C-39 A7 본문 + Codex round 1/2/3 fix 2026-05-17, C-40 A8 본문 + R1 self-review 2026-05-17, C-41 CodexOAuth 본문 + reasoning_effort fix 2026-05-18, C-42 A8-v2 UserProfile + Discovery Fusion + Reincarnation Pivot + Codex R1 audit + R1 fix 2026-05-19) | (없음) | A2 + v13 라운드 + A4 + A6 + A7 + A8 + A8-v2 |
+| P2 | 28 (해결 7 — P2-23 A8 R3 시연 검증 + P2-21 alembic 0005/0007 + P2-19 cso_cache volume + 3.4.1 전환 + P2-16 reset 가드 + P2-10 reset 가드 2026-05-19, 무효 2 — P2-3·P2-4 v13 pivot, 활성 19 — P2-22/24/25 A8 운영·A11 단계 + P2-26/27/28/29 A8-v2 R1 audit P2 backlog 포함) | (없음) | 후속 폴리시 단계 |
+| C-급 (인터뷰 식별 + codex v1·v2·v3 + multi-worker + 옵션 B + v13 pivot + A4 코드 + 3-라운드 audit + A6 본문 + Codex 2-라운드 audit + A7 본문 + Codex 3-라운드 audit + A8 본문 + R1 self-review + A8-v2 본문 + Codex R1 audit + P2 백로그 검토) | 43 (해결 43 — C-2 부분 해소, C-6~32 신규 해결 A2, C-33 v13 pivot 2026-05-11, C-34/C-35/C-36 A4 코드 + Codex round 2/3 + 통합 시연 fix 2026-05-16~17, C-37/C-38 A6 본문 + Codex round 1/2 fix 2026-05-17, C-39 A7 본문 + Codex round 1/2/3 fix 2026-05-17, C-40 A8 본문 + R1 self-review 2026-05-17, C-41 CodexOAuth 본문 + reasoning_effort fix 2026-05-18, C-42 A8-v2 UserProfile + Discovery Fusion + Reincarnation Pivot + Codex R1 audit + R1 fix 2026-05-19, **C-43 P2 백로그 그룹 A+B 검토 — P2-10/16/19/21 close + CSO 3.4 → 3.4.1 전환 + --reset 가드 + seed-cso-cache 타깃 2026-05-19**) | (없음) | A2 + v13 라운드 + A4 + A6 + A7 + A8 + A8-v2 + P2 검토 |
 
-**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. A6 본문 + Codex 2-라운드 audit + 통합 시연 검증 (C-37/C-38, 2026-05-17) [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) 완료. A7 본문 (leaf-lifecycle + traversal, trace operation 4→5 + merge 신규) + Codex 3-라운드 audit (C-39, 2026-05-17) 완료. A8 본문 (recommendation engine — core/adjacent/discovery + cold-start orchestrator + 첫 trace 생성 hook A7 #6 plan TBD 완성) + R1 self-review fix (C-40, 2026-05-17) 완료. CodexOAuth 본문 + reasoning_effort fix (C-41, 2026-05-18) 완료. **A8-v2 UserProfile + Discovery Fusion + Reincarnation Pivot + Codex R1 audit + R1 fix 7건 (C-42, 2026-05-19) 완료** [PR #25](https://github.com/nwejnkasdf/SKKU-insight/pull/25) merge `63f2cdde`. 다음 진입 가능 모듈: A9 electron-client (또는 A8-v2 R2 Codex 재감사 + 5 persona × 실 GPT-5.5 fusion 카드 시연 별도 세션).**
+**모든 P0 해소됨. P1-P2 활성 항목들은 default·stub 경로가 정해져 있어 모든 에이전트(A2-stub 포함)가 즉시 작업 시작 가능. v13 라운드 (C-33, 2026-05-11) 로 A4 collection 의 디자인이 LLM tool-use 모델로 pivot — P1-6/P2-3/P2-4 자연 무효. A4 코드 구현 + Codex 3-라운드 audit + 통합 시연 검증 (C-34/C-35/C-36, 2026-05-16~17) [PR #16](https://github.com/nwejnkasdf/SKKU-insight/pull/16) 완료. A6 본문 + Codex 2-라운드 audit + 통합 시연 검증 (C-37/C-38, 2026-05-17) [PR #18](https://github.com/nwejnkasdf/SKKU-insight/pull/18) 완료. A7 본문 (leaf-lifecycle + traversal, trace operation 4→5 + merge 신규) + Codex 3-라운드 audit (C-39, 2026-05-17) 완료. A8 본문 (recommendation engine — core/adjacent/discovery + cold-start orchestrator + 첫 trace 생성 hook A7 #6 plan TBD 완성) + R1 self-review fix (C-40, 2026-05-17) 완료. CodexOAuth 본문 + reasoning_effort fix (C-41, 2026-05-18) 완료. A8-v2 UserProfile + Discovery Fusion + Reincarnation Pivot + Codex R1 audit + R1 fix 7건 (C-42, 2026-05-19) 완료 [PR #25](https://github.com/nwejnkasdf/SKKU-insight/pull/25) merge `63f2cdde`. **P2 백로그 그룹 A+B 검토 (C-43, 2026-05-19)** — P2-10/16/19/21 close (alembic CHECK 검증 + CSO 3.4 → 3.4.1 전환 + cso_cache volume + --reset orphan 가드) + P2-25 A11 시점 유지 결정 + `seed-cso-cache` Makefile 타깃 + 5 회귀 테스트. 검증: 6 cross-check + ruff + mypy --strict 151 files + pytest 5 신규 모두 green. 다음 진입 가능 모듈: A9 electron-client (또는 그룹 C: A8-v2 운영 fix P2-26~29, Codex R2 재감사, 5 persona fusion 시연 별도 세션).**
 
 ## 본 백로그의 출처
 

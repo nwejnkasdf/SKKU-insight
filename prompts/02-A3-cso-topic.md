@@ -21,7 +21,7 @@ CSO (Computer Science Ontology) 데이터를 PostgreSQL에 임포트하고 Netwo
 
 ### 1. CSO 임포트 스크립트
 - `scripts/import_cso.py` — `data/cso-import.md` 의사 코드 그대로
-- 다운로드 캐시 `.cache/cso/CSO.3.4.csv`
+- 다운로드 캐시 `.cache/cso/CSO.3.4.1.csv`
 - 12 cluster seed BFS 라벨링
 - Alembic data migration 또는 직접 INSERT
 - **CSO 임포트 후 BroadInterest 12 시드 작성** — `cso_seed_topic_id` FK = 각 cluster 의 seed CSOTopic UUID (A2 가 빈 BroadInterest 테이블만 만들고 본 세션이 시드 채움; data/schema.md BroadInterest §)
@@ -48,7 +48,7 @@ CSO (Computer Science Ontology) 데이터를 PostgreSQL에 임포트하고 Netwo
 - **contracts.py 외 enum 정의 금지** — LeafTopicStatus, TraversalStatus 등 모두 import.
 - **다른 모듈 데이터 작성 금지**: 본 세션은 CSOTopic·BroadInterest 시드만. DynamicLeafTopic은 A7이, UserCSOTraversal은 A7이 작성. 본 세션은 read endpoint만.
 - **CSO 14k 노드 임포트 시간 5분 이내 목표**. 초과 시 cso-import.md 의사 코드 검토 후 최적화.
-- **CSO version pin**: 1차는 CSO 3.4. `CSO_DOWNLOAD_URL` env로 변경 가능 (decision-backlog P1-5).
+- **CSO version pin**: 1차는 CSO 3.4.1. `CSO_DOWNLOAD_URL` env로 변경 가능 (decision-backlog P1-5).
 
 ## 검증
 

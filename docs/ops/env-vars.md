@@ -230,7 +230,7 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 |---|---|---|
 | ~~`OPENALEX_POLITE_EMAIL`~~ | ~~`dev@insight.test`~~ | **(v13 라운드 dead)** OpenAlex 어댑터 미구현. 본 env 미사용. |
 | ~~`SEMANTIC_SCHOLAR_API_KEY`~~ | ~~(선택)~~ | **(v13 라운드 dead)** Semantic Scholar 어댑터 미구현. 본 env 미사용. |
-| `CSO_DOWNLOAD_URL` | `https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv` | A3 (cso-topic engine). `scripts/import_cso.py` 다운로드 URL. decision-backlog P1-5 — 버전 갱신(3.5+) 시 본 env 만 교체 + `make import-cso --reset --refresh`. |
+| `CSO_DOWNLOAD_URL` | `https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv` | A3 (cso-topic engine). `scripts/import_cso.py` 다운로드 URL. 캐시 파일명 = URL basename (`CSO.3.4.1.csv`). 호스트에 미리 받은 CSV 는 `make seed-cso-cache FILE=...` 로 `cso_cache` volume 에 카피해 URL 다운로드 skip. decision-backlog P1-5 — 버전 갱신(3.5+) 시 본 env 만 교체 + `make import-cso ARGS="--reset --refresh"`. |
 
 ## CORS / 호스트
 
@@ -429,8 +429,8 @@ USER_PROFILE_CACHE_TTL_SECONDS=3600
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test
 SEMANTIC_SCHOLAR_API_KEY=
-# CSO 3.4 다운로드 URL (A3, decision-backlog P1-5)
-CSO_DOWNLOAD_URL=https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv
+# CSO 3.4.1 다운로드 URL (A3, decision-backlog P1-5)
+CSO_DOWNLOAD_URL=https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv
 
 # === CORS / hosts ===
 CORS_ALLOWED_ORIGINS=http://localhost:3001,app://insight

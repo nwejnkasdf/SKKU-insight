@@ -80,7 +80,7 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
     검증 (10 KB 미만은 비정상).
 
     Args:
-        url: CSO_DOWNLOAD_URL env (예: https://cso.kmi.open.ac.uk/downloads/CSO.3.4.csv)
+        url: CSO_DOWNLOAD_URL env (예: https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv)
         cache_dir: 보통 워크트리 루트의 `.cache/cso/`
         refresh: True 면 캐시 무시 + 재다운로드
     """
@@ -98,7 +98,7 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
             with tmp.open("wb") as f:
                 for chunk in r.iter_bytes():
                     f.write(chunk)
-        # CSO 3.4 CSV 는 보통 수십 MB. 10 KB 미만은 비정상 응답.
+        # CSO 3.4.1 CSV 는 보통 수십 MB. 10 KB 미만은 비정상 응답.
         size = tmp.stat().st_size
         if size < 10_000:
             tmp.unlink(missing_ok=True)
@@ -345,7 +345,7 @@ async def seed_broad_interests(
     return inserted
 
 
-async def reset_cso_tables(session: AsyncSession) -> None:
+async def reset_cso_tables(session: AsyncSession, force_orphan: bool = False) -> None:
     """--reset 플래그용. cso_topic 참조 FK 를 모두 비운 후 cso_topic 자체 DELETE.
 
     FK RESTRICT (broad_interest.cso_seed_topic_id, dynamic_leaf_topic_cso_topic.cso_topic_id)
@@ -354,8 +354,38 @@ async def reset_cso_tables(session: AsyncSession) -> None:
     2. broad_interest (RESTRICT FK)
     3. cso_topic_parent (CASCADE 자식이긴 하나 명시 DELETE 로 명료성)
     4. cso_topic
-    user_cso_traversal.path 는 FK 없어 stale UUID 잔존 가능 (자체감사 B-5).
+
+    P2-16 + P2-10 가드 (2026-05-19):
+    - DynamicLeafTopic.cso_topic_ids 는 본 reset 으로 빈 배열 화 (M:N junction DELETE).
+    - user_cso_traversal.path 는 FK 없어 stale UUID 잔존 가능.
+    둘 중 하나라도 row 가 존재하면 default 거부 (RuntimeError) — 운영자가 의도를
+    명시하려면 `force_orphan=True` (CLI 의 `--force-orphan-cso-refs`).
     """
+    leaf_count = (
+        await session.execute(text("SELECT count(*) FROM dynamic_leaf_topic"))
+    ).scalar_one()
+    traversal_count = (
+        await session.execute(text("SELECT count(*) FROM user_cso_traversal"))
+    ).scalar_one()
+
+    if (leaf_count or traversal_count) and not force_orphan:
+        raise RuntimeError(
+            "--reset 가드 (P2-16 + P2-10): "
+            f"dynamic_leaf_topic {leaf_count} 행 + user_cso_traversal {traversal_count} 행이 "
+            "존재합니다. CSO 테이블 reset 은 이들 row 의 cso_topic_ids / path 를 "
+            "orphan reference 로 만듭니다. 의도된 동작이면 "
+            "`--force-orphan-cso-refs` 플래그 추가 후 재실행하거나, leaf/trace 데이터를 "
+            "먼저 정리한 뒤 진행하세요."
+        )
+    if leaf_count or traversal_count:
+        logger.warning(
+            "--reset --force-orphan-cso-refs: orphan refs 허용 "
+            "(dynamic_leaf_topic=%d, user_cso_traversal=%d). "
+            "leaf 응답의 cso_topic_ids 가 [] 가 되고, traversal.path UUID 가 stale 가 됩니다.",
+            leaf_count,
+            traversal_count,
+        )
+
     logger.info(
         "--reset: DELETE dynamic_leaf_topic_cso_topic → broad_interest → "
         "cso_topic_parent → cso_topic"

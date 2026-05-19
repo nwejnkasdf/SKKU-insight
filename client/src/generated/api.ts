@@ -190,6 +190,15 @@ export type InterestStateResponse = {
   updated_at: string | null;
 };
 
+export type TraversalTraceSummary = {
+  trace_id: UUID;
+  path_labels: string[];
+  status: "active" | "stale" | "retracted" | "archived";
+  started_active_day: number;
+  last_activity_active_day: number;
+  leaf_count: number;
+};
+
 export type EventResponse = {
   event_id: UUID;
   accepted: boolean;
@@ -377,6 +386,10 @@ export class InsightApi {
 
   interestState(): Promise<InterestStateResponse> {
     return this.request("/interest/state");
+  }
+
+  traces(): Promise<PagedResponse<TraversalTraceSummary>> {
+    return this.request("/topics/traces");
   }
 
   postEvent(payload: {

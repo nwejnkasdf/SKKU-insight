@@ -33,6 +33,7 @@ import type {
   MeResponse,
   RecommendationCard,
   TopicDocumentsResponse,
+  TraversalTraceSummary,
   UUID
 } from "./generated/api";
 import { getApi, tokenStore } from "./lib/api";
@@ -427,6 +428,8 @@ function DashboardView({
   showToast: (toast: Toast) => void;
 }) {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [interest, setInterest] = useState<InterestStateResponse | null>(null);
+  const [traces, setTraces] = useState<TraversalTraceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const topicRanks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
@@ -435,7 +438,14 @@ function DashboardView({
     setLoading(true);
     setError(null);
     try {
-      setDashboard(refresh ? await api.refreshDashboard() : await api.dashboard());
+      const nextDashboard = refresh ? await api.refreshDashboard() : await api.dashboard();
+      const [nextInterest, nextTraces] = await Promise.all([
+        api.interestState().catch(() => null),
+        api.traces().catch(() => null)
+      ]);
+      setDashboard(nextDashboard);
+      setInterest(nextInterest);
+      setTraces(nextTraces?.items ?? []);
     } catch (err) {
       setDashboard(null);
       setError(messageForError(err));
@@ -457,7 +467,7 @@ function DashboardView({
       {!loading && error && <Empty title="추천 엔진을 기다리는 중입니다" body={error} />}
       {!loading && dashboard && (
         <div className="dashboardStack">
-          <SignalOverview dashboard={dashboard} topicCount={topicRanks.length} />
+          <SignalOverview dashboard={dashboard} topicCount={topicRanks.length} interest={interest} traces={traces} />
           <div className="dashboardMain">
             <div className="sectionTitle">
               <div>
@@ -582,35 +592,52 @@ function RecommendationCardView({
   );
 }
 
-function SignalOverview({ dashboard, topicCount }: { dashboard: DashboardResponse; topicCount: number }) {
+function SignalOverview({
+  dashboard,
+  topicCount,
+  interest,
+  traces
+}: {
+  dashboard: DashboardResponse;
+  topicCount: number;
+  interest: InterestStateResponse | null;
+  traces: TraversalTraceSummary[];
+}) {
   const core = dashboard.slots.find((slot) => slot.slot_type === "core")?.actual_count ?? 0;
   const adjacent = dashboard.slots.find((slot) => slot.slot_type === "adjacent")?.actual_count ?? 0;
   const discovery = dashboard.slots.find((slot) => slot.slot_type === "discovery")?.actual_count ?? 0;
-  const trace = ["CS", "AI", "IR", "RAG", "AS"];
+  const trackedTopics = (interest?.topics ?? []).filter((topic) => topic.bucket !== "neutral");
+  const trackedNodes = buildTrackedNodes(dashboard, interest, traces);
+  const activeTraceCount = traces.filter((trace) => trace.status === "active").length;
   return (
     <div className="signalOverview">
-      <div className="signalMap" aria-label="관심 경로">
-        <i className="mapLine lineOne" />
-        <i className="mapLine lineTwo" />
-        <i className="mapLine lineThree" />
-        <i className="mapLine lineFour" />
-        {trace.map((node, index) => (
-          <span key={node} className={`mapNode node${index + 1} ${index === trace.length - 1 ? "active" : ""}`}>{node}</span>
+      <div className="signalMap" aria-label="추적 관심사 그래프">
+        {trackedNodes.slice(1).map((node, index) => (
+          <i key={`line-${node}-${index}`} className={`mapLine line${index + 1}`} />
+        ))}
+        {trackedNodes.map((node, index) => (
+          <span key={`${node}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node}>
+            {compactTopicLabel(node)}
+          </span>
         ))}
       </div>
-      <div className="slotColumns" aria-label="슬롯 분포">
+      <div className="slotColumns" aria-label="추천 슬롯 분포">
         <span style={{ height: `${Math.max(18, core * 12)}px` }}><b>중심</b></span>
         <span className="adjacent" style={{ height: `${Math.max(18, adjacent * 12)}px` }}><b>인접</b></span>
         <span className="discovery" style={{ height: `${Math.max(18, discovery * 12)}px` }}><b>탐색</b></span>
       </div>
-      <div className="queueDots" aria-label="추천 큐">
-        {dashboard.cards.map((card, index) => (
-          <i key={card.recommendation_id} className={card.slot_type} title={`${index + 1}. ${slotLabel(card.slot_type)}`} />
-        ))}
+      <div className="trackedPanel">
+        <span className="panelMiniLabel">추적 관심사</span>
+        <div className="trackedChips">
+          {(trackedTopics.length ? trackedTopics : interest?.topics.slice(0, 3) ?? []).slice(0, 5).map((topic) => (
+            <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}-${topic.label}`} className={topic.bucket}>{topic.label}</span>
+          ))}
+        </div>
+        <small>{activeTraceCount > 0 ? `${activeTraceCount}개 trace 활성` : "trace 생성 대기"} · {interest?.updated_at ? formatDate(interest.updated_at) : "초기 상태"}</small>
       </div>
       <div className="signalStats">
         <span><b>{dashboard.cards.length}</b> 추천</span>
-        <span><b>{topicCount}</b> 토픽</span>
+        <span><b>{trackedTopics.length || topicCount}</b> 관심</span>
         <span><b>{dashboard.cold_start ? "활성" : "종료"}</b> 초기</span>
       </div>
     </div>
@@ -1274,6 +1301,40 @@ function sourceInitials(sourceName: string): string {
     .join("")
     .slice(0, 3)
     .toUpperCase();
+}
+
+function buildTrackedNodes(
+  dashboard: DashboardResponse,
+  interest: InterestStateResponse | null,
+  traces: TraversalTraceSummary[]
+): string[] {
+  const labels: string[] = [];
+  for (const trace of traces.filter((item) => item.status === "active")) {
+    labels.push(...trace.path_labels);
+  }
+  labels.push(
+    ...(interest?.topics ?? [])
+      .filter((topic) => topic.bucket !== "neutral")
+      .map((topic) => topic.label)
+  );
+  labels.push(
+    ...dashboard.cards.flatMap((card) =>
+      card.related_topics.map((topic) => topic.label)
+    )
+  );
+
+  const unique = labels
+    .map((label) => label.trim())
+    .filter(Boolean)
+    .filter((label, index, arr) => arr.findIndex((other) => other.toLowerCase() === label.toLowerCase()) === index);
+  return unique.slice(0, 5);
+}
+
+function compactTopicLabel(label: string): string {
+  const words = label.split(/[\s/.-]+/).filter(Boolean);
+  if (words.length === 0) return label.slice(0, 3).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
 
 function buildTopicRanks(cards: RecommendationCard[]): TopicRank[] {

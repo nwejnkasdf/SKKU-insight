@@ -202,7 +202,7 @@ nav button.active::before {
 
 .signalOverview {
   display: grid;
-  grid-template-columns: minmax(300px, 1.35fr) 190px minmax(140px, 0.72fr) 190px;
+  grid-template-columns: minmax(300px, 1.3fr) 170px minmax(220px, 0.9fr) 190px;
   gap: 16px;
   align-items: center;
   min-height: 140px;
@@ -237,7 +237,21 @@ nav button.active::before {
   transform: rotate(-24deg);
 }
 
+.line1 {
+  left: 15%;
+  top: 66%;
+  width: 25%;
+  transform: rotate(-24deg);
+}
+
 .lineTwo {
+  left: 37%;
+  top: 42%;
+  width: 22%;
+  transform: rotate(20deg);
+}
+
+.line2 {
   left: 37%;
   top: 42%;
   width: 22%;
@@ -251,7 +265,21 @@ nav button.active::before {
   transform: rotate(-18deg);
 }
 
+.line3 {
+  left: 55%;
+  top: 55%;
+  width: 20%;
+  transform: rotate(-18deg);
+}
+
 .lineFour {
+  left: 72%;
+  top: 44%;
+  width: 16%;
+  transform: rotate(28deg);
+}
+
+.line4 {
   left: 72%;
   top: 44%;
   width: 16%;
@@ -362,6 +390,56 @@ nav button.active::before {
 .queueDots i.discovery,
 .queueDots i.fallback_trend {
   background: var(--accent-3);
+}
+
+.trackedPanel {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.panelMiniLabel {
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.trackedChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.trackedChips span {
+  max-width: 150px;
+  overflow: hidden;
+  padding: 6px 8px;
+  color: #244b43;
+  background: #e8f0ec;
+  border: 1px solid #cddcd4;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackedChips span.medium {
+  color: #263f6d;
+  background: #e6ebf2;
+  border-color: #ccd5e1;
+}
+
+.trackedChips span.low,
+.trackedChips span.neutral {
+  color: #664412;
+  background: #f1e7d6;
+  border-color: #e0ccad;
+}
+
+.trackedPanel small {
+  color: var(--soft);
+  font-size: 12px;
 }
 
 .signalStats {

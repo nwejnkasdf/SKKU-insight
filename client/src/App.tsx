@@ -1,0 +1,1140 @@
+import {
+  Activity,
+  ArrowLeft,
+  BarChart3,
+  Bookmark,
+  CheckCircle2,
+  EyeOff,
+  ExternalLink,
+  GitBranch,
+  HeartCrack,
+  Library,
+  ListOrdered,
+  Loader2,
+  LogOut,
+  Network,
+  RefreshCcw,
+  Settings,
+  ShieldCheck,
+  TrendingUp,
+  Trash2
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+import type {
+  ApiError,
+  CSOCluster,
+  DashboardResponse,
+  DocumentDetailResponse,
+  DocumentSummary,
+  DocumentSummaryResponse,
+  InsightApi,
+  InterestStateResponse,
+  MeResponse,
+  RecommendationCard,
+  TopicDocumentsResponse,
+  UUID
+} from "./generated/api";
+import { getApi, tokenStore } from "./lib/api";
+import { configureDwellTracker, startDwell, stopDwell } from "./lib/dwellTracker";
+
+type View =
+  | { name: "boot" }
+  | { name: "auth" }
+  | { name: "onboarding"; me: MeResponse | null }
+  | { name: "dashboard" }
+  | { name: "topics" }
+  | { name: "ranking" }
+  | { name: "library" }
+  | { name: "document"; documentId: UUID }
+  | { name: "topic"; topicId: UUID; label: string }
+  | { name: "settings" };
+
+type Toast = { tone: "ok" | "error"; text: string } | null;
+type TopicRank = { topicId: UUID; label: string; count: number };
+
+const userClassOptions = [
+  { value: "general", label: "일반" },
+  { value: "undergraduate", label: "학부생" },
+  { value: "researcher", label: "연구자" },
+  { value: "professor", label: "교수" }
+];
+
+export default function App() {
+  const [api, setApi] = useState<InsightApi | null>(null);
+  const [view, setView] = useState<View>({ name: "boot" });
+  const [toast, setToast] = useState<Toast>(null);
+
+  useEffect(() => {
+    void getApi().then((resolved) => {
+      setApi(resolved);
+      configureDwellTracker(resolved);
+      void resolved
+        .me()
+        .then((me) => {
+          if (!me.consent_active || !me.onboarding_complete) {
+            setView({ name: "onboarding", me });
+          } else {
+            setView({ name: "dashboard" });
+          }
+        })
+        .catch(() => setView({ name: "auth" }));
+    });
+  }, []);
+
+  function showToast(next: Toast) {
+    setToast(next);
+    if (next) {
+      window.setTimeout(() => setToast(null), 3400);
+    }
+  }
+
+  if (!api || view.name === "boot") {
+    return <Shell view={view} setView={setView} toast={toast}><Loading label="앱을 준비하고 있습니다" /></Shell>;
+  }
+
+  return (
+    <Shell view={view} setView={setView} toast={toast}>
+      {view.name === "auth" && <AuthView api={api} setView={setView} showToast={showToast} />}
+      {view.name === "onboarding" && (
+        <OnboardingView api={api} me={view.me} setView={setView} showToast={showToast} />
+      )}
+      {view.name === "dashboard" && (
+        <DashboardView api={api} setView={setView} showToast={showToast} />
+      )}
+      {view.name === "topics" && <TopicsView api={api} setView={setView} />}
+      {view.name === "ranking" && <RankingView api={api} setView={setView} />}
+      {view.name === "library" && <LibraryView api={api} setView={setView} />}
+      {view.name === "document" && (
+        <DocumentView api={api} documentId={view.documentId} setView={setView} showToast={showToast} />
+      )}
+      {view.name === "topic" && (
+        <TopicView api={api} topicId={view.topicId} label={view.label} setView={setView} />
+      )}
+      {view.name === "settings" && <SettingsView api={api} setView={setView} showToast={showToast} />}
+    </Shell>
+  );
+}
+
+function Shell({
+  children,
+  view,
+  setView,
+  toast
+}: {
+  children: React.ReactNode;
+  view: View;
+  setView: (view: View) => void;
+  toast: Toast;
+}) {
+  const authed = !["boot", "auth", "onboarding"].includes(view.name);
+  if (!authed) {
+    return (
+      <div className="entryApp">
+        <main className="entryMain">{children}</main>
+        {toast && <div className={`toast ${toast.tone}`}>{toast.text}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brandMark"><GitBranch size={19} /></div>
+          <div>
+            <strong>SKKU InSight</strong>
+            <span>CS/AI 동향 추천</span>
+          </div>
+        </div>
+        <nav>
+          <button className={view.name === "dashboard" ? "active" : ""} disabled={!authed} onClick={() => setView({ name: "dashboard" })}>
+            <BarChart3 size={17} /> 추천
+          </button>
+          <button className={view.name === "topics" || view.name === "topic" ? "active" : ""} disabled={!authed} onClick={() => setView({ name: "topics" })}>
+            <Network size={17} /> 토픽
+          </button>
+          <button className={view.name === "ranking" ? "active" : ""} disabled={!authed} onClick={() => setView({ name: "ranking" })}>
+            <ListOrdered size={17} /> 랭킹
+          </button>
+          <button className={view.name === "library" ? "active" : ""} disabled={!authed} onClick={() => setView({ name: "library" })}>
+            <Library size={17} /> 보관함
+          </button>
+          <button className={view.name === "settings" ? "active" : ""} disabled={!authed} onClick={() => setView({ name: "settings" })}>
+            <Settings size={17} /> 설정
+          </button>
+        </nav>
+        <div className="sidebarFoot">데모 클라이언트</div>
+      </aside>
+      <main className="main">{children}</main>
+      {toast && <div className={`toast ${toast.tone}`}>{toast.text}</div>}
+    </div>
+  );
+}
+
+function AuthView({
+  api,
+  setView,
+  showToast
+}: {
+  api: InsightApi;
+  setView: (view: View) => void;
+  showToast: (toast: Toast) => void;
+}) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (mode === "signup") {
+        await api.signup(email, password);
+      }
+      const tokens = await api.login(email, password);
+      await tokenStore.setTokens(tokens);
+      const me = await api.me();
+      setView(!me.consent_active || !me.onboarding_complete ? { name: "onboarding", me } : { name: "dashboard" });
+    } catch (err) {
+      setError(messageForError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="auth">
+      <div className="authCopy">
+        <p className="eyebrow">데스크톱 클라이언트</p>
+        <h1>검색하지 않아도 따라오는 CS/AI 기술 흐름</h1>
+        <p>관심 클러스터와 행동 신호를 바탕으로 오늘 읽을 만한 논문, 블로그, 기술 글을 모읍니다.</p>
+        <div className="authPreview">
+          <div className="previewHeader">
+            <span>오늘의 브리프</span>
+            <b>10건</b>
+          </div>
+          <div className="previewBars">
+            <span style={{ width: "72%" }} />
+            <span style={{ width: "48%" }} />
+            <span style={{ width: "34%" }} />
+          </div>
+          <div className="previewGrid">
+            <span><b>5</b> 중심</span>
+            <span><b>3</b> 인접</span>
+            <span><b>2</b> 탐색</span>
+          </div>
+        </div>
+      </div>
+      <form className="panel authPanel" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+        <div className="segmented">
+          <button type="button" className={mode === "login" ? "selected" : ""} onClick={() => setMode("login")}>로그인</button>
+          <button type="button" className={mode === "signup" ? "selected" : ""} onClick={() => setMode("signup")}>가입</button>
+        </div>
+        <label>이메일<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@skku.edu" /></label>
+        <label>비밀번호<input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="12자 이상" type="password" /></label>
+        {error && <p className="inlineError">{error}</p>}
+        <button className="primary" disabled={busy || !email || !password}>
+          {busy ? <Loader2 className="spin" size={17} /> : <ShieldCheck size={17} />}
+          {mode === "login" ? "로그인" : "가입하고 시작"}
+        </button>
+        <button type="button" className="ghost" onClick={() => showToast({ tone: "ok", text: "백엔드 API가 켜져 있으면 바로 연결됩니다." })}>
+          연결 상태 안내
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function OnboardingView({
+  api,
+  me,
+  setView,
+  showToast
+}: {
+  api: InsightApi;
+  me: MeResponse | null;
+  setView: (view: View) => void;
+  showToast: (toast: Toast) => void;
+}) {
+  const [consentActive, setConsentActive] = useState(me?.consent_active ?? false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [clusters, setClusters] = useState<CSOCluster[]>([]);
+  const [selected, setSelected] = useState<Set<UUID>>(new Set());
+  const [userClass, setUserClass] = useState("general");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!consentActive) return;
+    void api.clusters().then((res) => setClusters(res.clusters)).catch((err) => setError(messageForError(err)));
+  }, [api, consentActive]);
+
+  async function agree() {
+    if (!consentChecked) return;
+    setBusy(true);
+    try {
+      await api.consentAgree();
+      setConsentActive(true);
+      showToast({ tone: "ok", text: "동의가 저장되었습니다." });
+    } catch (err) {
+      setError(messageForError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.submitInterests([...selected], userClass);
+      await pollColdStart(api, res.request_id);
+      setView({ name: "dashboard" });
+    } catch (err) {
+      setError(messageForError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <Header title="시작 설정" subtitle="관심 클러스터를 고르면 첫 관심 경로와 초기 추천 큐가 만들어집니다." />
+      {!consentActive ? (
+        <div className="panel consentPanel">
+          <h2>개인화 추천 동의</h2>
+          <p>추천을 위해 클릭, 저장, 숨김 같은 앱 내 행동을 개인화 신호로 사용합니다.</p>
+          <label className="checkLine">
+            <input type="checkbox" checked={consentChecked} onChange={(event) => setConsentChecked(event.target.checked)} />
+            개인화 추천 처리에 동의합니다.
+          </label>
+          <button className="primary" disabled={!consentChecked || busy} onClick={() => void agree()}>
+            <ShieldCheck size={17} /> 동의하고 계속
+          </button>
+        </div>
+      ) : (
+        <div className="onboardingLayout">
+          <div className="onboardingMain">
+            <div className="onboardingTop">
+              <div className="stepPills">
+                <span className="current">1. 관심 분야</span>
+                <span>2. 초기 경로</span>
+                <span>3. 첫 추천</span>
+              </div>
+              <div className="onboardingTitleRow">
+                <div>
+                  <h2>관심 분야 선택</h2>
+                  <p>넓은 분야를 고르면 첫 추천의 기준점으로만 사용됩니다. 이후에는 클릭, 저장, 숨김 같은 실제 행동이 더 크게 반영됩니다.</p>
+                </div>
+                <div className="selectedMini">
+                  <strong>{selected.size}</strong>
+                  <span>개 선택됨</span>
+                </div>
+              </div>
+            </div>
+            {error && <p className="inlineError">{error}</p>}
+            <div className="clusterGrid">
+              {clusters.map((cluster, index) => {
+                const isSelected = selected.has(cluster.cso_topic_id);
+                return (
+                  <button
+                    key={cluster.cso_topic_id}
+                    className={isSelected ? "cluster selected" : "cluster"}
+                    onClick={() => toggleSet(selected, setSelected, cluster.cso_topic_id)}
+                  >
+                    <div className="clusterTop">
+                      <span className="clusterIndex">{String(index + 1).padStart(2, "0")}</span>
+                      {isSelected ? <CheckCircle2 size={18} /> : <span className="clusterType">CSO</span>}
+                    </div>
+                    <strong>{cluster.label}</strong>
+                    <span>{cluster.description_ko}</span>
+                    <div className="clusterFooter">
+                      <small>최근 문서 {cluster.document_count}건</small>
+                      <div className="clusterSignal" aria-hidden="true">
+                        <i style={{ width: `${Math.min(96, 34 + cluster.document_count)}%` }} />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="onboardingRail">
+            <div className="insightPanel">
+              <PanelHeading icon={<ShieldCheck size={16} />} title="프로필" />
+              <label>사용자 유형
+                <select value={userClass} onChange={(event) => setUserClass(event.target.value)}>
+                  {userClassOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <SelectionPreview clusters={clusters.filter((cluster) => selected.has(cluster.cso_topic_id))} />
+            <div className="insightPanel">
+              <PanelHeading icon={<BarChart3 size={16} />} title="첫 추천 구성" />
+              <div className="previewSlots">
+                <span><b>5</b> 중심</span>
+                <span><b>3</b> 인접</span>
+                <span><b>2</b> 탐색</span>
+              </div>
+              <p className="panelNote">선택한 분야는 첫 추천의 기준 신호로 쓰이고, 이후 이벤트가 관심 경로를 갱신합니다.</p>
+              <button className="primary wide" disabled={selected.size === 0 || busy} onClick={() => void submit()}>
+                {busy ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />} 추천 준비
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SelectionPreview({ clusters }: { clusters: CSOCluster[] }) {
+  return (
+    <div className="insightPanel">
+      <PanelHeading icon={<GitBranch size={16} />} title="선택 요약" />
+      {clusters.length === 0 ? (
+        <p className="panelNote">관심 분야를 선택하면 여기에서 한 번에 확인할 수 있습니다.</p>
+      ) : (
+        <div className="seedList">
+          {clusters.slice(0, 5).map((cluster) => (
+            <span key={cluster.cso_topic_id}>{cluster.label}</span>
+          ))}
+          {clusters.length > 5 && <span>+{clusters.length - 5}개 더</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DashboardView({
+  api,
+  setView,
+  showToast
+}: {
+  api: InsightApi;
+  setView: (view: View) => void;
+  showToast: (toast: Toast) => void;
+}) {
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const topicRanks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
+
+  async function load(refresh = false) {
+    setLoading(true);
+    setError(null);
+    try {
+      setDashboard(refresh ? await api.refreshDashboard() : await api.dashboard());
+    } catch (err) {
+      setDashboard(null);
+      setError(messageForError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  return (
+    <section>
+      <Header title="오늘의 추천" subtitle="중심 · 인접 · 탐색 큐">
+        <button className="iconButton" title="새로고침" onClick={() => void load(true)}><RefreshCcw size={17} /></button>
+      </Header>
+      {loading && <Loading label="추천을 불러오는 중" />}
+      {!loading && error && <Empty title="추천 엔진을 기다리는 중입니다" body={error} />}
+      {!loading && dashboard && (
+        <div className="dashboardStack">
+          <SignalOverview dashboard={dashboard} topicCount={topicRanks.length} />
+          <div className="dashboardMain">
+            <div className="sectionTitle">
+              <div>
+                <span>추천 큐</span>
+                <h2>추천 우선순위</h2>
+              </div>
+              <small>{dashboard.cache === "hit" ? "캐시 응답" : "새로 계산됨"} · {formatDate(dashboard.generated_at)}</small>
+            </div>
+            <div className="dashboardGrid">
+              {dashboard.cards.map((card, index) => (
+                <RecommendationCardView
+                  key={card.recommendation_id}
+                  api={api}
+                  card={card}
+                  rank={index + 1}
+                  setView={setView}
+                  showToast={showToast}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RecommendationCardView({
+  api,
+  card,
+  rank,
+  setView,
+  showToast
+}: {
+  api: InsightApi;
+  card: RecommendationCard;
+  rank: number;
+  setView: (view: View) => void;
+  showToast: (toast: Toast) => void;
+}) {
+  const visibleTopics = card.related_topics.slice(0, 2);
+  const hiddenTopicCount = Math.max(0, card.related_topics.length - visibleTopics.length);
+
+  async function eventAndOpen() {
+    await api.postEvent({
+      event_type: "click",
+      document_id: card.document_id,
+      occurred_at: new Date().toISOString(),
+      client_request_id: crypto.randomUUID()
+    }).catch(() => undefined);
+    setView({ name: "document", documentId: card.document_id });
+  }
+
+  return (
+    <article className={`recCard recCard-${card.slot_type}`}>
+      <div className={`cardGlyph ${card.slot_type}`} aria-hidden="true">
+        <b>{String(rank).padStart(2, "0")}</b>
+        <span>
+          <i />
+          <i />
+          <i />
+        </span>
+      </div>
+      <button className="cardHit" onClick={() => void eventAndOpen()}>
+        <div className="cardMeta">
+          <span className={`slot ${card.slot_type}`}>{slotLabel(card.slot_type)}</span>
+        </div>
+        <h2>{card.title}</h2>
+        <span className="sourceLine">{card.source_name} · {formatDate(card.published_at)}</span>
+        <span className={`cardSignal ${card.slot_type}`} aria-hidden="true">
+          <i style={{ width: `${Math.max(28, 96 - rank * 7)}%` }} />
+        </span>
+      </button>
+      <div className="chips">
+        {visibleTopics.map((topic) => (
+          <button key={`${topic.type}-${topic.topic_id}`} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
+        ))}
+        {hiddenTopicCount > 0 && <span className="chipMore">+{hiddenTopicCount}</span>}
+      </div>
+      <div className="cardActions">
+        <button title="저장" onClick={() => void api.saveDocument(card.document_id).then(() => showToast({ tone: "ok", text: "저장했습니다." }))}><Bookmark size={16} /></button>
+        <button title="숨김" onClick={() => void api.hideDocument(card.document_id).then(() => showToast({ tone: "ok", text: "숨김 처리했습니다." }))}><EyeOff size={16} /></button>
+        <button title="관심 없음" onClick={() => void api.notInterestedDocument(card.document_id).then(() => showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." }))}><HeartCrack size={16} /></button>
+      </div>
+    </article>
+  );
+}
+
+function SignalOverview({ dashboard, topicCount }: { dashboard: DashboardResponse; topicCount: number }) {
+  const core = dashboard.slots.find((slot) => slot.slot_type === "core")?.actual_count ?? 0;
+  const adjacent = dashboard.slots.find((slot) => slot.slot_type === "adjacent")?.actual_count ?? 0;
+  const discovery = dashboard.slots.find((slot) => slot.slot_type === "discovery")?.actual_count ?? 0;
+  const trace = ["CS", "AI", "IR", "RAG", "AS"];
+  return (
+    <div className="signalOverview">
+      <div className="signalMap" aria-label="관심 경로">
+        <i className="mapLine lineOne" />
+        <i className="mapLine lineTwo" />
+        <i className="mapLine lineThree" />
+        <i className="mapLine lineFour" />
+        {trace.map((node, index) => (
+          <span key={node} className={`mapNode node${index + 1} ${index === trace.length - 1 ? "active" : ""}`}>{node}</span>
+        ))}
+      </div>
+      <div className="slotColumns" aria-label="슬롯 분포">
+        <span style={{ height: `${Math.max(18, core * 12)}px` }}><b>중심</b></span>
+        <span className="adjacent" style={{ height: `${Math.max(18, adjacent * 12)}px` }}><b>인접</b></span>
+        <span className="discovery" style={{ height: `${Math.max(18, discovery * 12)}px` }}><b>탐색</b></span>
+      </div>
+      <div className="queueDots" aria-label="추천 큐">
+        {dashboard.cards.map((card, index) => (
+          <i key={card.recommendation_id} className={card.slot_type} title={`${index + 1}. ${slotLabel(card.slot_type)}`} />
+        ))}
+      </div>
+      <div className="signalStats">
+        <span><b>{dashboard.cards.length}</b> 추천</span>
+        <span><b>{topicCount}</b> 토픽</span>
+        <span><b>{dashboard.cold_start ? "활성" : "종료"}</b> 초기</span>
+      </div>
+    </div>
+  );
+}
+
+function SlotBars({ dashboard }: { dashboard: DashboardResponse }) {
+  const total = Math.max(1, dashboard.slots.reduce((sum, slot) => sum + slot.actual_count, 0));
+  return (
+    <div className="insightPanel">
+      <PanelHeading icon={<BarChart3 size={16} />} title="슬롯 분포" />
+      <div className="slotBars">
+        {dashboard.slots.map((slot) => (
+          <div key={slot.slot_type} className="barRow">
+            <div className="barLabel">
+              <span>{slotLabel(slot.slot_type)}</span>
+              <b>{slot.actual_count}/{slot.target_count}</b>
+            </div>
+            <div className="barTrack">
+              <span className={`barFill ${slot.slot_type}`} style={{ width: `${(slot.actual_count / total) * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TraceMap() {
+  const nodes = ["CS", "AI", "IR", "RAG", "Agentic Search"];
+  return (
+    <div className="insightPanel">
+      <PanelHeading icon={<GitBranch size={16} />} title="관심 경로" />
+      <div className="traceMap" aria-label="interest trace">
+        {nodes.map((node, index) => (
+          <div key={node} className={index === nodes.length - 1 ? "traceNode active" : "traceNode"}>
+            <span>{node}</span>
+          </div>
+        ))}
+      </div>
+      <p className="panelNote">현재 중심 슬롯은 관심 경로 끝단과 하위 리프에서 우선 채웁니다.</p>
+    </div>
+  );
+}
+
+function TopicRanks({ ranks, setView }: { ranks: TopicRank[]; setView: (view: View) => void }) {
+  const max = Math.max(1, ...ranks.map((rank) => rank.count));
+  return (
+    <div className="insightPanel">
+      <PanelHeading icon={<TrendingUp size={16} />} title="토픽 순위" />
+      <div className="topicRanks">
+        {ranks.slice(0, 6).map((rank, index) => (
+          <button key={rank.topicId} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
+            <b>{index + 1}</b>
+            <span>{rank.label}</span>
+            <i style={{ width: `${(rank.count / max) * 100}%` }} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourceMix({ rows }: { rows: Array<{ label: string; count: number }> }) {
+  const total = Math.max(1, rows.reduce((sum, row) => sum + row.count, 0));
+  return (
+    <div className="insightPanel compact">
+      <PanelHeading icon={<Activity size={16} />} title="출처 구성" />
+      <div className="donutRow">
+        <div
+          className="donut"
+          style={{
+            background: `conic-gradient(var(--accent) 0 ${percent(rows[0]?.count ?? 0, total)}%, var(--accent-2) 0 ${percent((rows[0]?.count ?? 0) + (rows[1]?.count ?? 0), total)}%, var(--accent-3) 0 100%)`
+          }}
+        />
+        <div className="sourceLegend">
+          {rows.map((row) => (
+            <span key={row.label}><i /> {row.label} <b>{row.count}</b></span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PanelHeading({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="panelHeading">
+      <span>{icon}</span>
+      <h3>{title}</h3>
+    </div>
+  );
+}
+
+function DocumentView({
+  api,
+  documentId,
+  setView,
+  showToast
+}: {
+  api: InsightApi;
+  documentId: UUID;
+  setView: (view: View) => void;
+  showToast: (toast: Toast) => void;
+}) {
+  const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
+  const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    startDwell(documentId);
+    void api.documentDetail(documentId).then(setDetail).catch((err) => setError(messageForError(err)));
+    void api.documentSummary(documentId).then(setSummary).catch(() => undefined);
+    return stopDwell;
+  }, [api, documentId]);
+
+  if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;
+  if (!detail) return <Loading label="문서를 불러오는 중" />;
+
+  const visibleTopics = detail.related_topics.slice(0, 3);
+  const sourceTone = detail.source_type;
+
+  return (
+    <section>
+      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatDate(detail.published_at)}`}>
+        <button className="iconButton" title="뒤로" onClick={() => setView({ name: "dashboard" })}><ArrowLeft size={17} /></button>
+      </Header>
+      <div className="documentShell">
+        <section className="panel documentHero">
+          <div className={`docCover ${sourceTone}`} aria-hidden="true">
+            <span>{sourceTypeLabel(detail.source_type)}</span>
+            <strong>{sourceInitials(detail.source_name)}</strong>
+            <div>
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+          <div className="docHeroCopy">
+            <div className="docMetaLine">
+              <span>{detail.source_name}</span>
+              <span>{formatDate(detail.published_at)}</span>
+            </div>
+            <h2>{detail.title}</h2>
+            <p>{summary?.reason_short ?? detail.summary_short}</p>
+            <div className="docTopicStrip">
+              {visibleTopics.map((topic) => (
+                <button key={topic.topic_id} onClick={() => setView({ name: "topic", topicId: topic.topic_id, label: topic.label })}>{topic.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="docSignalBox" aria-label="문서 신호">
+            <span><b>match</b><i><em style={{ width: "88%" }} /></i></span>
+            <span><b>trace</b><i><em style={{ width: "72%" }} /></i></span>
+            <span><b>fresh</b><i><em style={{ width: "56%" }} /></i></span>
+          </div>
+        </section>
+
+        <div className="documentWorkspace">
+          <article className="documentInsights">
+            <section className="docSummaryCard">
+              <span className="eyebrow">요약</span>
+              <p>{detail.summary_short}</p>
+            </section>
+            <div className="docSectionGrid">
+              {summary?.sections.map((section, index) => (
+                <section key={section.section} className={`docSectionCard ${section.section}`}>
+                  <b>{String(index + 1).padStart(2, "0")}</b>
+                  <h3>{section.title_ko}</h3>
+                  <p>{section.body_ko}</p>
+                </section>
+              ))}
+            </div>
+          </article>
+          <aside className="documentRail">
+            <div className="panel documentActions">
+              <button className="primary" onClick={() => void window.insightShell?.openExternal(detail.url)}>
+                <ExternalLink size={17} /> 원문 열기
+              </button>
+              <button onClick={() => void api.saveDocument(documentId).then(() => showToast({ tone: "ok", text: "저장했습니다." }))}><Bookmark size={16} /> 저장</button>
+              <button onClick={() => void api.hideDocument(documentId).then(() => showToast({ tone: "ok", text: "숨김 처리했습니다." }))}><EyeOff size={16} /> 숨김</button>
+              <button onClick={() => void api.notInterestedDocument(documentId).then(() => showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." }))}><HeartCrack size={16} /> 관심 없음</button>
+            </div>
+            <div className="panel docTraceCard">
+              <PanelHeading icon={<GitBranch size={16} />} title="추천 경로" />
+              <div className="docTraceMini" aria-hidden="true">
+                {["CS", "AI", "IR", "RAG"].map((node, index) => <span key={node} className={index === 3 ? "active" : ""}>{node}</span>)}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TopicView({ api, topicId, label, setView }: { api: InsightApi; topicId: UUID; label: string; setView: (view: View) => void }) {
+  const [topic, setTopic] = useState<TopicDocumentsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.topicDocuments(topicId).then(setTopic).catch((err) => setError(messageForError(err)));
+  }, [api, topicId]);
+
+  return (
+    <section>
+      <Header title={label} subtitle="관련 최신 문서">
+        <button className="iconButton" title="뒤로" onClick={() => setView({ name: "dashboard" })}><ArrowLeft size={17} /></button>
+      </Header>
+      {error && <Empty title="토픽 정보를 불러오지 못했습니다" body={error} />}
+      {!error && !topic && <Loading label="토픽 문서를 불러오는 중" />}
+      {topic && topic.items.length === 0 && <Empty title="관련 최신 문서가 아직 없습니다" body="인접 토픽이나 대시보드 추천을 확인해보세요." />}
+      {topic && topic.items.length > 0 && <DocumentList items={topic.items} setView={setView} />}
+    </section>
+  );
+}
+
+function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) => void }) {
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [interest, setInterest] = useState<InterestStateResponse | null>(null);
+
+  useEffect(() => {
+    void api.dashboard().then(setDashboard).catch(() => undefined);
+    void api.interestState().then(setInterest).catch(() => undefined);
+  }, [api]);
+
+  const ranks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
+
+  return (
+    <section>
+      <Header title="토픽 맵" subtitle="현재 관심 경로와 인접 토픽, 추천 근거를 함께 확인합니다." />
+      <div className="topicScreen">
+        <TraceBoard ranks={ranks} cards={dashboard?.cards ?? []} setView={setView} />
+        <aside className="topicSide">
+          <div className="insightPanel">
+            <PanelHeading icon={<Activity size={16} />} title="Interest buckets" />
+            <div className="interestList">
+              {(interest?.topics ?? []).slice(0, 7).map((topic) => (
+                <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}`}>
+                  {topic.label}<b>{bucketLabel(topic.bucket)}</b>
+                </span>
+              ))}
+            </div>
+          </div>
+          <TopicRanks ranks={ranks} setView={setView} />
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function TraceBoard({
+  ranks,
+  cards,
+  setView
+}: {
+  ranks: TopicRank[];
+  cards: RecommendationCard[];
+  setView: (view: View) => void;
+}) {
+  const trace = [
+    { label: "Computer Science", short: "CS", tone: "root", meta: "기준", weight: 0.32 },
+    { label: "Artificial Intelligence", short: "AI", tone: "core", meta: "현재", weight: 0.82 },
+    { label: "Information Retrieval", short: "IR", tone: "core", meta: "활성", weight: 0.71 },
+    { label: "Retrieval-Augmented Generation", short: "RAG", tone: "leaf", meta: "리프", weight: 0.64 },
+    { label: "Agentic Search", short: "Agentic Search", tone: "active", meta: "확장", weight: 0.58 }
+  ];
+  const adjacent = ranks.slice(0, 4);
+  const activeLeaf = trace[trace.length - 1];
+
+  return (
+    <div className="traceBoard">
+      <div className="traceSummary panel">
+        <div className="traceSummaryHead">
+          <div>
+            <span className="eyebrow">현재 경로</span>
+            <h2>AI 기반 검색 에이전트</h2>
+          </div>
+          <div className="leafBadge">
+            <span>활성 리프</span>
+            <strong>{activeLeaf.short}</strong>
+          </div>
+        </div>
+        <div className="tracePath">
+          {trace.map((node) => (
+            <div key={node.label} className={`traceStep ${node.tone}`}>
+              <div className="traceStepMain">
+                <span>{node.meta}</span>
+                <strong>{node.short}</strong>
+                <small>{node.label}</small>
+              </div>
+              <div className="traceWeight">
+                <i style={{ width: `${node.weight * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="traceDetailGrid">
+        <div className="panel traceEvidence">
+          <PanelHeading icon={<BarChart3 size={16} />} title="추천 근거" />
+          <div className="evidenceRows">
+            {cards.slice(0, 4).map((card, index) => (
+              <button key={card.recommendation_id} onClick={() => setView({ name: "document", documentId: card.document_id })}>
+                <b>{String(index + 1).padStart(2, "0")}</b>
+                <span>
+                  <strong>{card.title}</strong>
+                  <small>{card.source_name} · {slotLabel(card.slot_type)} · {formatDate(card.published_at)}</small>
+                </span>
+                <em>{card.related_topics.slice(0, 2).map((topic) => topic.label).join(" / ")}</em>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel adjacentPanel">
+          <PanelHeading icon={<Network size={16} />} title="인접 후보" />
+          <div className="adjacentList">
+            {adjacent.map((rank) => (
+              <button key={rank.topicId} onClick={() => setView({ name: "topic", topicId: rank.topicId, label: rank.label })}>
+                <span>{rank.label}</span>
+                <b>{rank.count}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RankingView({ api, setView }: { api: InsightApi; setView: (view: View) => void }) {
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+
+  useEffect(() => {
+    void api.dashboard().then(setDashboard).catch(() => undefined);
+  }, [api]);
+
+  return (
+    <section>
+      <Header title="추천 랭킹" subtitle="오늘 추천 큐를 순위, 슬롯, 출처 기준으로 훑어봅니다." />
+      {!dashboard ? <Loading label="랭킹을 계산하는 중" /> : (
+        <div className="rankScreen">
+          <div className="rankTable panel">
+            {dashboard.cards.map((card, index) => (
+              <button key={card.recommendation_id} onClick={() => setView({ name: "document", documentId: card.document_id })}>
+                <b>{String(index + 1).padStart(2, "0")}</b>
+                <span className={`slot ${card.slot_type}`}>{slotLabel(card.slot_type)}</span>
+                <strong>{card.title}</strong>
+                <small>{card.source_name} · {formatDate(card.published_at)}</small>
+              </button>
+            ))}
+          </div>
+          <aside className="insightRail">
+            <SlotBars dashboard={dashboard} />
+            <SourceMix rows={buildSourceMix(dashboard.cards)} />
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) => void }) {
+  const [saved, setSaved] = useState<DocumentSummary[]>([]);
+  const [hidden, setHidden] = useState<DocumentSummary[]>([]);
+
+  useEffect(() => {
+    void api.savedDocuments().then((res) => setSaved(res.items)).catch(() => undefined);
+    void api.hiddenDocuments().then((res) => setHidden(res.items)).catch(() => undefined);
+  }, [api]);
+
+  return (
+    <section>
+      <Header title="보관함" subtitle="저장한 문서와 숨긴 문서를 추천 큐와 분리해서 관리합니다." />
+      <div className="libraryScreen">
+        <div className="panel libraryHero">
+          <Bookmark size={26} />
+          <div>
+            <h2>{saved.length} saved · {hidden.length} hidden</h2>
+            <p>명시 피드백은 다음 추천 캐시를 무효화하고 베이지안 관심 상태에 반영됩니다.</p>
+          </div>
+        </div>
+        <div className="libraryColumns">
+          <div className="panel">
+            <h2>저장한 문서</h2>
+            {saved.length === 0 ? <p className="muted">저장한 문서가 없습니다. 추천 카드에서 북마크를 눌러보세요.</p> : <DocumentList items={saved} setView={setView} />}
+          </div>
+          <div className="panel">
+            <h2>숨긴 문서</h2>
+            {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SettingsView({ api, setView, showToast }: { api: InsightApi; setView: (view: View) => void; showToast: (toast: Toast) => void }) {
+  const [interest, setInterest] = useState<InterestStateResponse | null>(null);
+  const [saved, setSaved] = useState<DocumentSummary[]>([]);
+  const [hidden, setHidden] = useState<DocumentSummary[]>([]);
+
+  useEffect(() => {
+    void api.interestState().then(setInterest).catch(() => undefined);
+    void api.savedDocuments().then((res) => setSaved(res.items)).catch(() => undefined);
+    void api.hiddenDocuments().then((res) => setHidden(res.items)).catch(() => undefined);
+  }, [api]);
+
+  async function logout() {
+    const refreshToken = await tokenStore.getRefreshToken();
+    await api.logout(refreshToken).catch(() => undefined);
+    await tokenStore.clearTokens();
+    setView({ name: "auth" });
+  }
+
+  return (
+    <section>
+      <Header title="설정과 피드백" subtitle="관심 상태, 저장/숨김 문서, 동의 상태를 관리합니다." />
+      <div className="settingsGrid">
+        <div className="panel">
+          <h2>관심 상태</h2>
+          {!interest || interest.topics.length === 0 ? <p className="muted">아직 관심 상태가 쌓이지 않았습니다.</p> : (
+            <div className="interestList">
+              {interest.topics.map((topic) => <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}`}>{topic.label}<b>{bucketLabel(topic.bucket)}</b></span>)}
+            </div>
+          )}
+        </div>
+        <div className="panel">
+          <h2>저장한 문서</h2>
+          {saved.length === 0 ? <p className="muted">저장한 문서가 없습니다.</p> : <DocumentList items={saved} setView={setView} />}
+        </div>
+        <div className="panel">
+          <h2>숨긴 문서</h2>
+          {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
+        </div>
+        <div className="panel sidePanel">
+          <h2>동의 관리</h2>
+          <button onClick={() => void api.revokeConsent().then(() => { showToast({ tone: "ok", text: "동의가 철회되었습니다." }); setView({ name: "onboarding", me: null }); })}>
+            <Trash2 size={16} /> 동의 철회
+          </button>
+          <button onClick={() => void logout()}><LogOut size={16} /> 로그아웃</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Header({ title, subtitle, children }: { title: string; subtitle: string; children?: React.ReactNode }) {
+  return (
+    <header className="header">
+      <div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
+      <div className="headerActions">{children}</div>
+    </header>
+  );
+}
+
+function Loading({ label }: { label: string }) {
+  return <div className="loading"><Loader2 className="spin" size={22} /> {label}</div>;
+}
+
+function Empty({ title, body }: { title: string; body: string }) {
+  return <div className="empty"><h2>{title}</h2><p>{body}</p></div>;
+}
+
+function DocumentList({ items, setView }: { items: DocumentSummary[]; setView: (view: View) => void }) {
+  return (
+    <div className="docList">
+      {items.map((item) => (
+        <button key={item.document_id} onClick={() => setView({ name: "document", documentId: item.document_id })}>
+          <strong>{item.title}</strong>
+          <span>{item.source_name} · {formatDate(item.published_at)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+async function pollColdStart(api: InsightApi, requestId: UUID): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 60_000) {
+    const status = await api.coldStartStatus(requestId);
+    if (status.status === "completed" && status.dashboard_ready) return;
+    if (status.status === "failed") return;
+    await new Promise((resolve) => window.setTimeout(resolve, window.__INSIGHT_DEMO_MODE__ ? 500 : 1000));
+  }
+}
+
+function toggleSet<T>(set: Set<T>, setter: (next: Set<T>) => void, value: T) {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  setter(next);
+}
+
+function messageForError(err: unknown): string {
+  const maybe = err as Partial<ApiError>;
+  return maybe.message || "처리 중 문제가 발생했습니다.";
+}
+
+function slotLabel(slot: string): string {
+  return {
+    core: "중심",
+    adjacent: "인접",
+    discovery: "탐색",
+    fallback_adjacent: "대체",
+    fallback_trend: "트렌드"
+  }[slot] ?? slot;
+}
+
+function sourceTypeLabel(sourceType: string): string {
+  return {
+    academic: "논문",
+    vendor_blog: "블로그",
+    tech_news: "뉴스"
+  }[sourceType] ?? sourceType;
+}
+
+function sourceInitials(sourceName: string): string {
+  return sourceName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+}
+
+function buildTopicRanks(cards: RecommendationCard[]): TopicRank[] {
+  const map = new Map<UUID, TopicRank>();
+  for (const card of cards) {
+    for (const topic of card.related_topics) {
+      const current = map.get(topic.topic_id);
+      map.set(topic.topic_id, {
+        topicId: topic.topic_id,
+        label: topic.label,
+        count: (current?.count ?? 0) + 1
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+function buildSourceMix(cards: RecommendationCard[]): Array<{ label: string; count: number }> {
+  const labels: Record<string, string> = {
+    academic: "논문",
+    vendor_blog: "블로그",
+    tech_news: "뉴스"
+  };
+  const map = new Map<string, number>();
+  for (const card of cards) {
+    const label = labels[card.source_type] ?? card.source_type;
+    map.set(label, (map.get(label) ?? 0) + 1);
+  }
+  return [...map.entries()].map(([label, count]) => ({ label, count }));
+}
+
+function percent(value: number, total: number): number {
+  return Math.round((value / total) * 100);
+}
+
+function bucketLabel(bucket: string): string {
+  return { high: "높음", medium: "보통", low: "낮음", neutral: "중립" }[bucket] ?? bucket;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(new Date(value));
+}

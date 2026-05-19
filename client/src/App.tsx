@@ -972,6 +972,20 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
   }, [api]);
 
   const ranks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
+  const bucketRows = useMemo(() => {
+    if (interest?.topics.length) {
+      return interest.topics.slice(0, 5).map((topic) => ({
+        id: `${topic.cso_topic_id ?? topic.leaf_topic_id}`,
+        label: topic.label,
+        value: bucketLabel(topic.bucket)
+      }));
+    }
+    return ranks.slice(0, 5).map((rank) => ({
+      id: rank.topicId,
+      label: rank.label,
+      value: String(rank.count)
+    }));
+  }, [interest, ranks]);
 
   return (
     <section>
@@ -982,9 +996,9 @@ function TopicsView({ api, setView }: { api: InsightApi; setView: (view: View) =
           <div className="insightPanel">
             <PanelHeading icon={<Activity size={16} />} title="Interest buckets" />
             <div className="interestList">
-              {(interest?.topics ?? []).slice(0, 5).map((topic) => (
-                <span key={`${topic.cso_topic_id ?? topic.leaf_topic_id}`}>
-                  {topic.label}<b>{bucketLabel(topic.bucket)}</b>
+              {bucketRows.map((topic) => (
+                <span key={topic.id}>
+                  {topic.label}<b>{topic.value}</b>
                 </span>
               ))}
             </div>

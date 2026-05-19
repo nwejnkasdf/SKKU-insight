@@ -36,7 +36,8 @@
 
 ### Phase 2 — 추천 핵심 (Phase 1 후)
 - **A7. leaf-lifecycle + traversal** ✅ — `LifecycleEvaluator` D 하이브리드 + `TraversalEngine` 5 operation (extend/retract/split/archive/**merge** 신규) + 3단계 강등 (active→stale→retract→archive) + Strict 검증 (confidence ≥0.6 + supporting ≥3 + trace_anchor + label dedup) + LLM 5 프롬프트 (identify_emerging/evaluate_merges/retract_reposition/split_dispatch/trace_merge_verify) + `topic_lifecycle.toml` + INTEREST_PROPAGATION_ENABLED=true 토글 (FR-14~16). alembic 0005 (UserCSOTraversal.merged_into_trace_id + ck_collection_job_type P2-21 해소) + 47 unit test + Codex 3 라운드 audit 23건 fix. 7-commit PR-stack (2026-05-17)
-- **A8. recommendation** — core/adjacent/discovery 후보 생성, fallback, Cold-start LLM, 랭킹 (FR-35~45, FR-26) — **다음 작업**
+- **A8. recommendation** ✅ — core/adjacent/discovery 후보 생성, fallback, Cold-start LLM, 랭킹 (FR-35~45, FR-26). [PR #23](https://github.com/nwejnkasdf/SKKU-insight/pull/23) 7-commit PR-stack + Codex 3 라운드 audit + 실 GPT-5.5 통합 시연 검증 (2026-05-17)
+- **A8-v2. discovery pivot** ✅ — discovery slot 2 본질 pivot: "trust=high trend" → "Fusion 1 (archive × current cross-product) + Reincarnation 1 (`score_tail >= 0.6` archived trace 부활)". SRS FR-41 "잠재적으로 관심 있을 수 있는" 의도 회복. core 5 + adjacent 3 그대로. UserProfile ORM (10 컬럼, daily 19 UTC LLM cron 생성) + `app/profile/` 5 파일 + `_build_discovery_pools` per-source fallback + traversal queries 3 신규. [PR #25](https://github.com/nwejnkasdf/SKKU-insight/pull/25) merge `63f2cdde` (2026-05-19) — Codex R1 audit (Critical 2 + Suggested 7 + Nit 2) + R1 fix 7건 + P2-26~29 backlog + tests/profile/ 57 passed + WSL docker compose 통합 시연 통과
 
 ### Phase 3 — UI (Phase 2 후 병렬)
 - **A9. electron-client** — UI-01~05, API 연동, safeStorage 토큰 관리, 한국어 i18n

@@ -725,9 +725,9 @@ function SignalOverview({
         <small>{activeTraceCount > 0 ? `${activeTraceCount}개 trace 활성` : "trace 생성 대기"} · {interest?.updated_at ? formatDate(interest.updated_at) : "초기 상태"}</small>
       </div>
       <div className="signalStats">
-        <span><b>{dashboard.cards.length}</b> 추천</span>
-        <span><b>{trackedTopics.length || topicCount}</b> 관심</span>
-        <span><b>{dashboard.cold_start ? "활성" : "종료"}</b> 초기</span>
+        <span title="현재 추천 큐에 표시되는 문서 수"><b>{dashboard.cards.length}</b><em>추천 문서</em></span>
+        <span title="관심 상태에서 추적 중인 토픽 수"><b>{trackedTopics.length || topicCount}</b><em>추적 관심</em></span>
+        <span title="현재 활성 상태인 관심 경로 수"><b>{activeTraceCount}</b><em>활성 경로</em></span>
       </div>
     </div>
   );

@@ -911,6 +911,7 @@ function DocumentView({
   const queueIndex = queueCards.findIndex((card) => card.document_id === documentId);
   const previousCard = queueIndex > 0 ? queueCards[queueIndex - 1] : null;
   const nextCard = queueIndex >= 0 && queueIndex < queueCards.length - 1 ? queueCards[queueIndex + 1] : null;
+  const queuePosition = queueIndex >= 0 && queueCards.length > 0 ? `${queueIndex + 1}/${queueCards.length}` : "큐";
   const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
   const matchedTrace =
     traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
@@ -1008,12 +1009,11 @@ function DocumentView({
       <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`}>
         <div className="documentHeaderNav" aria-label="추천 문서 이동">
           <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
-            <ArrowLeft size={16} />
-            <span><b>이전 문서</b><small>{previousCard?.title ?? "처음 문서"}</small></span>
+            <b>이전</b>
           </button>
+          <em title="추천 큐 위치">{queuePosition}</em>
           <button disabled={!nextCard} title={nextCard?.title ?? "추천 큐의 마지막입니다"} onClick={() => openQueuedDocument(nextCard)}>
-            <ArrowRight size={16} />
-            <span><b>다음 문서</b><small>{nextCard?.title ?? "마지막 문서"}</small></span>
+            <b>다음</b>
           </button>
         </div>
       </Header>

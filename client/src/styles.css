@@ -1898,52 +1898,50 @@ select:focus {
 }
 
 .documentHeaderNav {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
-  gap: 8px;
-  width: min(420px, 42vw);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding: 4px;
+  background: #eef1ec;
+  border: 1px solid #dfe6df;
+  border-radius: 999px;
 }
 
 .documentHeaderNav button {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  min-height: 48px;
-  padding: 8px 10px;
+  place-items: center;
+  min-height: 32px;
+  padding: 0 14px;
   color: var(--text);
-  background: var(--surface-subtle);
-  border: 1px solid #e0e5df;
-  border-radius: 8px;
-  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  text-align: center;
 }
 
 .documentHeaderNav button:hover:not(:disabled) {
+  color: var(--accent);
   background: #ffffff;
-  border-color: var(--line-strong);
-}
-
-.documentHeaderNav span {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.documentHeaderNav b,
-.documentHeaderNav small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .documentHeaderNav b {
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.documentHeaderNav small {
-  color: var(--soft);
-  font-size: 11px;
+.documentHeaderNav em {
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .documentHeaderNav button:disabled {

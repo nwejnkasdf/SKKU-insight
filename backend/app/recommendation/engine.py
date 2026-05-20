@@ -31,6 +31,7 @@ from app.collection.dedup import normalize_title
 from app.config import Settings
 from app.contracts import (
     ContentType,
+    EventType,
     SentinelSource,
     SlotType,
     TopicChip,
@@ -48,6 +49,7 @@ from app.db.models import (
     SavedDocument,
     Source,
     User,
+    UserEvent,
     UserInterestState,
 )
 from app.interest.config_loader import InterestParams
@@ -736,33 +738,16 @@ async def _fetch_hidden_documents(
 async def _fetch_not_interested_documents(
     db: AsyncSession, user_id: UUID, document_ids: list[UUID]
 ) -> set[UUID]:
-    """document_ids 중 사용자가 관심 없음으로 마킹한 토픽에 걸리는 문서."""
+    """document_ids 중 문서 단위 관심 없음으로 숨겨진 문서."""
     if not document_ids:
         return set()
-    stmt = select(DocumentTopic.document_id).where(
-        DocumentTopic.document_id.in_(document_ids),
+    stmt = select(HiddenDocument.document_id).where(
+        HiddenDocument.user_id == user_id,
+        HiddenDocument.document_id.in_(document_ids),
         exists().where(
-            NotInterestedTopic.user_id == user_id,
-            or_(
-                and_(
-                    NotInterestedTopic.cso_topic_id.is_not(None),
-                    NotInterestedTopic.leaf_topic_id.is_(None),
-                    NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
-                ),
-                and_(
-                    NotInterestedTopic.cso_topic_id.is_(None),
-                    NotInterestedTopic.leaf_topic_id.is_not(None),
-                    NotInterestedTopic.leaf_topic_id
-                    == DocumentTopic.leaf_topic_id,
-                ),
-                and_(
-                    NotInterestedTopic.cso_topic_id.is_not(None),
-                    NotInterestedTopic.leaf_topic_id.is_not(None),
-                    NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
-                    NotInterestedTopic.leaf_topic_id
-                    == DocumentTopic.leaf_topic_id,
-                ),
-            ),
+            UserEvent.user_id == user_id,
+            UserEvent.document_id == HiddenDocument.document_id,
+            UserEvent.event_type == EventType.NOT_INTERESTED.value,
         ),
     )
     rows = (await db.execute(stmt)).scalars().all()

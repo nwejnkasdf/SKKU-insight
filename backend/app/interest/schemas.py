@@ -94,11 +94,11 @@ class HideFeedbackRequest(BaseModel):
 
 
 class NotInterestedRequest(BaseModel):
-    """토픽 또는 문서 단위 명시 거부.
+    """문서 단위 관심 없음 또는 토픽 단위 분야 줄이기.
 
     cso_topic_id / leaf_topic_id / document_id 중 1개 이상 필수. 셋 다 None 이면 422.
-    document_id 단독 시 service 가 DocumentTopic 최고 confidence 토픽을 NotInterestedTopic 에
-    INSERT (하이브리드, 정렬 2).
+    document_id 단독 시 해당 문서만 추천 큐에서 제외하고 토픽 posterior 는 변경하지 않는다.
+    cso_topic_id / leaf_topic_id 직접 지정 시에만 토픽 선호도 감소로 처리한다.
     """
 
     cso_topic_id: UUID | None = None

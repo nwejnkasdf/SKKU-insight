@@ -4,9 +4,8 @@ case 1: event.cso_topic_id / leaf_topic_id 직접 지정 → 100% 단일 토픽.
 case 2: document_id 만 → DocumentTopic 모든 row confidence 정규화 분배 (P1-4).
 case 3: 토픽도 문서도 없음 → 빈 list (event INSERT 만, posterior skip).
 
-not-interested 하이브리드 (정렬 2):
-- Bayesian update 는 본 함수가 반환하는 분배 (case 2 면 모든 토픽).
-- NotInterestedTopic INSERT 는 service.py 가 별도로 최고 confidence 1 row 만.
+not_interested 문서 단위 요청은 service.py 에서 posterior 갱신을 우회한다.
+토픽 단위 "분야 줄이기" 요청만 case 1 경로로 점수에 반영한다.
 """
 from __future__ import annotations
 

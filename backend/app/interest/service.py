@@ -247,6 +247,7 @@ async def _record_user_event(
     client_request_id: str,
     payload_hash: str,
     occurred_at: datetime,
+    active_day_at_event: int | None = None,
 ) -> UUID | None:
     """UserEvent INSERT (audit log). cap/view 경로도 호출 (베이지안 skip 이어도 record).
 
@@ -268,6 +269,7 @@ async def _record_user_event(
             client_request_id=client_request_id,
             payload_hash=payload_hash,
             occurred_at=occurred_at,
+            active_day_at_event=active_day_at_event,
         )
         .on_conflict_do_nothing(index_elements=["user_id", "client_request_id"])
         .returning(UserEvent.event_id)
@@ -504,6 +506,7 @@ async def ingest_event_atomic(
         client_request_id=client_request_id,
         payload_hash=payload_hash,
         occurred_at=occurred_at,
+        active_day_at_event=active_day,
     )
     if event_id is None:
         # race — Redis/DB miss 동시 통과 후 ON CONFLICT 로 한쪽만 INSERT 성공.

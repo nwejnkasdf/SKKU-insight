@@ -218,6 +218,7 @@ class AdminInterestTopicView(BaseModel):
     - **길이 = 1**: 전체 local part 마스킹 fallback (예: `a@gmail.com` → `***@gmail.com`)
 - `POST /admin/users/{user_id}/collection/run-now` 는 동의 활성 사용자에게만 허용한다. 내부적으로 사용자용 `trigger_run_now`와 같은 큐잉 로직을 재사용하므로 같은 사용자에 대해 이미 수집 대기/실행 중이면 409 `collection.already_running` 을 반환한다.
 - `/admin/users` 는 관리자 콘솔의 행 단위 운영 판단을 위해 사용자별 최신 `daily_collect` job 상태와 생성/시작/종료 시각을 함께 반환한다.
+- 관리자 수동 수집은 worker jitter 없이 바로 실행 대기열에 태우며, 콘솔은 `/admin/users` 의 최신 job 상태를 주기적으로 갱신해 `queued/running/succeeded/failed/skipped` 를 행 단위로 표시한다.
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
 
 ## 오류 응답

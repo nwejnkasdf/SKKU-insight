@@ -74,6 +74,7 @@ class RunNowResponse(BaseModel):
 ## 비즈니스 룰
 
 - 일일 수집은 `COLLECTION_CRON` 환경변수에 따라 사용자별로 스케줄. 동일 사용자에 대해 동시 실행 1건만 허용한다. worker 실행 중 Redis `lock:collection:{user_id}`를 확인하고, manual run-now는 최근 2시간 안의 `queued/running` `daily_collect` row도 409로 차단한다.
+- cron fan-out 은 사용자별 deterministic jitter 를 적용하지만, manual run-now 는 관리자/사용자 화면에서 즉시 상태가 `running` 으로 전환되도록 worker jitter 를 적용하지 않는다. 이때 `eta_seconds` 는 큐 등록 직후 상태 반영 예상치로 5초를 반환한다.
 - `CollectionJobView` (admin 응답) 는 `failure_reason` 포함, `CollectionJobPublicView` (사용자 응답) 는 NFR-08 따라 마스킹.
 - 관리자 영역(`/admin/collection/*`) 비즈니스 룰은 [`admin.md §비즈니스 룰`](admin.md) 참조.
 

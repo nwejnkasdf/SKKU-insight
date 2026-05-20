@@ -19,7 +19,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
@@ -29,7 +29,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collection.orchestrator import (
     LLM_SEARCH_SENTINEL_NAME,
-    deterministic_jitter_seconds,
 )
 from app.collection.schemas import (
     CollectionJobMeResponse,
@@ -223,9 +222,7 @@ async def trigger_run_now(
             },
         ) from exc
 
-    today = date.today()
-    eta = deterministic_jitter_seconds(user_id, today) + 5
-    return RunNowResponse(job_id=job.job_id, eta_seconds=eta)
+    return RunNowResponse(job_id=job.job_id, eta_seconds=5)
 
 
 async def _get_recent_pending_job(db: AsyncSession, user_id: UUID) -> CollectionJob | None:

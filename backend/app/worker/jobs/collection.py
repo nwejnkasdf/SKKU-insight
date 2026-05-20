@@ -86,7 +86,9 @@ async def _async_collection_job(
 
         async def _run_one(uid: UUID) -> None:
             async with sem:
-                sleep_for = deterministic_jitter_seconds(uid, today)
+                # Manual run-now should feel immediate in the admin console.
+                # Cron fan-out keeps deterministic jitter to avoid a thundering herd.
+                sleep_for = 0 if is_run_now else deterministic_jitter_seconds(uid, today)
                 if sleep_for > 0:
                     await asyncio.sleep(sleep_for)
                 async with session_factory() as session:

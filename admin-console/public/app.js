@@ -11,6 +11,7 @@ const state = {
   noticeTone: "success",
   collectionBusyUserId: "",
   collectionRowMessages: {},
+  collectionPollTimer: null,
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -136,6 +137,7 @@ async function login(event) {
   } finally {
     state.loading = false;
     render();
+    updateCollectionPolling();
   }
 }
 
@@ -174,6 +176,7 @@ async function logout() {
   }
   clearTokens();
   render();
+  stopCollectionPolling();
 }
 
 async function loadDashboard() {
@@ -198,6 +201,7 @@ async function loadDashboard() {
   } finally {
     state.loading = false;
     render();
+    updateCollectionPolling();
   }
 }
 
@@ -223,7 +227,7 @@ async function runCollectionForUser(userId, email) {
     const label = email ? `${email} · ` : "";
     setCollectionRowMessage(userId, `${label}job ${shortJobId} · 예상 ${eta}초`, "loading");
     await refreshUsersTable();
-    window.setTimeout(refreshUsersTable, Math.min((eta + 15) * 1000, 180000));
+    startCollectionPolling();
   } catch (error) {
     setCollectionRowMessage(userId, messageForError(error), error.status === 409 ? "loading" : "warn");
     try {
@@ -234,6 +238,7 @@ async function runCollectionForUser(userId, email) {
   } finally {
     state.collectionBusyUserId = "";
     renderUsersTableOnly();
+    updateCollectionPolling();
   }
 }
 
@@ -331,6 +336,7 @@ async function refreshUsersTable() {
   state.users = users.items || [];
   reconcileCollectionRowMessages();
   renderUsersTableOnly();
+  updateCollectionPolling();
 }
 
 function renderUsersTableOnly() {
@@ -364,6 +370,41 @@ function reconcileCollectionRowMessages() {
       };
     }
   });
+}
+
+function hasCollectionPollingWork() {
+  if (state.view !== "operations") return false;
+  return state.users.slice(0, 8).some((user) => {
+    const inline = state.collectionRowMessages[user.user_id];
+    return state.collectionBusyUserId === user.user_id
+      || isCollectionInFlight(user)
+      || inline?.tone === "loading";
+  });
+}
+
+function startCollectionPolling() {
+  if (state.collectionPollTimer) return;
+  state.collectionPollTimer = window.setInterval(async () => {
+    try {
+      await refreshUsersTable();
+    } catch {
+      stopCollectionPolling();
+    }
+  }, 5000);
+}
+
+function stopCollectionPolling() {
+  if (!state.collectionPollTimer) return;
+  window.clearInterval(state.collectionPollTimer);
+  state.collectionPollTimer = null;
+}
+
+function updateCollectionPolling() {
+  if (hasCollectionPollingWork()) {
+    startCollectionPolling();
+  } else {
+    stopCollectionPolling();
+  }
 }
 
 function render() {
@@ -637,6 +678,7 @@ function bindApp() {
       state.view = button.getAttribute("data-view") || "operations";
       window.location.hash = state.view === "account" ? "account" : "operations";
       render();
+      updateCollectionPolling();
     });
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {

@@ -19,7 +19,9 @@ import networkx as nx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db.models import DynamicLeafTopic, UserCSOTraversal
+from sqlalchemy import select
+
+from app.db.models import Document, DynamicLeafTopic, UserCSOTraversal
 from app.leaf_lifecycle.protocol import NewLeafCandidate
 from app.leaf_lifecycle.strict_validation import (
     ValidationResult,
@@ -54,13 +56,17 @@ SYSTEM_PROMPT_IDENTIFY = """당신은 학술/기술 큐레이션 어시스턴트
 
 
 def _build_user_prompt(
-    new_documents: list[UUID],
+    new_documents: list[tuple[UUID, str, str]],
     existing_leaves: list[DynamicLeafTopic],
     active_traces: list[UserCSOTraversal],
     *,
     anchor_violations: list[UUID] | None = None,
 ) -> str:
-    """LLM user content. anchor_violations 가 있으면 재호출 시 보강 안내 추가."""
+    """LLM user content. anchor_violations 가 있으면 재호출 시 보강 안내 추가.
+
+    new_documents 는 (document_id, title, summary) 튜플 — LLM 이 본문 보고 후보를
+    만들 수 있게 메타데이터 동봉.
+    """
     parts: list[str] = []
     parts.append(f"[기존 active leaf list ({len(existing_leaves)})]")
     for leaf in existing_leaves[:50]:
@@ -72,8 +78,9 @@ def _build_user_prompt(
             f"path={[str(p) for p in trace.path]}"
         )
     parts.append(f"[input documents (최근 24h, {len(new_documents)} 건)]")
-    for doc_id in new_documents[:30]:
-        parts.append(f"- {doc_id}")
+    for doc_id, title, summary in new_documents[:30]:
+        snippet = (summary or "")[:240].replace("\n", " ")
+        parts.append(f"- id={doc_id} | {title} | {snippet}")
     if anchor_violations:
         parts.append(
             f"\n[ANCHOR 위반 재호출 — 이전 응답의 다음 cso_topic_id 들은 "
@@ -83,7 +90,25 @@ def _build_user_prompt(
     return "\n".join(parts)
 
 
+async def _fetch_document_summaries(
+    db: AsyncSession, document_ids: list[UUID]
+) -> list[tuple[UUID, str, str]]:
+    """document_id list → (id, title, summary) 튜플 list. 순서는 입력 보존."""
+    if not document_ids:
+        return []
+    rows = (
+        await db.execute(
+            select(Document.document_id, Document.title, Document.summary).where(
+                Document.document_id.in_(document_ids)
+            )
+        )
+    ).all()
+    by_id = {row.document_id: (row.document_id, row.title or "", row.summary or "") for row in rows}
+    return [by_id[d] for d in document_ids if d in by_id]
+
+
 async def _call_llm_identify(
+    db: AsyncSession,
     provider: LLMProvider,
     user_id: UUID,
     new_documents: list[UUID],
@@ -100,8 +125,9 @@ async def _call_llm_identify(
     system = SYSTEM_PROMPT_IDENTIFY.replace(
         "{max_new_leaves_per_day}", str(settings.LEAF_EMERGING_MAX_PER_DAY)
     )
+    document_summaries = await _fetch_document_summaries(db, new_documents)
     user_content = _build_user_prompt(
-        new_documents,
+        document_summaries,
         existing_leaves,
         active_traces,
         anchor_violations=anchor_violations,
@@ -181,7 +207,7 @@ async def identify_emerging_with_validation(
     settings = get_settings()
     # 1차 호출.
     candidates = await _call_llm_identify(
-        provider, user_id, new_documents, existing_leaves, active_traces
+        db, provider, user_id, new_documents, existing_leaves, active_traces
     )
     if not candidates:
         return []
@@ -199,6 +225,7 @@ async def identify_emerging_with_validation(
     retry_cap = settings.LEAF_LLM_ANCHOR_RETRY_CAP
     for _ in range(retry_cap):
         retry_candidates = await _call_llm_identify(
+            db,
             provider,
             user_id,
             new_documents,

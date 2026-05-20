@@ -94,7 +94,17 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["title", "url", "abstract_summary"],
+                "required": [
+                    "title",
+                    "url",
+                    "abstract_summary",
+                    "publisher_domain",
+                    "publisher_label",
+                    "published_at",
+                    "doi",
+                    "canonical_url",
+                    "confidence",
+                ],
                 "properties": {
                     "title": {"type": "string"},
                     "url": {"type": "string"},
@@ -105,7 +115,6 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
                     "doi": {"type": ["string", "null"]},
                     "canonical_url": {"type": ["string", "null"]},
                     "confidence": {"type": "number"},
-                    "raw": {"type": "object"},
                 },
             },
         }
@@ -243,6 +252,36 @@ async def _run_codex_subprocess(
     return stdout, stderr
 
 
+def _try_parse_json_relaxed(text: str) -> Any | None:
+    """LLM 응답에서 JSON object 추출 — markdown ```json``` fence + prefix/suffix prose 흡수."""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        pass
+    s = text.strip()
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+        try:
+            return json.loads(s)
+        except (ValueError, json.JSONDecodeError):
+            pass
+    start = s.find("{")
+    end = s.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(s[start : end + 1])
+        except (ValueError, json.JSONDecodeError):
+            return None
+    return None
+
+
 def _parse_jsonl_events(stdout_bytes: bytes) -> tuple[str, dict[str, int]]:
     """codex JSONL event stream → (final_text, usage_dict).
 
@@ -351,10 +390,7 @@ class CodexOAuthProvider:
 
         parsed_json: Any | None = None
         if response_format == "json":
-            try:
-                parsed_json = json.loads(text)
-            except json.JSONDecodeError:
-                parsed_json = None
+            parsed_json = _try_parse_json_relaxed(text)
         return LLMResponse(
             text=text,
             model=model_name,

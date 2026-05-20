@@ -615,12 +615,12 @@ if not pool:
 
 #### P2 backlog 4건 (decision-backlog P2-26 ~ P2-29)
 
-| ID | 영역 | 미해결 사유 |
+| ID | 영역 | 상태 |
 |---|---|---|
-| P2-26 | `LLMProvider.complete` 시그니처에 `output_schema` 인자 추가 (codex `--output-schema` / openai `response_format=json_schema` strict 모드 API 수준 연결) | protocol 변경이 다른 provider 전체 영향 — 별도 라운드 |
-| P2-27 | `UserCSOTraversal.archived_at_active_day` 별도 컬럼 추가 (A7 execute_archive 가 user.active_day_counter 저장) | alembic migration + A7 archive operation 갱신 — 별도 라운드 |
-| P2-28 | Fusion bridge_cso 가 `cso_candidate_pool` 멤버십 강제 (graph 전체 외) | UserProfile.candidate_pool_ids JSONB 신규 컬럼 또는 engine 시점 재계산 — 별도 라운드 |
-| P2-29 | `RedisKey.recommendation_cache` key 에 `UserProfile.generated_at` 버전 토큰 포함 + read 시점 stale 거부 | multi-worker race window — single-worker 시연 환경 실효 무해, 운영 단계 적용 |
+| P2-26 | `LLMProvider.complete` 시그니처에 `output_schema` 인자 추가 (codex `--output-schema` / openai `response_format=json_schema` strict 모드 API 수준 연결) | **활성** — protocol 변경이 다른 provider 전체 영향 (단 Anthropic 미사용 결정 2026-05-19, codex_oauth/openai/openrouter/mock 만 본격 구현). 후속 세션. |
+| P2-27 | `UserCSOTraversal.archived_at_active_day` 별도 컬럼 추가 (A7 execute_archive 가 user.active_day_counter 저장) | **✅ 해소 (C-44, 2026-05-19, [PR #28](https://github.com/nwejnkasdf/SKKU-insight/pull/28))** — alembic 0008 + ORM + operations.execute_archive(active_day_counter) + execute_merge loser archive + queries COALESCE fallback. |
+| P2-28 | Fusion bridge_cso 가 `cso_candidate_pool` 멤버십 강제 (graph 전체 외) | **✅ 해소 (C-44, 2026-05-19, 옵션 A2 카테고리별, [PR #28](https://github.com/nwejnkasdf/SKKU-insight/pull/28))** — alembic 0008 user_profile.candidate_pool_ids JSONB + CSOTopicCandidatePool schema (fusion/deepening/broadening) + validation 강화. |
+| P2-29 | `RedisKey.recommendation_cache` key 에 `UserProfile.generated_at` 버전 토큰 포함 + read 시점 stale 거부 | **활성** — multi-worker race window. single-worker 시연 환경 실효 무해, 운영 단계 적용. 후속 세션. |
 
 #### 검증 결과 (R1 fix 후)
 

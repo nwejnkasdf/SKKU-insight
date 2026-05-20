@@ -78,7 +78,7 @@ async def apply_decay_to_user(
                 short_beta,
                 last_decay_active_day,
                 boost_applied_at_active_day,
-                GREATEST(0, :current_active_day - last_decay_active_day) AS delta
+                GREATEST(0, CAST(:current_active_day AS INTEGER) - COALESCE(last_decay_active_day, CAST(:current_active_day AS INTEGER))) AS delta
             FROM user_interest_state
             WHERE user_id = :user_id
         ),

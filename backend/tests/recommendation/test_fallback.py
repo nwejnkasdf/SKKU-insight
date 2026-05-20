@@ -24,8 +24,12 @@ _QUOTA = CoreSlotQuota(emerging_leaf_quota_in_core=1)
 
 
 def _card(
-    *, trust: str = "high", topic_match: float = 0.9
+    *,
+    trust: str = "high",
+    topic_match: float = 0.9,
+    topic_confidence: float | None = None,
 ) -> ScoredCandidate:
+    confidence = topic_match if topic_confidence is None else topic_confidence
     return ScoredCandidate(
         document_id=uuid.uuid4(),
         title="t",
@@ -39,7 +43,7 @@ def _card(
         leaf_status=None,
         leaf_label=None,
         cso_label="t",
-        topic_confidence=topic_match,
+        topic_confidence=confidence,
         topic_match=topic_match,
         freshness=1.0,
         trust=1.0,
@@ -50,8 +54,8 @@ def _card(
 def test_fr42_slot_short_borrows_from_donor() -> None:
     """core 부족 시 adjacent 잉여 (core 임계 통과 0.75+) 로 보충."""
     core_pool = [_card(topic_match=0.9) for _ in range(2)]
-    # adjacent 5개 — 3 target 채우고 2 잉여 (모두 0.85, core 임계 통과)
-    adjacent_pool = [_card(topic_match=0.85) for _ in range(5)]
+    # adjacent 6개 — 3 target 채우고 3 잉여 (모두 0.85, core 임계 통과)
+    adjacent_pool = [_card(topic_match=0.85) for _ in range(6)]
     discovery_pool = [_card(topic_match=0.5) for _ in range(2)]
     filled = fill_slots(
         core_pool=core_pool,
@@ -145,3 +149,40 @@ def test_discovery_requires_trust_high() -> None:
     # high 만 1개 통과.
     assert len(filled.discovery) == 1
     assert filled.discovery[0].trust_level == "high"
+
+
+def test_adjacent_threshold_uses_topic_confidence_not_bucketed_match() -> None:
+    """인접 슬롯은 낮은 bucket 점수여도 매핑 confidence 가 높으면 통과한다."""
+    adjacent_pool = [
+        _card(topic_match=0.32, topic_confidence=0.86),
+        _card(topic_match=0.34, topic_confidence=0.88),
+        _card(topic_match=0.36, topic_confidence=0.90),
+    ]
+    filled = fill_slots(
+        core_pool=[],
+        adjacent_pool=adjacent_pool,
+        discovery_pool=[],
+        emerging_pool=[],
+        targets=_TARGETS,
+        thresholds=_THRESHOLDS,
+        quota=_QUOTA,
+    )
+    assert len(filled.adjacent) == 3
+
+
+def test_discovery_threshold_uses_topic_confidence_not_bucketed_match() -> None:
+    """탐색 슬롯도 neutral bucket 때문에 high-confidence trend 를 탈락시키지 않는다."""
+    discovery_pool = [
+        _card(trust="high", topic_match=0.18, topic_confidence=0.90),
+        _card(trust="high", topic_match=0.16, topic_confidence=0.80),
+    ]
+    filled = fill_slots(
+        core_pool=[],
+        adjacent_pool=[],
+        discovery_pool=discovery_pool,
+        emerging_pool=[],
+        targets=_TARGETS,
+        thresholds=_THRESHOLDS,
+        quota=_QUOTA,
+    )
+    assert len(filled.discovery) == 2

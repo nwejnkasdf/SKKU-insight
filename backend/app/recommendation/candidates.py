@@ -75,9 +75,11 @@ class CandidateRow:
     topic_confidence: float
 
 
-def _antijoin_clauses(user_id: UUID) -> list[ColumnElement[bool]]:
+def _antijoin_clauses(
+    user_id: UUID, *, include_not_interested: bool = True
+) -> list[ColumnElement[bool]]:
     """공통 AntiJoin 6종 WHERE clause list — Document.document_id 기준."""
-    return [
+    clauses: list[ColumnElement[bool]] = [
         # 1. NOT IN SavedDocument
         ~exists().where(
             SavedDocument.user_id == user_id,
@@ -88,20 +90,6 @@ def _antijoin_clauses(user_id: UUID) -> list[ColumnElement[bool]]:
             HiddenDocument.user_id == user_id,
             HiddenDocument.document_id == Document.document_id,
         ),
-        # 3. NOT IN NotInterestedTopic — cso_topic_id OR leaf_topic_id 양쪽
-        ~exists().where(
-            NotInterestedTopic.user_id == user_id,
-            or_(
-                and_(
-                    NotInterestedTopic.cso_topic_id.is_not(None),
-                    NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
-                ),
-                and_(
-                    NotInterestedTopic.leaf_topic_id.is_not(None),
-                    NotInterestedTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
-                ),
-            ),
-        ),
         # 4. NOT IN ClickbaitResult.decision='clickbait'
         ~exists().where(
             ClickbaitResult.document_id == Document.document_id,
@@ -110,6 +98,24 @@ def _antijoin_clauses(user_id: UUID) -> list[ColumnElement[bool]]:
         # 5. content_type != 'pseudo_cold_start' (일반 추천 경로에서 제외)
         Document.content_type != "pseudo_cold_start",
     ]
+    if include_not_interested:
+        # 3. NOT IN NotInterestedTopic — cso_topic_id OR leaf_topic_id 양쪽.
+        clauses.append(
+            ~exists().where(
+                NotInterestedTopic.user_id == user_id,
+                or_(
+                    and_(
+                        NotInterestedTopic.cso_topic_id.is_not(None),
+                        NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
+                    ),
+                    and_(
+                        NotInterestedTopic.leaf_topic_id.is_not(None),
+                        NotInterestedTopic.leaf_topic_id == DocumentTopic.leaf_topic_id,
+                    ),
+                ),
+            )
+        )
+    return clauses
 
 
 def _build_base_select() -> Select[Any]:
@@ -199,7 +205,9 @@ async def query_core(
     stmt = _build_base_select().where(
         or_(*or_clauses),
         _filter_leaf_status_valid(),
-        *_antijoin_clauses(user_id),
+        # core 는 이미 active trace 로 확정된 현재 관심사라 not_interested topic 을
+        # 절대 차단으로 쓰지 않는다. 해당 신호는 Bayesian score 하락으로만 반영한다.
+        *_antijoin_clauses(user_id, include_not_interested=False),
     ).order_by(Document.published_at.desc().nulls_last()).limit(limit)
     rows = (await db.execute(stmt)).all()
     return [_row_to_candidate(r) for r in rows]

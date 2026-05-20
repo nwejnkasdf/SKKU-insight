@@ -124,7 +124,10 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
     """active trace 0개 AND UserInterestState 행동 신호 0 (alpha_prior 만)."""
     active_count = await trav_queries.count_active_traces(db, user.user_id)
     if active_count > 0:
-        return await _has_only_cold_start_recommendations(db, user.user_id)
+        # Once an active trace exists, normal ranking should take over. Keeping
+        # the user on pseudo_cold_start rows here blocks newly collected
+        # current/adjacent documents from surfacing after refresh.
+        return False
     # boost_applied_at_active_day 가 있는 row 는 onboarding boost — 행동 신호 X.
     # 행동 신호 = boost 없이 long_alpha 가 prior 보다 큰 row.
     stmt = select(func.count(UserInterestState.state_id)).where(

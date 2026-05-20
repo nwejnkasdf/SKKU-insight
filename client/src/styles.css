@@ -249,6 +249,21 @@ nav button.active::before {
   border-radius: 8px;
 }
 
+.signalMapLines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.signalMapLines line {
+  stroke: #9db2a8;
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .mapLine {
   position: absolute;
   height: 2px;
@@ -325,6 +340,7 @@ nav button.active::before {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 900;
+  transform: translate(-50%, -50%);
 }
 
 .mapNode[data-full-label]:hover::after,

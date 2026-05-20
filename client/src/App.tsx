@@ -677,15 +677,27 @@ function SignalOverview({
     .map(displayTopicChip);
   const trackedTopics = visibleInterestTopics.filter((topic) => topic.bucket !== "neutral");
   const trackedNodes = buildTrackedNodeItems(dashboard, interest, traces);
+  const mapNodes = trackedNodes.slice(0, 5);
+  const mapPoints = mapNodes.map((_, index) => signalMapPoint(index, mapNodes.length));
   const activeTraceCount = traces.filter((trace) => trace.status === "active").length;
   return (
     <div className="signalOverview">
       <div className="signalMap" aria-label="추적 관심사 그래프">
-        {trackedNodes.slice(1).map((node, index) => (
-          <i key={`line-${node.rawLabel}-${index}`} className={`mapLine line${index + 1}`} />
-        ))}
-        {trackedNodes.map((node, index) => (
-          <span key={`${node.rawLabel}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node.rawLabel} data-full-label={node.rawLabel}>
+        <svg className="signalMapLines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {mapNodes.slice(1).map((node, index) => {
+            const from = mapPoints[index];
+            const to = mapPoints[index + 1];
+            return <line key={`line-${node.rawLabel}-${index}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+          })}
+        </svg>
+        {mapNodes.map((node, index) => (
+          <span
+            key={`${node.rawLabel}-${index}`}
+            className={`mapNode ${index === mapNodes.length - 1 ? "active" : ""}`}
+            style={{ left: `${mapPoints[index].x}%`, top: `${mapPoints[index].y}%` }}
+            title={node.rawLabel}
+            data-full-label={node.rawLabel}
+          >
             {compactTopicLabel(node.label)}
           </span>
         ))}
@@ -1667,6 +1679,15 @@ function buildTrackedNodeItems(
   );
 
   return displayTopicNodes(labels).slice(0, 5);
+}
+
+function signalMapPoint(index: number, total: number): { x: number; y: number } {
+  if (total <= 1) return { x: 50, y: 54 };
+  const yPattern = [64, 32, 56, 34, 62];
+  return {
+    x: 12 + (76 * index) / (total - 1),
+    y: yPattern[index] ?? 50
+  };
 }
 
 function buildInterestModelLayers(

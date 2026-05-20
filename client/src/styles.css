@@ -1884,10 +1884,6 @@ select:focus {
   gap: 10px;
 }
 
-.documentQueuePanel {
-  padding: 12px;
-}
-
 .documentActions button {
   justify-content: flex-start;
   min-height: 42px;
@@ -1901,18 +1897,20 @@ select:focus {
   background: var(--accent);
 }
 
-.documentQueueNav {
+.documentHeaderNav {
   display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
   gap: 8px;
+  width: min(420px, 42vw);
 }
 
-.documentQueueNav button {
+.documentHeaderNav button {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 58px;
-  padding: 10px 12px;
+  min-height: 48px;
+  padding: 8px 10px;
   color: var(--text);
   background: var(--surface-subtle);
   border: 1px solid #e0e5df;
@@ -1920,35 +1918,35 @@ select:focus {
   text-align: left;
 }
 
-.documentQueueNav button:hover:not(:disabled) {
+.documentHeaderNav button:hover:not(:disabled) {
   background: #ffffff;
   border-color: var(--line-strong);
 }
 
-.documentQueueNav span {
+.documentHeaderNav span {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.documentQueueNav b,
-.documentQueueNav small {
+.documentHeaderNav b,
+.documentHeaderNav small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.documentQueueNav b {
+.documentHeaderNav b {
   font-size: 13px;
 }
 
-.documentQueueNav small {
+.documentHeaderNav small {
   color: var(--soft);
   font-size: 11px;
 }
 
-.documentQueueNav button:disabled {
+.documentHeaderNav button:disabled {
   opacity: 0.52;
 }
 
@@ -1977,6 +1975,10 @@ select:focus {
   left: 20px;
   width: 2px;
   background: #d4ddd5;
+}
+
+.docTraceMini.single::before {
+  display: none;
 }
 
 .docTraceMini span {

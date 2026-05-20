@@ -911,6 +911,13 @@ function DocumentView({
   const queueIndex = queueCards.findIndex((card) => card.document_id === documentId);
   const previousCard = queueIndex > 0 ? queueCards[queueIndex - 1] : null;
   const nextCard = queueIndex >= 0 && queueIndex < queueCards.length - 1 ? queueCards[queueIndex + 1] : null;
+  const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
+  const matchedTrace =
+    traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
+    traces.find((t) => t.status === "active") ??
+    traces[0];
+  const traceNodes = matchedTrace?.path_labels ?? [];
+  const traceTitle = traceNodes.length > 1 ? "추천 경로" : "매칭 관심사";
 
   function openQueuedDocument(card: RecommendationCard | null) {
     if (!card) return;
@@ -998,7 +1005,18 @@ function DocumentView({
       <button className="backLink" onClick={() => setView({ name: "dashboard" })}>
         <ArrowLeft size={17} /> 추천으로 돌아가기
       </button>
-      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`} />
+      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`}>
+        <div className="documentHeaderNav" aria-label="추천 문서 이동">
+          <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
+            <ArrowLeft size={16} />
+            <span><b>이전 문서</b><small>{previousCard?.title ?? "처음 문서"}</small></span>
+          </button>
+          <button disabled={!nextCard} title={nextCard?.title ?? "추천 큐의 마지막입니다"} onClick={() => openQueuedDocument(nextCard)}>
+            <ArrowRight size={16} />
+            <span><b>다음 문서</b><small>{nextCard?.title ?? "마지막 문서"}</small></span>
+          </button>
+        </div>
+      </Header>
       <div className="documentShell">
         <section className="panel documentHero">
           <div className={`docCover ${sourceTone}`} aria-hidden="true">
@@ -1047,18 +1065,6 @@ function DocumentView({
             </div>
           </article>
           <aside className="documentRail">
-            <div className="panel documentQueuePanel">
-              <div className="documentQueueNav" aria-label="추천 문서 이동">
-                <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
-                  <ArrowLeft size={16} />
-                  <span><b>이전 문서</b><small>{previousCard?.title ?? "처음 문서"}</small></span>
-                </button>
-                <button disabled={!nextCard} title={nextCard?.title ?? "추천 큐의 마지막입니다"} onClick={() => openQueuedDocument(nextCard)}>
-                  <ArrowRight size={16} />
-                  <span><b>다음 문서</b><small>{nextCard?.title ?? "마지막 문서"}</small></span>
-                </button>
-              </div>
-            </div>
             <div className="panel documentActions">
               <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
                 <ExternalLink size={17} /> 원문 열기
@@ -1074,25 +1080,16 @@ function DocumentView({
               </button>
             </div>
             <div className="panel docTraceCard">
-              <PanelHeading icon={<GitBranch size={16} />} title="추천 경로" />
-              <div className="docTraceMini">
-                {(() => {
-                  const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
-                  const matched =
-                    traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
-                    traces.find((t) => t.status === "active") ??
-                    traces[0];
-                  const nodes = matched?.path_labels ?? [];
-                  if (nodes.length === 0) {
-                    return <p className="docTraceEmpty">경로 형성 대기</p>;
-                  }
-                  return nodes.map((node, index) => (
-                    <span key={`${node}-${index}`} className={index === nodes.length - 1 ? "active" : ""} title={node}>
-                      <b>{compactTopicLabel(node)}</b>
-                      <small>{cleanTopicLabel(node)}</small>
-                    </span>
-                  ));
-                })()}
+              <PanelHeading icon={<GitBranch size={16} />} title={traceTitle} />
+              <div className={`docTraceMini ${traceNodes.length <= 1 ? "single" : ""}`}>
+                {traceNodes.length === 0 ? (
+                  <p className="docTraceEmpty">경로 형성 대기</p>
+                ) : traceNodes.map((node, index) => (
+                  <span key={`${node}-${index}`} className={index === traceNodes.length - 1 ? "active" : ""} title={node}>
+                    <b>{compactTopicLabel(node)}</b>
+                    <small>{cleanTopicLabel(node)}</small>
+                  </span>
+                ))}
               </div>
             </div>
           </aside>

@@ -639,7 +639,7 @@ function SignalOverview({
   interest: InterestStateResponse | null;
   traces: TraversalTraceSummary[];
 }) {
-  const visibleSlots = buildVisibleSlots(dashboard.slots, true);
+  const visibleSlots = buildVisibleSlots(dashboard.slots, true, dashboard.cards);
   const maxSlotCount = Math.max(1, ...visibleSlots.map((slot) => slot.actual_count));
   const visibleInterestTopics = (interest?.topics ?? [])
     .map(displayTopicChip);
@@ -724,7 +724,7 @@ function InterestStructurePanel({
 }
 
 function SlotBars({ dashboard }: { dashboard: DashboardResponse }) {
-  const slots = buildVisibleSlots(dashboard.slots, true);
+  const slots = buildVisibleSlots(dashboard.slots, true, dashboard.cards);
   const total = Math.max(1, slots.reduce((sum, slot) => sum + slot.actual_count, 0));
   return (
     <div className="insightPanel">
@@ -1523,20 +1523,42 @@ function slotMeta(actualCount: number, _targetCount: number): string {
   return `${actualCount}`;
 }
 
-function buildVisibleSlots(slots: SlotSummaryItem[], includeEmptyBase: boolean): SlotSummaryItem[] {
+function buildVisibleSlots(
+  slots: SlotSummaryItem[],
+  includeEmptyBase: boolean,
+  cards: RecommendationCard[] = []
+): SlotSummaryItem[] {
   const byType = new Map(slots.map((slot) => [slot.slot_type, slot]));
+  const cardCounts = cards.reduce((counts, card) => {
+    counts.set(card.slot_type, (counts.get(card.slot_type) ?? 0) + 1);
+    return counts;
+  }, new Map<SlotSummaryItem["slot_type"], number>());
   const baseSlots = Object.entries(baseSlotTargets)
     .map(([slotType, targetCount]) => {
       const typedSlot = slotType as SlotSummaryItem["slot_type"];
+      const actualCount = cardCounts.get(typedSlot) ?? byType.get(typedSlot)?.actual_count ?? 0;
       return byType.get(typedSlot) ?? {
         slot_type: typedSlot,
-        actual_count: 0,
+        actual_count: actualCount,
         target_count: targetCount,
         fallback_reason: null
       };
     })
+    .map((slot) => ({ ...slot, actual_count: cardCounts.get(slot.slot_type) ?? slot.actual_count }))
     .filter((slot) => includeEmptyBase || slot.actual_count > 0);
-  const fallbackSlots = slots.filter((slot) => slot.slot_type.startsWith("fallback_") && slot.actual_count > 0);
+  const fallbackSlots = slotOrder
+    .filter((slotType) => slotType.startsWith("fallback_"))
+    .map((slotType) => {
+      const typedSlot = slotType as SlotSummaryItem["slot_type"];
+      const existing = byType.get(typedSlot);
+      return {
+        slot_type: typedSlot,
+        target_count: existing?.target_count ?? 0,
+        actual_count: cardCounts.get(typedSlot) ?? existing?.actual_count ?? 0,
+        fallback_reason: existing?.fallback_reason ?? null
+      };
+    })
+    .filter((slot) => slot.actual_count > 0);
   return [...baseSlots, ...fallbackSlots]
     .sort((a, b) => slotOrder.indexOf(a.slot_type) - slotOrder.indexOf(b.slot_type));
 }
@@ -1638,7 +1660,7 @@ function buildInterestModelLayers(
       key: "slots",
       kicker: "4",
       title: "추천 슬롯",
-      nodes: buildVisibleSlots(dashboard.slots, true)
+      nodes: buildVisibleSlots(dashboard.slots, true, dashboard.cards)
         .map((slot) => ({
           label: slotLabel(slot.slot_type),
           tone: slot.slot_type,

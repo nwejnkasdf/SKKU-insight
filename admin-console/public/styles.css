@@ -482,6 +482,12 @@ button.tableAction {
   overflow-wrap: anywhere;
 }
 
+.collectionStamp {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .collectionInline {
   color: var(--muted);
   font-size: 12px;

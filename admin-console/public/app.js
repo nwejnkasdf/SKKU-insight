@@ -13,6 +13,7 @@ const state = {
   collectionRowMessages: {},
   collectionPollTimer: null,
   collectionTickTimer: null,
+  collectionAutoRefreshTimer: null,
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -178,6 +179,7 @@ async function logout() {
   clearTokens();
   render();
   stopCollectionPolling();
+  stopCollectionAutoRefresh();
 }
 
 async function loadDashboard() {
@@ -203,6 +205,7 @@ async function loadDashboard() {
     state.loading = false;
     render();
     updateCollectionPolling();
+    updateCollectionAutoRefresh();
   }
 }
 
@@ -212,7 +215,6 @@ async function runCollectionForUser(userId, email) {
   state.error = "";
   state.notice = "";
   setMessage("", "success");
-  setCollectionRowMessage(userId, "수집 등록 중", "loading");
   setUserCollectionSnapshot(userId, {
     latest_collection_status: "queued",
     latest_collection_created_at: new Date().toISOString(),
@@ -319,6 +321,17 @@ function collectionTimeText(user) {
   return time ? formatDate(time) : "-";
 }
 
+function collectionStampText(user) {
+  if (isCollectionInFlight(user)) {
+    const start = collectionStartTime(user);
+    return start ? formatDate(start) : "";
+  }
+  if (user.latest_collection_finished_at) {
+    return formatDate(user.latest_collection_finished_at);
+  }
+  return "";
+}
+
 function collectionStatusLabel(status) {
   return {
     queued: "대기",
@@ -350,6 +363,7 @@ function collectionMeta(user) {
         <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
         <em data-collection-time="${escapeHtml(user.user_id)}">${collectionTimeText(user)}</em>
       </span>
+      ${collectionStampText(user) ? `<small class="collectionStamp">${collectionStampText(user)}</small>` : ""}
       ${inline ? `<small class="collectionInline ${inline.tone}">${escapeHtml(inline.text)}</small>` : ""}
     </span>
   `;
@@ -368,6 +382,7 @@ async function refreshUsersTable() {
   reconcileCollectionRowMessages();
   renderUsersTableOnly();
   updateCollectionPolling();
+  updateCollectionAutoRefresh();
 }
 
 function renderUsersTableOnly() {
@@ -391,18 +406,11 @@ function reconcileCollectionRowMessages() {
     const inline = state.collectionRowMessages[user.user_id];
     if (!inline) return;
     if (user.latest_collection_status === "succeeded") {
-      const elapsed = collectionElapsedMs(user);
-      state.collectionRowMessages[user.user_id] = {
-        text: elapsed === null ? "수집 완료" : `수집 완료 · 소요 ${formatDuration(elapsed)}`,
-        tone: "success"
-      };
+      delete state.collectionRowMessages[user.user_id];
     } else if (user.latest_collection_status === "failed") {
       state.collectionRowMessages[user.user_id] = { text: "수집 실패", tone: "warn" };
     } else if (isCollectionInFlight(user)) {
-      state.collectionRowMessages[user.user_id] = {
-        text: user.latest_collection_status === "running" ? "수집 실행 중" : inline.text,
-        tone: "loading"
-      };
+      delete state.collectionRowMessages[user.user_id];
     }
   });
 }
@@ -419,6 +427,7 @@ function hasCollectionPollingWork() {
 
 function startCollectionPolling() {
   if (state.collectionPollTimer) return;
+  stopCollectionAutoRefresh();
   state.collectionPollTimer = window.setInterval(async () => {
     try {
       await refreshUsersTable();
@@ -434,6 +443,7 @@ function stopCollectionPolling() {
   window.clearInterval(state.collectionPollTimer);
   state.collectionPollTimer = null;
   stopCollectionTicking();
+  updateCollectionAutoRefresh();
 }
 
 function startCollectionTicking() {
@@ -466,6 +476,42 @@ function updateCollectionPolling() {
     startCollectionPolling();
   } else {
     stopCollectionPolling();
+  }
+}
+
+function shouldAutoRefreshCollections() {
+  return Boolean(state.accessToken)
+    && state.view === "operations"
+    && !state.loading
+    && !state.collectionPollTimer;
+}
+
+function startCollectionAutoRefresh() {
+  if (state.collectionAutoRefreshTimer) return;
+  state.collectionAutoRefreshTimer = window.setInterval(async () => {
+    if (!shouldAutoRefreshCollections()) {
+      stopCollectionAutoRefresh();
+      return;
+    }
+    try {
+      await refreshUsersTable();
+    } catch {
+      stopCollectionAutoRefresh();
+    }
+  }, 30000);
+}
+
+function stopCollectionAutoRefresh() {
+  if (!state.collectionAutoRefreshTimer) return;
+  window.clearInterval(state.collectionAutoRefreshTimer);
+  state.collectionAutoRefreshTimer = null;
+}
+
+function updateCollectionAutoRefresh() {
+  if (shouldAutoRefreshCollections()) {
+    startCollectionAutoRefresh();
+  } else {
+    stopCollectionAutoRefresh();
   }
 }
 
@@ -741,6 +787,7 @@ function bindApp() {
       window.location.hash = state.view === "account" ? "account" : "operations";
       render();
       updateCollectionPolling();
+      updateCollectionAutoRefresh();
     });
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {

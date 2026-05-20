@@ -681,11 +681,6 @@ function accountView() {
           ${statusRow("토큰 만료", session.expiresAt, session.valid)}
         </div>
       </div>
-      <div class="card">
-        <h2>계정 작업</h2>
-        <p class="muted">현재 세션을 종료하면 관리자 로그인 화면으로 돌아갑니다.</p>
-        <button type="button" id="accountLogoutButton">로그아웃</button>
-      </div>
     </section>
   `;
 }
@@ -795,7 +790,6 @@ function bindApp() {
   });
   bindCollectionButtons();
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
-  document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);
 }
 
 function bindCollectionButtons() {

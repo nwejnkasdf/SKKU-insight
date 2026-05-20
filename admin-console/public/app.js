@@ -223,9 +223,6 @@ async function runCollectionForUser(userId, email) {
     const result = await request(`/admin/users/${userId}/collection/run-now`, {
       method: "POST"
     });
-    const shortJobId = String(result.job_id || "").slice(0, 8);
-    const label = email ? `${email} · ` : "";
-    setCollectionRowMessage(userId, `${label}job ${shortJobId} · 처리 중`, "loading");
     await refreshUsersTable();
     startCollectionPolling();
   } catch (error) {

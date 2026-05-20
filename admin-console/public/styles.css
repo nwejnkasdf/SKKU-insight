@@ -303,6 +303,13 @@ button.iconRefresh {
   border-radius: 8px;
 }
 
+button.tableAction {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .metric {
   font-size: 30px;
   font-weight: 900;
@@ -446,7 +453,7 @@ button.iconRefresh {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) 110px 110px minmax(170px, 0.8fr);
+  grid-template-columns: minmax(190px, 1.2fr) 110px 110px minmax(170px, 0.8fr) 112px;
   gap: 12px;
   align-items: center;
   min-height: 54px;
@@ -474,6 +481,12 @@ button.iconRefresh {
   background: #f7f0e5;
   border: 1px solid #ead8bc;
   border-radius: 8px;
+}
+
+.notice.success {
+  color: var(--accent);
+  background: #e9f1ed;
+  border-color: #cbdad3;
 }
 
 .error {

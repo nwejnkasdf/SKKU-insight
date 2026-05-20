@@ -7,6 +7,8 @@ const state = {
   mustChangePassword: localStorage.getItem("admin_must_change") === "true",
   loading: false,
   error: "",
+  notice: "",
+  collectionBusyUserId: "",
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -99,7 +101,9 @@ async function request(path, options = {}, retry = true) {
     } catch {
       payload = null;
     }
-    const error = new Error(payload?.message || payload?.detail || `HTTP ${response.status}`);
+    const detail = payload?.detail;
+    const message = payload?.message || (typeof detail === "string" ? detail : detail?.message) || `HTTP ${response.status}`;
+    const error = new Error(message);
     error.status = response.status;
     error.payload = payload;
     throw error;
@@ -173,6 +177,7 @@ async function logout() {
 async function loadDashboard() {
   state.loading = true;
   state.error = "";
+  state.notice = "";
   render();
   try {
     const [users, health] = await Promise.all([
@@ -189,6 +194,26 @@ async function loadDashboard() {
     state.error = messageForError(error);
   } finally {
     state.loading = false;
+    render();
+  }
+}
+
+async function runCollectionForUser(userId, email) {
+  if (!userId) return;
+  state.collectionBusyUserId = userId;
+  state.error = "";
+  state.notice = "";
+  render();
+  try {
+    const result = await request(`/admin/users/${userId}/collection/run-now`, {
+      method: "POST"
+    });
+    const shortJobId = String(result.job_id || "").slice(0, 8);
+    state.notice = `${email || "선택 사용자"} 수집 잡을 등록했습니다. job ${shortJobId} · 예상 ${result.eta_seconds ?? 0}초`;
+  } catch (error) {
+    state.error = messageForError(error);
+  } finally {
+    state.collectionBusyUserId = "";
     render();
   }
 }
@@ -297,7 +322,8 @@ function shellView() {
             <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
           </div>
         </header>
-        ${state.error ? `<p class="notice">${state.error}</p>` : ""}
+        ${state.error ? `<p class="notice">${escapeHtml(state.error)}</p>` : ""}
+        ${state.notice ? `<p class="notice success">${escapeHtml(state.notice)}</p>` : ""}
         ${isAccount ? accountView() : operationsView()}
       </section>
     </div>
@@ -436,7 +462,7 @@ function usersTable(users) {
   return `
     <div class="table">
       <div class="row header">
-        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>가입일</span>
+        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>가입일</span><span>수집</span>
       </div>
       ${users.map((user) => `
         <div class="row">
@@ -444,6 +470,13 @@ function usersTable(users) {
           <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
           <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
           <span class="muted">${formatDate(user.created_at)}</span>
+          <button
+            class="tableAction"
+            type="button"
+            data-run-collection="${escapeHtml(user.user_id)}"
+            data-user-email="${escapeHtml(user.email)}"
+            ${!user.consent_active || state.collectionBusyUserId === user.user_id ? "disabled" : ""}
+          >${state.collectionBusyUserId === user.user_id ? "등록 중" : "수집 실행"}</button>
         </div>
       `).join("")}
     </div>
@@ -469,6 +502,14 @@ function bindApp() {
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", loadDashboard);
+  });
+  document.querySelectorAll("[data-run-collection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      runCollectionForUser(
+        button.getAttribute("data-run-collection"),
+        button.getAttribute("data-user-email") || ""
+      );
+    });
   });
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
   document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);

@@ -14,10 +14,13 @@ from datetime import datetime
 from uuid import UUID
 
 import redis.asyncio as aioredis
+from fastapi import HTTPException, status
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contracts import AdminRole, PagedResponse, PageMeta, RedisKey
+from app.collection import service as collection_service
+from app.collection.schemas import RunNowResponse
+from app.contracts import AdminRole, ErrorCode, PagedResponse, PageMeta, RedisKey
 from app.db.models import AdminUser, User, UserConsent
 
 from .schemas import AdminUserListItem
@@ -120,4 +123,52 @@ async def list_users(
     )
 
 
-__all__ = ["list_users", "mask_email"]
+async def trigger_user_collection_now(
+    admin: AdminUser,
+    *,
+    user_id: UUID,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> RunNowResponse:
+    """관리자가 사용자 1명의 문서 수집을 즉시 큐잉한다.
+
+    사용자용 `/collection/jobs/me/run-now`와 같은 service를 재사용하되,
+    관리자 화면에서 오작동하지 않도록 존재/동의 상태만 먼저 확인한다.
+    """
+    _ = admin
+    user = (
+        await db.execute(
+            select(User).where(User.user_id == user_id, User.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": ErrorCode.VALIDATION_ERROR.value,
+                "message": "사용자를 찾을 수 없습니다.",
+            },
+        )
+
+    active_consent = (
+        await db.execute(
+            select(UserConsent.consent_id).where(
+                UserConsent.user_id == user_id,
+                UserConsent.consent_type == "personalization",
+                UserConsent.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if active_consent is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": ErrorCode.VALIDATION_ERROR.value,
+                "message": "개인화 동의가 활성화된 사용자만 수집을 실행할 수 있습니다.",
+            },
+        )
+
+    return await collection_service.trigger_run_now(db, redis, user_id)
+
+
+__all__ = ["list_users", "mask_email", "trigger_user_collection_now"]

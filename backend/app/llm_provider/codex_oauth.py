@@ -94,7 +94,17 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["title", "url", "abstract_summary"],
+                "required": [
+                    "title",
+                    "url",
+                    "abstract_summary",
+                    "publisher_domain",
+                    "publisher_label",
+                    "published_at",
+                    "doi",
+                    "canonical_url",
+                    "confidence",
+                ],
                 "properties": {
                     "title": {"type": "string"},
                     "url": {"type": "string"},
@@ -105,7 +115,6 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
                     "doi": {"type": ["string", "null"]},
                     "canonical_url": {"type": ["string", "null"]},
                     "confidence": {"type": "number"},
-                    "raw": {"type": "object"},
                 },
             },
         }
@@ -243,6 +252,36 @@ async def _run_codex_subprocess(
     return stdout, stderr
 
 
+def _try_parse_json_relaxed(text: str) -> Any | None:
+    """LLM 응답에서 JSON object 추출 — markdown ```json``` fence + prefix/suffix prose 흡수."""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        pass
+    s = text.strip()
+    if s.startswith("```"):
+        lines = s.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        s = "\n".join(lines).strip()
+        try:
+            return json.loads(s)
+        except (ValueError, json.JSONDecodeError):
+            pass
+    start = s.find("{")
+    end = s.rfind("}")
+    if 0 <= start < end:
+        try:
+            return json.loads(s[start : end + 1])
+        except (ValueError, json.JSONDecodeError):
+            return None
+    return None
+
+
 def _parse_jsonl_events(stdout_bytes: bytes) -> tuple[str, dict[str, int]]:
     """codex JSONL event stream → (final_text, usage_dict).
 
@@ -329,19 +368,21 @@ class CodexOAuthProvider:
         # `_` placeholder for unused (signature 호환).
         _ = max_tokens, temperature
 
-        with _maybe_output_schema(response_format) as schema_path:
-            argv = _build_base_argv(
-                model_name=model_name,
-                reasoning_effort=reasoning_effort,
-                output_schema_path=schema_path,
-                enable_search=False,
+        # Codex CLI 0.131.0 exits with code 1 and empty stderr for the generic
+        # open-ended JSON schema. For normal complete(json) calls, rely on the
+        # prompt's JSON-only instruction and parse the final agent message.
+        argv = _build_base_argv(
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            output_schema_path=None,
+            enable_search=False,
+        )
+        async with acquire_slot(user_id):
+            stdout, _stderr = await _run_codex_subprocess(
+                argv,
+                stdin_bytes=prompt.encode("utf-8"),
+                timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
             )
-            async with acquire_slot(user_id):
-                stdout, _stderr = await _run_codex_subprocess(
-                    argv,
-                    stdin_bytes=prompt.encode("utf-8"),
-                    timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
-                )
 
         text, usage = _parse_jsonl_events(stdout)
         prompt_tokens, completion_tokens = _map_usage_to_tokens(usage)
@@ -349,10 +390,7 @@ class CodexOAuthProvider:
 
         parsed_json: Any | None = None
         if response_format == "json":
-            try:
-                parsed_json = json.loads(text)
-            except json.JSONDecodeError:
-                parsed_json = None
+            parsed_json = _try_parse_json_relaxed(text)
         return LLMResponse(
             text=text,
             model=model_name,

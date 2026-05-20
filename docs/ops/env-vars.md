@@ -70,7 +70,7 @@
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `ADMIN_BOOTSTRAP_EMAIL` | `admin@insight.test` | 첫 관리자 이메일 |
+| `ADMIN_BOOTSTRAP_EMAIL` | `admin@skkuinsight.org` | 첫 관리자 이메일 |
 | `ADMIN_BOOTSTRAP_PASSWORD` | (강력 비밀번호) | 첫 로그인 시 강제 변경 |
 | `ADMIN_BOOTSTRAP_ROLE` | `super` | super | operator | read_only |
 
@@ -125,7 +125,7 @@
 | `COLD_START_MAX_PER_USER_LIFETIME` | `3` | 사용자 lifetime cap (cold-start.md §비용 가드). pseudo_cold_start Document 수 기준 — 초과 시 trust=high 트렌드 fallback. |
 | `COLD_START_LLM_TIMEOUT_SECONDS` | `180` | cold-start LLM `complete(high, json)` 호출 timeout. NFR-12 (cache hit 3s) 예외 — 8s SLA 목표지만 cap 180s. 일반 `LLM_REQUEST_TIMEOUT_SECONDS=180` 과 정합. |
 | `COLD_START_DEDUP_WINDOW_DAYS` | `30` | cold-start orchestrator 가 pseudo Document 생성 시 기존 Document 매칭 dedup window (A4 `_DEDUP_WINDOW_DAYS` 와 동일). |
-| `RATE_LIMIT_DASHBOARD_REFRESH` | `1/minute` | `POST /recommendations/dashboard/refresh` slowapi rate limit. 사용자당 1회/분. |
+| `RATE_LIMIT_DASHBOARD_REFRESH` | `20/minute` | `POST /recommendations/dashboard/refresh` slowapi rate limit. 데모 반복 조작을 위해 사용자당 20회/분. |
 | `DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS` | `60` | `GET /documents/{id}/summary` LLM medium 호출 timeout. DB `DocumentSummaryCache` 가 1차 SOR — 본 timeout 은 miss 시 LLM 한계만. |
 | `DOCUMENT_SUMMARY_SOURCE_ABSTRACT_MAX_CHARS` | `500` | LLM 실패 시 generator=`source_abstract` fallback 의 Document.summary 최대 문자 수. |
 
@@ -236,7 +236,7 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:3001,app://insight` | admin-console + electron app |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight` | admin-console + electron app |
 | `API_PUBLIC_BASE` | `http://localhost:8000` | 클라이언트가 호출 |
 | `LOG_LEVEL` | `INFO` | DEBUG / INFO / WARNING |
 | `STRUCTLOG_RENDER` | `json` | json | console |
@@ -328,7 +328,7 @@ CLICKBAIT_MODEL_NAME=ax-4.0-light-dora-clickbait-v1
 CLICKBAIT_ENABLED=false
 
 # === Admin bootstrap ===
-ADMIN_BOOTSTRAP_EMAIL=admin@insight.test
+ADMIN_BOOTSTRAP_EMAIL=admin@skkuinsight.org
 ADMIN_BOOTSTRAP_PASSWORD=Bootstrap-Initial-2026-Strong!
 ADMIN_BOOTSTRAP_ROLE=super
 
@@ -369,7 +369,7 @@ COLD_START_MAX_PER_DAY=100
 COLD_START_MAX_PER_USER_LIFETIME=3
 COLD_START_LLM_TIMEOUT_SECONDS=180
 COLD_START_DEDUP_WINDOW_DAYS=30
-RATE_LIMIT_DASHBOARD_REFRESH=1/minute
+RATE_LIMIT_DASHBOARD_REFRESH=20/minute
 DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS=60
 DOCUMENT_SUMMARY_SOURCE_ABSTRACT_MAX_CHARS=500
 
@@ -433,7 +433,7 @@ SEMANTIC_SCHOLAR_API_KEY=
 CSO_DOWNLOAD_URL=https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv
 
 # === CORS / hosts ===
-CORS_ALLOWED_ORIGINS=http://localhost:3001,app://insight
+CORS_ALLOWED_ORIGINS=http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight
 API_PUBLIC_BASE=http://localhost:8000
 LOG_LEVEL=INFO
 STRUCTLOG_RENDER=json

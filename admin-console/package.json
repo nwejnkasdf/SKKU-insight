@@ -1,0 +1,11 @@
+{
+  "name": "skku-insight-admin-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SKKU InSight admin console",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check public/app.js"
+  }
+}

@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 
 import networkx as nx
 import redis.asyncio as aioredis
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -246,6 +247,7 @@ async def _record_user_event(
     client_request_id: str,
     payload_hash: str,
     occurred_at: datetime,
+    active_day_at_event: int | None = None,
 ) -> UUID | None:
     """UserEvent INSERT (audit log). cap/view 경로도 호출 (베이지안 skip 이어도 record).
 
@@ -267,6 +269,7 @@ async def _record_user_event(
             client_request_id=client_request_id,
             payload_hash=payload_hash,
             occurred_at=occurred_at,
+            active_day_at_event=active_day_at_event,
         )
         .on_conflict_do_nothing(index_elements=["user_id", "client_request_id"])
         .returning(UserEvent.event_id)
@@ -503,6 +506,7 @@ async def ingest_event_atomic(
         client_request_id=client_request_id,
         payload_hash=payload_hash,
         occurred_at=occurred_at,
+        active_day_at_event=active_day,
     )
     if event_id is None:
         # race — Redis/DB miss 동시 통과 후 ON CONFLICT 로 한쪽만 INSERT 성공.
@@ -938,8 +942,6 @@ async def delete_saved_document(
     db: AsyncSession, *, user_id: UUID, document_id: UUID
 ) -> bool:
     """SavedDocument DELETE. 동의 비활성이어도 허용."""
-    from sqlalchemy import delete as sa_delete
-
     stmt = sa_delete(SavedDocument).where(
         SavedDocument.user_id == user_id,
         SavedDocument.document_id == document_id,
@@ -951,6 +953,34 @@ async def delete_saved_document(
 # ============================================================
 # Buffer flush callback — service 가 default 등록.
 # ============================================================
+
+
+async def delete_hidden_document(
+    db: AsyncSession, *, user_id: UUID, document_id: UUID
+) -> bool:
+    stmt = sa_delete(HiddenDocument).where(
+        HiddenDocument.user_id == user_id,
+        HiddenDocument.document_id == document_id,
+    )
+    result = await db.execute(stmt)
+    return (result.rowcount or 0) > 0
+
+
+async def delete_not_interested_for_document(
+    db: AsyncSession, *, user_id: UUID, document_id: UUID
+) -> bool:
+    mappings = await lookup_document_topics(db, document_id)
+    picked = pick_max_confidence(mappings)
+    if picked is None:
+        return False
+    where_clauses = [NotInterestedTopic.user_id == user_id]
+    if picked.cso_topic_id is not None:
+        where_clauses.append(NotInterestedTopic.cso_topic_id == picked.cso_topic_id)
+    if picked.leaf_topic_id is not None:
+        where_clauses.append(NotInterestedTopic.leaf_topic_id == picked.leaf_topic_id)
+    stmt = sa_delete(NotInterestedTopic).where(*where_clauses)
+    result = await db.execute(stmt)
+    return (result.rowcount or 0) > 0
 
 
 async def flush_buffered_events(
@@ -1051,6 +1081,8 @@ __all__ = [
     "IngestResult",
     "InvalidEventTargetError",
     "bootstrap_interest_state",
+    "delete_hidden_document",
+    "delete_not_interested_for_document",
     "delete_saved_document",
     "flush_buffered_events",
     "hide_feedback",

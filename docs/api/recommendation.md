@@ -14,7 +14,7 @@
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/recommendations/dashboard` | UI-02 대시보드 10개 카드 |
-| POST | `/recommendations/dashboard/refresh` | 캐시 폐기 후 재계산 (1/분/사용자) |
+| POST | `/recommendations/dashboard/refresh` | 캐시 폐기 후 재계산 (20/분/사용자, 데모 반복 조작 허용) |
 | GET | `/documents/{document_id}` | UI-04 문서 상세 |
 | GET | `/documents/{document_id}/summary` | 섹션형 생성 요약 (FR-51) |
 

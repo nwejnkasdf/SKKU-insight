@@ -18,7 +18,7 @@ import asyncio
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -45,6 +45,124 @@ logger = logging.getLogger("daily_lifecycle_evaluation_job")
 _RELEASE_LOCK_LUA = (
     "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
 )
+
+
+async def _evaluate_trace_expansion_for_user(
+    db: AsyncSession,
+    engine: DefaultTraversalEngine,
+    user: User,
+) -> tuple[int, int]:
+    """active trace path 끝 자식 cso 중 user_event 임계 통과 자식들을 가져와
+    1개면 `evaluate_extend`, ≥2개면 `evaluate_split` 호출 — daily 18 UTC.
+
+    A7 결정 #14 (extend 임계 `TRACE_EXTEND_MIN_INTERACTIONS`) + #20 (split: 두 자식
+    동시 부상). P1-12 fix (C-45 라운드, 2026-05-20): A7 PR-stack 누락분 — extend /
+    split caller 가 production code 어디서도 호출 안 되던 결함을 본 helper 가 채움.
+
+    Window: active day delta (벽시계 아님 — SRS 시간모델 SOR 정합).
+    Event type: 모든 type 카운트 (사용자 결정 — view/click/save/hide/not_interested 다).
+    NULL active_day_at_event row 는 window 밖으로 취급 (0009 이전 row).
+
+    return: (extended, split) — 각각 extend / split 적용된 trace 수.
+    """
+    settings = get_settings()
+    threshold = settings.TRACE_EXTEND_MIN_INTERACTIONS
+    current_ad = user.active_day_counter or 0
+    active_traces = list(
+        (
+            await db.execute(
+                select(UserCSOTraversal).where(
+                    UserCSOTraversal.user_id == user.user_id,
+                    UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    extended = 0
+    split = 0
+    for trace in active_traces:
+        path = list(trace.path or [])
+        if not path:
+            continue
+        tail_cso = path[-1]
+        # 임계 통과 자식들 (count DESC) — split 가능성 위해 top 2 까지.
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT ctp.cso_topic_id AS child_cso,
+                           COUNT(DISTINCT ue.event_id) AS cnt
+                    FROM cso_topic_parent ctp
+                    LEFT JOIN document_topic dt ON dt.cso_topic_id = ctp.cso_topic_id
+                    LEFT JOIN user_event ue ON ue.document_id = dt.document_id
+                      AND ue.user_id = :user_id
+                      AND ue.active_day_at_event IS NOT NULL
+                      AND (:current_ad - ue.active_day_at_event) <= :window_days
+                    WHERE ctp.parent_cso_topic_id = :tail_cso
+                    GROUP BY ctp.cso_topic_id
+                    HAVING COUNT(DISTINCT ue.event_id) >= :threshold
+                    ORDER BY COUNT(DISTINCT ue.event_id) DESC
+                    LIMIT 2
+                    """
+                ),
+                {
+                    "user_id": user.user_id,
+                    "tail_cso": tail_cso,
+                    "threshold": threshold,
+                    "current_ad": current_ad,
+                    "window_days": 7,
+                },
+            )
+        ).all()
+        candidates = [r.child_cso for r in rows if r.child_cso not in path]
+        if not candidates:
+            continue
+        if len(candidates) == 1:
+            try:
+                ok = await engine.evaluate_extend(trace.trace_id, candidates[0])
+            except Exception:
+                logger.exception(
+                    "evaluate_extend failed user=%s trace=%s child=%s",
+                    user.user_id,
+                    trace.trace_id,
+                    candidates[0],
+                )
+                continue
+            if ok:
+                extended += 1
+                logger.info(
+                    "trace extended user=%s trace=%s tail=%s child=%s",
+                    user.user_id,
+                    trace.trace_id,
+                    tail_cso,
+                    candidates[0],
+                )
+        else:
+            # ≥2 자식 동시 부상 — split (T 가 top1 으로 extend, T' 가 top2 로 fork).
+            try:
+                plan = await engine.evaluate_split(
+                    trace.trace_id, candidates[:2]
+                )
+            except Exception:
+                logger.exception(
+                    "evaluate_split failed user=%s trace=%s children=%s",
+                    user.user_id,
+                    trace.trace_id,
+                    candidates[:2],
+                )
+                continue
+            if plan is not None:
+                split += 1
+                logger.info(
+                    "trace split user=%s trace=%s tail=%s children=%s",
+                    user.user_id,
+                    trace.trace_id,
+                    tail_cso,
+                    candidates[:2],
+                )
+    return extended, split
 
 
 async def _evaluate_trace_demotion_for_user(
@@ -172,6 +290,8 @@ async def _run() -> int:
     total_retracted = 0
     total_archived = 0
     total_leaf_demoted = 0
+    total_extended = 0
+    total_split = 0
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
@@ -200,6 +320,13 @@ async def _run() -> int:
                 continue
             try:
                 engine_inst = DefaultTraversalEngine(db, provider, graph)
+                # P1-12 (C-45, 2026-05-20): expansion 평가 먼저 — active trace 가
+                # path 늘어난 후 demotion 평가가 새 tail 기준으로 동작.
+                ext, spl = await _evaluate_trace_expansion_for_user(
+                    db, engine_inst, user
+                )
+                total_extended += ext
+                total_split += spl
                 r, a = await _evaluate_trace_demotion_for_user(engine_inst, user)
                 total_retracted += r
                 total_archived += a
@@ -207,7 +334,7 @@ async def _run() -> int:
                 total_leaf_demoted += leaf_demoted
                 await db.commit()
                 # (Codex R1 Suggested 6) trace/leaf 변경 후 추천 캐시 invalidate.
-                if r or a or leaf_demoted:
+                if ext or spl or r or a or leaf_demoted:
                     await redis.delete(
                         RedisKey.recommendation_cache(user.user_id)
                     )
@@ -228,12 +355,20 @@ async def _run() -> int:
                         user.user_id,
                     )
     logger.info(
-        "daily_lifecycle_evaluation_job retracted=%d archived=%d leaf_demoted=%d",
+        "daily_lifecycle_evaluation_job extended=%d split=%d retracted=%d archived=%d leaf_demoted=%d",
+        total_extended,
+        total_split,
         total_retracted,
         total_archived,
         total_leaf_demoted,
     )
-    return total_retracted + total_archived + total_leaf_demoted
+    return (
+        total_extended
+        + total_split
+        + total_retracted
+        + total_archived
+        + total_leaf_demoted
+    )
 
 
 def daily_lifecycle_evaluation_job() -> None:

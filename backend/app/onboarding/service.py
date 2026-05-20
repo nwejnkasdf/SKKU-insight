@@ -23,7 +23,7 @@ from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts import ErrorCode, ErrorResponse, RedisKey
@@ -101,14 +101,14 @@ async def post_interests(
             request=request,
         )
     # 3) BroadInterest 존재 검증
-    valid_ids = await _valid_cluster_ids(payload.cso_cluster_ids, db)
-    if len(valid_ids) != len(payload.cso_cluster_ids):
+    cluster_ids = await _valid_cluster_ids(payload.cso_cluster_ids, db)
+    if len(cluster_ids) != len(payload.cso_cluster_ids):
         raise _http_error(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             ErrorCode.ONBOARDING_INVALID_CLUSTER,
             "선택한 클러스터 중 일부가 유효하지 않습니다.",
             request=request,
-            details={"invalid_count": len(payload.cso_cluster_ids) - len(valid_ids)},
+            details={"invalid_count": len(payload.cso_cluster_ids) - len(cluster_ids)},
         )
     # 4) Idempotency-Key 캐시
     cached = await lookup_idempotent_response(
@@ -171,7 +171,7 @@ async def post_interests(
                 db,
                 cso_graph,
                 user=user,
-                cluster_ids=payload.cso_cluster_ids,
+                cluster_ids=cluster_ids,
                 active_day=user.active_day_counter,
                 redis=redis,
             )
@@ -192,7 +192,7 @@ async def post_interests(
     _enqueue_cold_start_job(
         request_id=request_id,
         user_id=user.user_id,
-        cluster_ids=payload.cso_cluster_ids,
+        cluster_ids=cluster_ids,
         user_class=payload.user_class.value,
         locale=payload.locale,
     )
@@ -296,10 +296,25 @@ async def _valid_cluster_ids(
 ) -> list[UUID]:
     if not candidates:
         return []
-    stmt = select(BroadInterest.broad_interest_id).where(
-        BroadInterest.broad_interest_id.in_(candidates)
+    stmt = select(
+        BroadInterest.broad_interest_id,
+        BroadInterest.cso_seed_topic_id,
+    ).where(
+        or_(
+            BroadInterest.broad_interest_id.in_(candidates),
+            BroadInterest.cso_seed_topic_id.in_(candidates),
+        )
     )
-    return [row for row in (await db.execute(stmt)).scalars().all()]
+    rows = (await db.execute(stmt)).all()
+    candidate_to_broad_id: dict[UUID, UUID] = {}
+    for row in rows:
+        candidate_to_broad_id[row.broad_interest_id] = row.broad_interest_id
+        candidate_to_broad_id[row.cso_seed_topic_id] = row.broad_interest_id
+    return [
+        candidate_to_broad_id[candidate]
+        for candidate in candidates
+        if candidate in candidate_to_broad_id
+    ]
 
 
 def _enqueue_cold_start_job(

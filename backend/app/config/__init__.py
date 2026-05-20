@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     CLICKBAIT_ENABLED: bool = False
 
     # === Admin bootstrap ===
-    ADMIN_BOOTSTRAP_EMAIL: str = "admin@insight.test"
+    ADMIN_BOOTSTRAP_EMAIL: str = "admin@skkuinsight.org"
     # 정책 위반 회피: "admin" 금칙어 + email local "admin" 포함 차단 룰 통과해야 함.
     ADMIN_BOOTSTRAP_PASSWORD: str = "Bootstrap-Initial-2026-Strong!"
     ADMIN_BOOTSTRAP_ROLE: AdminRole = AdminRole.SUPER
@@ -169,7 +169,7 @@ class Settings(BaseSettings):
     # A4 _DEDUP_WINDOW_DAYS=30 과 동일 (기존 LLM 검색 결과 재활용).
     COLD_START_DEDUP_WINDOW_DAYS: int = 30
     # POST /recommendations/dashboard/refresh slowapi rate limit.
-    RATE_LIMIT_DASHBOARD_REFRESH: str = "1/minute"
+    RATE_LIMIT_DASHBOARD_REFRESH: str = "20/minute"
     # GET /documents/{id}/summary LLM timeout (초). DB 영속 캐시 (DocumentSummaryCache) 가
     # 1차 SOR — 본 timeout 은 miss 시 LLM 호출 한계.
     DOCUMENT_SUMMARY_LLM_TIMEOUT_SECONDS: int = 60
@@ -309,7 +309,9 @@ class Settings(BaseSettings):
     CSO_DOWNLOAD_URL: str = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv"
 
     # === CORS / hosts / logging ===
-    CORS_ALLOWED_ORIGINS: str = "http://localhost:3001,app://insight"
+    CORS_ALLOWED_ORIGINS: str = (
+        "http://localhost:3001,http://localhost:5173,http://127.0.0.1:5173,app://insight"
+    )
     API_PUBLIC_BASE: str = "http://localhost:8000"
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     STRUCTLOG_RENDER: Literal["json", "console"] = "json"

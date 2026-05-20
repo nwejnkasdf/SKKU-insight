@@ -74,6 +74,13 @@ class UserEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # P1-12 fix (alembic 0009, 2026-05-20): 이벤트 발생 시점 user.active_day_counter
+    # 스냅샷. trace_extend / leaf_lifecycle 의 active day delta window 계산에 사용
+    # (벽시계가 아닌 SRS 시간모델 SOR 정합). 0009 이전 row 는 NULL — caller 는
+    # NULL row 를 window 밖으로 취급.
+    active_day_at_event: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

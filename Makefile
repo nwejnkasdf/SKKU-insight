@@ -1,7 +1,7 @@
 # SKKU InSight — A2 Phase 0b Makefile.
 # 모든 타깃은 repo root 에서 실행. docker compose 실서비스 가정.
 
-.PHONY: help dev demo migrate create-admin seed-cso-cache import-cso reset-password test lint check-all ci-regression-net stop down clean codex-login codex-status
+.PHONY: help dev demo migrate create-admin seed-cso-cache import-cso reset-password test lint check-all ci-regression-net stop down clean codex-login codex-status next-day collection-user weekly-user
 
 help:
 	@echo "주요 타깃:"
@@ -23,6 +23,11 @@ help:
 	@echo "CodexOAuthProvider (LLM_PROVIDER=codex_oauth 시):"
 	@echo "  make codex-login    - 호스트에서 codex login 진행 (~/.codex 토큰 발급)"
 	@echo "  make codex-status   - 컨테이너 안 codex login status 확인"
+	@echo ""
+	@echo "수동 day-by-day 시뮬레이션 (P1-12, docs/ops/manual-day-control.md):"
+	@echo "  make next-day EMAIL=user@x        - active_day+1 + interest_decay + daily_lifecycle (extend/split)"
+	@echo "  make collection-user EMAIL=user@x - 단일 user collection_job (LLM web_search, 60-180s)"
+	@echo "  make weekly-user EMAIL=user@x     - leaf_lifecycle + trace_merge + user_profile (LLM 3-4회)"
 
 dev:
 	docker compose up -d
@@ -119,3 +124,22 @@ codex-login:
 codex-status:
 	@docker compose exec api codex login status || { \
 		echo "[ERR] codex login 만료 또는 binary 없음 — `make codex-login` 후 재시도"; exit 1; }
+
+# === 수동 day-by-day 시뮬레이션 — P1-12 fix 검증 + 시연 narrative (2026-05-20) ===
+# 자세히는 docs/ops/manual-day-control.md.
+
+# EMAIL=user@x 또는 USER_ID=<uuid> 둘 중 하나 필수.
+_target_args = $(if $(EMAIL),--user-email $(EMAIL))$(if $(USER_ID), --user-id $(USER_ID))
+
+_check_target:
+	@if [ -z "$(EMAIL)" ] && [ -z "$(USER_ID)" ]; then \
+		echo "[ERR] EMAIL=user@example.com 또는 USER_ID=<uuid> 중 하나 필요"; exit 1; fi
+
+next-day: _check_target
+	docker compose exec -T api python -m scripts.simulate_user_day next-day $(_target_args)
+
+collection-user: _check_target
+	docker compose exec -T api python -m scripts.simulate_user_day collection $(_target_args)
+
+weekly-user: _check_target
+	docker compose exec -T api python -m scripts.simulate_user_day weekly $(_target_args)

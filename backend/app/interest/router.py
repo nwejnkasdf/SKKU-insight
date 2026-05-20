@@ -25,6 +25,7 @@ from app.contracts import (
     EventType,
     PagedResponse,
     PageMeta,
+    RedisKey,
     SourceType,
 )
 from app.db.models import (
@@ -692,6 +693,47 @@ async def delete_saved(
         db, user_id=user.user_id, document_id=document_id
     )
     await db.commit()
+    await _redis().delete(RedisKey.recommendation_cache(user.user_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/feedback/hidden/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["feedback"],
+    summary="숨김 해제",
+)
+async def delete_hidden(
+    request: Request,
+    document_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    await interest_service.delete_hidden_document(
+        db, user_id=user.user_id, document_id=document_id
+    )
+    await db.commit()
+    await _redis().delete(RedisKey.recommendation_cache(user.user_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/feedback/not-interested/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["feedback"],
+    summary="관심 없음 해제",
+)
+async def delete_not_interested(
+    request: Request,
+    document_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    await interest_service.delete_not_interested_for_document(
+        db, user_id=user.user_id, document_id=document_id
+    )
+    await db.commit()
+    await _redis().delete(RedisKey.recommendation_cache(user.user_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

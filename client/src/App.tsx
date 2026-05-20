@@ -1047,10 +1047,7 @@ function DocumentView({
             </div>
           </article>
           <aside className="documentRail">
-            <div className="panel documentActions">
-              <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
-                <ExternalLink size={17} /> 원문 열기
-              </button>
+            <div className="panel documentQueuePanel">
               <div className="documentQueueNav" aria-label="추천 문서 이동">
                 <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
                   <ArrowLeft size={16} />
@@ -1061,6 +1058,11 @@ function DocumentView({
                   <span><b>다음 문서</b><small>{nextCard?.title ?? "마지막 문서"}</small></span>
                 </button>
               </div>
+            </div>
+            <div className="panel documentActions">
+              <button className="primary" disabled={!externalUrl} onClick={openOriginal}>
+                <ExternalLink size={17} /> 원문 열기
+              </button>
               <button className={feedback.saved ? "isActive" : ""} aria-pressed={feedback.saved} disabled={busyAction !== null} onClick={() => void applyFeedback("save")}>
                 {feedback.saved ? <CheckCircle2 size={16} /> : <Bookmark size={16} />} {feedback.saved ? "저장됨" : "저장"}
               </button>
@@ -1082,11 +1084,12 @@ function DocumentView({
                     traces[0];
                   const nodes = matched?.path_labels ?? [];
                   if (nodes.length === 0) {
-                    return <span>경로 형성 대기</span>;
+                    return <p className="docTraceEmpty">경로 형성 대기</p>;
                   }
                   return nodes.map((node, index) => (
-                    <span key={`${node}-${index}`} className={index === nodes.length - 1 ? "active" : ""}>
-                      {node}
+                    <span key={`${node}-${index}`} className={index === nodes.length - 1 ? "active" : ""} title={node}>
+                      <b>{compactTopicLabel(node)}</b>
+                      <small>{cleanTopicLabel(node)}</small>
                     </span>
                   ));
                 })()}

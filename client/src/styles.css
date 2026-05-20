@@ -1884,6 +1884,10 @@ select:focus {
   gap: 10px;
 }
 
+.documentQueuePanel {
+  padding: 12px;
+}
+
 .documentActions button {
   justify-content: flex-start;
   min-height: 42px;
@@ -1900,9 +1904,6 @@ select:focus {
 .documentQueueNav {
   display: grid;
   gap: 8px;
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
 }
 
 .documentQueueNav button {
@@ -1910,6 +1911,18 @@ select:focus {
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
+  min-height: 58px;
+  padding: 10px 12px;
+  color: var(--text);
+  background: var(--surface-subtle);
+  border: 1px solid #e0e5df;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.documentQueueNav button:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: var(--line-strong);
 }
 
 .documentQueueNav span {
@@ -1935,6 +1948,10 @@ select:focus {
   font-size: 11px;
 }
 
+.documentQueueNav button:disabled {
+  opacity: 0.52;
+}
+
 .documentActions button.isActive {
   color: #ffffff;
   background: var(--accent);
@@ -1949,17 +1966,16 @@ select:focus {
 .docTraceMini {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  align-items: center;
+  gap: 10px;
 }
 
 .docTraceMini::before {
   content: "";
   position: absolute;
-  left: 22px;
-  right: 22px;
-  height: 2px;
+  top: 18px;
+  bottom: 18px;
+  left: 20px;
+  width: 2px;
   background: #d4ddd5;
 }
 
@@ -1967,20 +1983,52 @@ select:focus {
   position: relative;
   z-index: 1;
   display: grid;
-  place-items: center;
-  height: 42px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
   color: var(--muted);
-  background: var(--surface-subtle);
-  border: 1px solid #dce4dd;
-  border-radius: 999px;
   font-size: 12px;
   font-weight: 900;
 }
 
-.docTraceMini span.active {
+.docTraceMini b {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
   color: #ffffff;
+  background: #66746d;
+  border: 1px solid #dce4dd;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.docTraceMini small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docTraceMini span.active b {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.docTraceMini span.active small {
+  color: var(--text);
+}
+
+.docTraceEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .documentBody {

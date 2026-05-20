@@ -509,7 +509,7 @@ function DashboardView({
                   setView={setView}
                   showToast={showToast}
                   onFeedbackApplied={(action, documentId) => {
-                    if (action !== "hide" && action !== "not_interested") return;
+                    if (action !== "hide") return;
                     setDashboard((current) => current ? {
                       ...current,
                       cards: current.cards.filter((item) => item.document_id !== documentId)

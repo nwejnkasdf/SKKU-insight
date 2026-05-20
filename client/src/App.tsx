@@ -898,6 +898,8 @@ function DocumentView({
     });
   }, [detail]);
 
+  const queueCards = useMemo(() => uniqueRecommendationCards(dashboard?.cards ?? []), [dashboard]);
+
   if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;
   if (!detail) return <Loading label="문서를 불러오는 중" />;
 
@@ -906,7 +908,6 @@ function DocumentView({
     .slice(0, 3);
   const sourceTone = detail.source_type;
   const externalUrl = getExternalUrl(detail.canonical_url ?? detail.url);
-  const queueCards = useMemo(() => uniqueRecommendationCards(dashboard?.cards ?? []), [dashboard]);
   const queueIndex = queueCards.findIndex((card) => card.document_id === documentId);
   const previousCard = queueIndex > 0 ? queueCards[queueIndex - 1] : null;
   const nextCard = queueIndex >= 0 && queueIndex < queueCards.length - 1 ? queueCards[queueIndex + 1] : null;

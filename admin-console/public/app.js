@@ -348,7 +348,7 @@ function collectionMeta(user) {
       <span class="collectionLine">
         ${loading ? `<i class="spinner" aria-hidden="true"></i>` : ""}
         <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
-        <em>${collectionTimeText(user)}</em>
+        <em data-collection-time="${escapeHtml(user.user_id)}">${collectionTimeText(user)}</em>
       </span>
       ${inline ? `<small class="collectionInline ${inline.tone}">${escapeHtml(inline.text)}</small>` : ""}
     </span>
@@ -443,8 +443,16 @@ function startCollectionTicking() {
       stopCollectionTicking();
       return;
     }
-    renderUsersTableOnly();
+    updateCollectionElapsedText();
   }, 1000);
+}
+
+function updateCollectionElapsedText() {
+  document.querySelectorAll("[data-collection-time]").forEach((node) => {
+    const userId = node.getAttribute("data-collection-time");
+    const user = state.users.find((item) => item.user_id === userId);
+    if (user) node.textContent = collectionTimeText(user);
+  });
 }
 
 function stopCollectionTicking() {

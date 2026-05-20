@@ -187,6 +187,7 @@ async def _load_cold_start_dashboard(
         params=params,
         config=config,
     )
+    cards = await _with_feedback_flags(db, user.user_id, cards)
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -619,6 +620,7 @@ async def _materialize_cards(
     chip_map = await _fetch_topic_chips(db, doc_ids)
     saved_set = await _fetch_saved_documents(db, user_id, doc_ids)
     hidden_set = await _fetch_hidden_documents(db, user_id, doc_ids)
+    not_interested_set = await _fetch_not_interested_documents(db, user_id, doc_ids)
 
     cards: list[RecommendationCard] = []
     for rec in rows:
@@ -639,10 +641,11 @@ async def _materialize_cards(
                 reason_short=rec.reason or "",
                 published_at=published_dt,
                 thumbnail_url=None,
+                saved=rec.document_id in saved_set,
+                hidden=rec.document_id in hidden_set,
+                not_interested=rec.document_id in not_interested_set,
             )
         )
-    # saved/hidden flag 는 DocumentDetail 응답용 — dashboard card schema 에 부재.
-    _ = saved_set, hidden_set
     return cards
 
 
@@ -728,6 +731,64 @@ async def _fetch_hidden_documents(
     )
     rows = (await db.execute(stmt)).scalars().all()
     return set(rows)
+
+
+async def _fetch_not_interested_documents(
+    db: AsyncSession, user_id: UUID, document_ids: list[UUID]
+) -> set[UUID]:
+    """document_ids 중 사용자가 관심 없음으로 마킹한 토픽에 걸리는 문서."""
+    if not document_ids:
+        return set()
+    stmt = select(DocumentTopic.document_id).where(
+        DocumentTopic.document_id.in_(document_ids),
+        exists().where(
+            NotInterestedTopic.user_id == user_id,
+            or_(
+                and_(
+                    NotInterestedTopic.cso_topic_id.is_not(None),
+                    NotInterestedTopic.leaf_topic_id.is_(None),
+                    NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
+                ),
+                and_(
+                    NotInterestedTopic.cso_topic_id.is_(None),
+                    NotInterestedTopic.leaf_topic_id.is_not(None),
+                    NotInterestedTopic.leaf_topic_id
+                    == DocumentTopic.leaf_topic_id,
+                ),
+                and_(
+                    NotInterestedTopic.cso_topic_id.is_not(None),
+                    NotInterestedTopic.leaf_topic_id.is_not(None),
+                    NotInterestedTopic.cso_topic_id == DocumentTopic.cso_topic_id,
+                    NotInterestedTopic.leaf_topic_id
+                    == DocumentTopic.leaf_topic_id,
+                ),
+            ),
+        ),
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def _with_feedback_flags(
+    db: AsyncSession,
+    user_id: UUID,
+    cards: list[RecommendationCard],
+) -> list[RecommendationCard]:
+    """Dashboard cards 에 저장/숨김/관심 없음 상태를 최신 DB 기준으로 주입."""
+    doc_ids = [card.document_id for card in cards]
+    saved_set = await _fetch_saved_documents(db, user_id, doc_ids)
+    hidden_set = await _fetch_hidden_documents(db, user_id, doc_ids)
+    not_interested_set = await _fetch_not_interested_documents(db, user_id, doc_ids)
+    return [
+        card.model_copy(
+            update={
+                "saved": card.document_id in saved_set,
+                "hidden": card.document_id in hidden_set,
+                "not_interested": card.document_id in not_interested_set,
+            }
+        )
+        for card in cards
+    ]
 
 
 def _dedupe_dashboard_cards(
@@ -1512,6 +1573,7 @@ async def build_dashboard(
         params=params,
         config=config,
     )
+    cards = await _with_feedback_flags(db, user.user_id, cards)
     response = DashboardResponse(
         user_id=user.user_id,
         cards=cards,

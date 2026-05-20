@@ -23,6 +23,9 @@ class RecommendationCard(BaseModel):
     reason_short: str  # 한국어 1 문장 (NFR-03)
     published_at: datetime
     thumbnail_url: str | None = None
+    saved: bool = False
+    hidden: bool = False
+    not_interested: bool = False
 
 
 class SlotSummary(BaseModel):
@@ -59,6 +62,7 @@ class DocumentDetailResponse(BaseModel):
     related_topics: list[TopicChip]
     saved: bool
     hidden: bool
+    not_interested: bool
 
 
 class DocumentSummarySection(BaseModel):

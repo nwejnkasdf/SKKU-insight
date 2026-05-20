@@ -66,7 +66,8 @@ const documents: DocumentDetailResponse[] = [
       "사용자 관심 trace를 검색 쿼리 생성의 중심에 두고, 검색 결과를 문서 단위 추천 후보로 정리하는 방법을 다룹니다.",
     related_topics: [topics[0], topics[5]],
     saved: false,
-    hidden: false
+    hidden: false,
+    not_interested: false
   },
   {
     document_id: mockId("doc-2"),
@@ -80,7 +81,8 @@ const documents: DocumentDetailResponse[] = [
       "긴 컨텍스트 모델을 실제 제품에 넣을 때 평가 세트, 실패 분석, 사용자 피드백 루프를 어떻게 나눌지 설명합니다.",
     related_topics: [topics[0], topics[3]],
     saved: false,
-    hidden: false
+    hidden: false,
+    not_interested: false
   },
   {
     document_id: mockId("doc-3"),
@@ -94,7 +96,8 @@ const documents: DocumentDetailResponse[] = [
       "작은 데모 환경에서 Redis lock, batch flush, worker scheduling으로 응답성과 비용을 같이 지키는 패턴을 정리합니다.",
     related_topics: [topics[1], topics[6]],
     saved: false,
-    hidden: false
+    hidden: false,
+    not_interested: false
   },
   {
     document_id: mockId("doc-4"),
@@ -108,7 +111,8 @@ const documents: DocumentDetailResponse[] = [
       "사용자 이벤트를 Beta-Bernoulli 업데이트로 반영하고, 점수 대신 bucket만 노출하는 개인화 모델을 소개합니다.",
     related_topics: [topics[5], topics[8 % topics.length]],
     saved: false,
-    hidden: false
+    hidden: false,
+    not_interested: false
   },
   {
     document_id: mockId("doc-5"),
@@ -122,7 +126,8 @@ const documents: DocumentDetailResponse[] = [
       "Electron 앱에서 토큰 저장, 외부 링크 열기, 사용자 행동 로그 처리 시 고려할 보안 경계를 설명합니다.",
     related_topics: [topics[2], topics[4]],
     saved: false,
-    hidden: false
+    hidden: false,
+    not_interested: false
   }
 ];
 
@@ -141,12 +146,16 @@ const cards = documents.concat(documents).slice(0, 10).map((document, index) => 
         ? "현재 관심과 한 단계 인접한 토픽입니다."
         : "새로운 방향을 가볍게 탐색하기 좋은 문서입니다.",
   published_at: document.published_at,
-  thumbnail_url: null
+  thumbnail_url: null,
+  saved: false,
+  hidden: false,
+  not_interested: false
 }));
 
 let user: MockUser | null = null;
 let saved = new Set<UUID>();
 let hidden = new Set<UUID>();
+let notInterested = new Set<UUID>();
 let coldStartReady = false;
 
 export class MockInsightApi implements Partial<InsightApi> {
@@ -184,6 +193,7 @@ export class MockInsightApi implements Partial<InsightApi> {
     user = null;
     saved = new Set();
     hidden = new Set();
+    notInterested = new Set();
     coldStartReady = false;
   }
 
@@ -262,7 +272,8 @@ export class MockInsightApi implements Partial<InsightApi> {
     return {
       ...document,
       saved: saved.has(documentId),
-      hidden: hidden.has(documentId)
+      hidden: hidden.has(documentId),
+      not_interested: notInterested.has(documentId)
     };
   }
 
@@ -329,7 +340,7 @@ export class MockInsightApi implements Partial<InsightApi> {
 
   async saveDocument(documentId: UUID): Promise<EventResponse> {
     saved.add(documentId);
-    hidden.delete(documentId);
+    notInterested.delete(documentId);
     return eventResponse();
   }
 
@@ -339,7 +350,7 @@ export class MockInsightApi implements Partial<InsightApi> {
   }
 
   async notInterestedDocument(documentId: UUID): Promise<EventResponse> {
-    hidden.add(documentId);
+    notInterested.add(documentId);
     return eventResponse();
   }
 
@@ -362,7 +373,7 @@ export class MockInsightApi implements Partial<InsightApi> {
   }
 
   async deleteNotInterested(documentId: UUID): Promise<void> {
-    hidden.delete(documentId);
+    notInterested.delete(documentId);
   }
 
   private ensureUser(): MockUser {
@@ -398,7 +409,12 @@ export class MockInsightApi implements Partial<InsightApi> {
 function dashboardResponse(cache: "hit" | "miss"): DashboardResponse {
   return {
     user_id: user?.userId ?? mockId("user-demo"),
-    cards,
+    cards: cards.map((card) => ({
+      ...card,
+      saved: saved.has(card.document_id),
+      hidden: hidden.has(card.document_id),
+      not_interested: notInterested.has(card.document_id)
+    })),
     slots: [
       { slot_type: "core", target_count: 5, actual_count: 5, fallback_reason: null },
       { slot_type: "adjacent", target_count: 3, actual_count: 3, fallback_reason: null },

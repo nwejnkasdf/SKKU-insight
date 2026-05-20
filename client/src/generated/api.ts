@@ -116,6 +116,9 @@ export type RecommendationCard = {
   reason_short: string;
   published_at: string;
   thumbnail_url: string | null;
+  saved: boolean;
+  hidden: boolean;
+  not_interested: boolean;
 };
 
 export type SlotSummary = {
@@ -156,6 +159,7 @@ export type DocumentDetailResponse = {
   related_topics: TopicChip[];
   saved: boolean;
   hidden: boolean;
+  not_interested: boolean;
 };
 
 export type DocumentSummaryResponse = {

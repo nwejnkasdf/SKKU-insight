@@ -527,8 +527,20 @@ function RecommendationCardView({
     .map(displayTopicChip);
   const visibleTopics = displayTopics.slice(0, 2);
   const hiddenTopicCount = Math.max(0, displayTopics.length - visibleTopics.length);
-  const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    saved: card.saved,
+    hidden: card.hidden,
+    notInterested: card.not_interested
+  });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
+
+  useEffect(() => {
+    setFeedback({
+      saved: card.saved,
+      hidden: card.hidden,
+      notInterested: card.not_interested
+    });
+  }, [card.document_id, card.saved, card.hidden, card.not_interested]);
 
   async function eventAndOpen() {
     await api.postEvent({
@@ -847,7 +859,11 @@ function DocumentView({
 
   useEffect(() => {
     if (!detail) return;
-    setFeedback({ saved: detail.saved, hidden: detail.hidden, notInterested: false });
+    setFeedback({
+      saved: detail.saved,
+      hidden: detail.hidden,
+      notInterested: detail.not_interested
+    });
   }, [detail]);
 
   if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;

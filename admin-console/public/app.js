@@ -10,6 +10,7 @@ const state = {
   notice: "",
   noticeTone: "success",
   collectionBusyUserId: "",
+  collectionRowMessages: {},
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -202,12 +203,11 @@ async function loadDashboard() {
 
 async function runCollectionForUser(userId, email) {
   if (!userId) return;
-  const button = findElementByData("run-collection", userId);
   state.collectionBusyUserId = userId;
   state.error = "";
   state.notice = "";
   setMessage("", "success");
-  setCollectionButtonBusy(button, true);
+  setCollectionRowMessage(userId, "수집 등록 중", "loading");
   setUserCollectionSnapshot(userId, {
     latest_collection_status: "queued",
     latest_collection_created_at: new Date().toISOString(),
@@ -220,11 +220,12 @@ async function runCollectionForUser(userId, email) {
     });
     const shortJobId = String(result.job_id || "").slice(0, 8);
     const eta = Number(result.eta_seconds ?? 0);
-    setMessage(`${email || "선택 사용자"} 수집을 등록했습니다. job ${shortJobId} · 예상 ${eta}초`, "success");
+    const label = email ? `${email} · ` : "";
+    setCollectionRowMessage(userId, `${label}job ${shortJobId} · 예상 ${eta}초`, "loading");
     await refreshUsersTable();
     window.setTimeout(refreshUsersTable, Math.min((eta + 15) * 1000, 180000));
   } catch (error) {
-    setMessage(messageForError(error), "warn");
+    setCollectionRowMessage(userId, messageForError(error), error.status === 409 ? "loading" : "warn");
     try {
       await refreshUsersTable();
     } catch {
@@ -232,7 +233,7 @@ async function runCollectionForUser(userId, email) {
     }
   } finally {
     state.collectionBusyUserId = "";
-    setCollectionButtonBusy(findElementByData("run-collection", userId), false);
+    renderUsersTableOnly();
   }
 }
 
@@ -304,40 +305,65 @@ function isCollectionInFlight(user) {
 function collectionMeta(user) {
   const status = user.latest_collection_status || "";
   const time = latestCollectionTime(user);
+  const inline = state.collectionRowMessages[user.user_id];
+  const loading = state.collectionBusyUserId === user.user_id || inline?.tone === "loading" || isCollectionInFlight(user);
   return `
     <span class="collectionMeta" data-collection-meta="${escapeHtml(user.user_id)}">
-      <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
-      <em>${time ? formatDate(time) : "-"}</em>
+      <span class="collectionLine">
+        ${loading ? `<i class="spinner" aria-hidden="true"></i>` : ""}
+        <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
+        <em>${time ? formatDate(time) : "-"}</em>
+      </span>
+      ${inline ? `<small class="collectionInline ${inline.tone}">${escapeHtml(inline.text)}</small>` : ""}
     </span>
   `;
-}
-
-function findElementByData(name, value) {
-  return Array.from(document.querySelectorAll(`[data-${name}]`))
-    .find((element) => element.getAttribute(`data-${name}`) === value) || null;
-}
-
-function setCollectionButtonBusy(button, busy) {
-  if (!button) return;
-  button.disabled = busy || button.dataset.inFlight === "true";
-  button.textContent = busy ? "등록 중" : (button.dataset.inFlight === "true" ? "진행 중" : "수집 실행");
 }
 
 function setUserCollectionSnapshot(userId, snapshot) {
   const user = state.users.find((item) => item.user_id === userId);
   if (!user) return;
   Object.assign(user, snapshot);
-  const node = findElementByData("collection-meta", userId);
-  if (node) node.outerHTML = collectionMeta(user);
+  renderUsersTableOnly();
 }
 
 async function refreshUsersTable() {
   const users = await request("/admin/users?limit=20");
   state.users = users.items || [];
+  reconcileCollectionRowMessages();
+  renderUsersTableOnly();
+}
+
+function renderUsersTableOnly() {
   const mount = document.querySelector("#usersTableMount");
   if (!mount) return;
   mount.innerHTML = usersTable(state.users.slice(0, 8));
   bindCollectionButtons();
+}
+
+function setCollectionRowMessage(userId, text, tone = "loading") {
+  if (text) {
+    state.collectionRowMessages[userId] = { text, tone };
+  } else {
+    delete state.collectionRowMessages[userId];
+  }
+  renderUsersTableOnly();
+}
+
+function reconcileCollectionRowMessages() {
+  state.users.forEach((user) => {
+    const inline = state.collectionRowMessages[user.user_id];
+    if (!inline) return;
+    if (user.latest_collection_status === "succeeded") {
+      state.collectionRowMessages[user.user_id] = { text: "수집 완료", tone: "success" };
+    } else if (user.latest_collection_status === "failed") {
+      state.collectionRowMessages[user.user_id] = { text: "수집 실패", tone: "warn" };
+    } else if (isCollectionInFlight(user)) {
+      state.collectionRowMessages[user.user_id] = {
+        text: user.latest_collection_status === "running" ? "수집 실행 중" : inline.text,
+        tone: "loading"
+      };
+    }
+  });
 }
 
 function render() {
@@ -561,25 +587,39 @@ function usersTable(users) {
       <div class="row header">
         <span>이메일</span><span>동의</span><span>삭제 대기</span><span>최근 수집</span><span>가입일</span><span>작업</span>
       </div>
-      ${users.map((user) => `
-        <div class="row">
-          <strong>${escapeHtml(user.email)}</strong>
-          <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
-          <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
-          ${collectionMeta(user)}
-          <span class="muted">${formatDate(user.created_at)}</span>
-          <button
-            class="tableAction"
-            type="button"
-            data-run-collection="${escapeHtml(user.user_id)}"
-            data-user-email="${escapeHtml(user.email)}"
-            data-in-flight="${isCollectionInFlight(user) ? "true" : "false"}"
-            ${!user.consent_active || state.collectionBusyUserId === user.user_id || isCollectionInFlight(user) ? "disabled" : ""}
-          >${state.collectionBusyUserId === user.user_id ? "등록 중" : (isCollectionInFlight(user) ? "진행 중" : "수집 실행")}</button>
-        </div>
-      `).join("")}
+      ${users.map(userRow).join("")}
     </div>
   `;
+}
+
+function userRow(user) {
+  const busy = state.collectionBusyUserId === user.user_id;
+  const inFlight = isCollectionInFlight(user);
+  const disabled = !user.consent_active || busy || inFlight;
+  const buttonLabel = busy
+    ? `${buttonSpinner()}등록 중`
+    : (inFlight ? `${buttonSpinner()}진행 중` : "수집 실행");
+  return `
+    <div class="row">
+      <strong>${escapeHtml(user.email)}</strong>
+      <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
+      <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
+      ${collectionMeta(user)}
+      <span class="muted">${formatDate(user.created_at)}</span>
+      <button
+        class="tableAction"
+        type="button"
+        data-run-collection="${escapeHtml(user.user_id)}"
+        data-user-email="${escapeHtml(user.email)}"
+        data-in-flight="${inFlight ? "true" : "false"}"
+        ${disabled ? "disabled" : ""}
+      >${buttonLabel}</button>
+    </div>
+  `;
+}
+
+function buttonSpinner() {
+  return `<i class="buttonSpinner" aria-hidden="true"></i>`;
 }
 
 function bindLogin() {

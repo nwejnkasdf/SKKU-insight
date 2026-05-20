@@ -463,6 +463,12 @@ button.tableAction {
 }
 
 .collectionMeta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.collectionLine {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -474,6 +480,56 @@ button.tableAction {
   color: var(--muted);
   font-style: normal;
   overflow-wrap: anywhere;
+}
+
+.collectionInline {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.collectionInline.loading {
+  color: var(--accent-2);
+}
+
+.collectionInline.success {
+  color: var(--accent);
+}
+
+.collectionInline.warn {
+  color: var(--warn);
+}
+
+.spinner,
+.buttonSpinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #c8d3ce;
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 0.75s linear infinite;
+}
+
+.buttonSpinner {
+  width: 13px;
+  height: 13px;
+  border-color: rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+}
+
+.tableAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .row.header {

@@ -8,6 +8,7 @@ const state = {
   loading: false,
   error: "",
   notice: "",
+  noticeTone: "success",
   collectionBusyUserId: "",
   users: [],
   health: null,
@@ -178,6 +179,7 @@ async function loadDashboard() {
   state.loading = true;
   state.error = "";
   state.notice = "";
+  state.noticeTone = "success";
   render();
   try {
     const [users, health] = await Promise.all([
@@ -200,21 +202,37 @@ async function loadDashboard() {
 
 async function runCollectionForUser(userId, email) {
   if (!userId) return;
+  const button = findElementByData("run-collection", userId);
   state.collectionBusyUserId = userId;
   state.error = "";
   state.notice = "";
-  render();
+  setMessage("", "success");
+  setCollectionButtonBusy(button, true);
+  setUserCollectionSnapshot(userId, {
+    latest_collection_status: "queued",
+    latest_collection_created_at: new Date().toISOString(),
+    latest_collection_started_at: null,
+    latest_collection_finished_at: null
+  });
   try {
     const result = await request(`/admin/users/${userId}/collection/run-now`, {
       method: "POST"
     });
     const shortJobId = String(result.job_id || "").slice(0, 8);
-    state.notice = `${email || "선택 사용자"} 수집 잡을 등록했습니다. job ${shortJobId} · 예상 ${result.eta_seconds ?? 0}초`;
+    const eta = Number(result.eta_seconds ?? 0);
+    setMessage(`${email || "선택 사용자"} 수집을 등록했습니다. job ${shortJobId} · 예상 ${eta}초`, "success");
+    await refreshUsersTable();
+    window.setTimeout(refreshUsersTable, Math.min((eta + 15) * 1000, 180000));
   } catch (error) {
-    state.error = messageForError(error);
+    setMessage(messageForError(error), "warn");
+    try {
+      await refreshUsersTable();
+    } catch {
+      // keep the inline message; the next manual refresh will reconcile the row.
+    }
   } finally {
     state.collectionBusyUserId = "";
-    render();
+    setCollectionButtonBusy(findElementByData("run-collection", userId), false);
   }
 }
 
@@ -232,6 +250,20 @@ function messageForError(error) {
   return error?.message || "요청을 처리하지 못했습니다.";
 }
 
+function messageView() {
+  if (state.error) return `<p class="notice">${escapeHtml(state.error)}</p>`;
+  if (state.notice) return `<p class="notice ${state.noticeTone === "success" ? "success" : ""}">${escapeHtml(state.notice)}</p>`;
+  return "";
+}
+
+function setMessage(message, tone = "success") {
+  state.error = tone === "warn" ? message : "";
+  state.notice = tone === "warn" ? "" : message;
+  state.noticeTone = tone;
+  const area = document.querySelector("#messageArea");
+  if (area) area.innerHTML = messageView();
+}
+
 function formatDate(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
@@ -240,6 +272,72 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function latestCollectionTime(user) {
+  return user.latest_collection_finished_at
+    || user.latest_collection_started_at
+    || user.latest_collection_created_at
+    || "";
+}
+
+function collectionStatusLabel(status) {
+  return {
+    queued: "대기",
+    running: "실행 중",
+    succeeded: "완료",
+    failed: "실패",
+    skipped: "건너뜀"
+  }[status] || "없음";
+}
+
+function collectionStatusTone(status) {
+  if (status === "failed") return "danger";
+  if (status === "queued" || status === "skipped") return "warn";
+  return "";
+}
+
+function isCollectionInFlight(user) {
+  return user.latest_collection_status === "queued" || user.latest_collection_status === "running";
+}
+
+function collectionMeta(user) {
+  const status = user.latest_collection_status || "";
+  const time = latestCollectionTime(user);
+  return `
+    <span class="collectionMeta" data-collection-meta="${escapeHtml(user.user_id)}">
+      <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
+      <em>${time ? formatDate(time) : "-"}</em>
+    </span>
+  `;
+}
+
+function findElementByData(name, value) {
+  return Array.from(document.querySelectorAll(`[data-${name}]`))
+    .find((element) => element.getAttribute(`data-${name}`) === value) || null;
+}
+
+function setCollectionButtonBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy || button.dataset.inFlight === "true";
+  button.textContent = busy ? "등록 중" : (button.dataset.inFlight === "true" ? "진행 중" : "수집 실행");
+}
+
+function setUserCollectionSnapshot(userId, snapshot) {
+  const user = state.users.find((item) => item.user_id === userId);
+  if (!user) return;
+  Object.assign(user, snapshot);
+  const node = findElementByData("collection-meta", userId);
+  if (node) node.outerHTML = collectionMeta(user);
+}
+
+async function refreshUsersTable() {
+  const users = await request("/admin/users?limit=20");
+  state.users = users.items || [];
+  const mount = document.querySelector("#usersTableMount");
+  if (!mount) return;
+  mount.innerHTML = usersTable(state.users.slice(0, 8));
+  bindCollectionButtons();
 }
 
 function render() {
@@ -322,8 +420,7 @@ function shellView() {
             <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
           </div>
         </header>
-        ${state.error ? `<p class="notice">${escapeHtml(state.error)}</p>` : ""}
-        ${state.notice ? `<p class="notice success">${escapeHtml(state.notice)}</p>` : ""}
+        <div id="messageArea">${messageView()}</div>
         ${isAccount ? accountView() : operationsView()}
       </section>
     </div>
@@ -388,7 +485,7 @@ function operationsView() {
           <h2>최근 사용자</h2>
           <button class="iconRefresh" type="button" title="최근 사용자 새로고침" data-refresh>↻</button>
         </div>
-        ${usersTable(state.users.slice(0, 8))}
+        <div id="usersTableMount">${usersTable(state.users.slice(0, 8))}</div>
       </div>
     </section>
   `;
@@ -462,21 +559,23 @@ function usersTable(users) {
   return `
     <div class="table">
       <div class="row header">
-        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>가입일</span><span>수집</span>
+        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>최근 수집</span><span>가입일</span><span>작업</span>
       </div>
       ${users.map((user) => `
         <div class="row">
           <strong>${escapeHtml(user.email)}</strong>
           <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
           <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
+          ${collectionMeta(user)}
           <span class="muted">${formatDate(user.created_at)}</span>
           <button
             class="tableAction"
             type="button"
             data-run-collection="${escapeHtml(user.user_id)}"
             data-user-email="${escapeHtml(user.email)}"
-            ${!user.consent_active || state.collectionBusyUserId === user.user_id ? "disabled" : ""}
-          >${state.collectionBusyUserId === user.user_id ? "등록 중" : "수집 실행"}</button>
+            data-in-flight="${isCollectionInFlight(user) ? "true" : "false"}"
+            ${!user.consent_active || state.collectionBusyUserId === user.user_id || isCollectionInFlight(user) ? "disabled" : ""}
+          >${state.collectionBusyUserId === user.user_id ? "등록 중" : (isCollectionInFlight(user) ? "진행 중" : "수집 실행")}</button>
         </div>
       `).join("")}
     </div>
@@ -503,16 +602,22 @@ function bindApp() {
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", loadDashboard);
   });
+  bindCollectionButtons();
+  document.querySelector("#logoutButton")?.addEventListener("click", logout);
+  document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);
+}
+
+function bindCollectionButtons() {
   document.querySelectorAll("[data-run-collection]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       runCollectionForUser(
         button.getAttribute("data-run-collection"),
         button.getAttribute("data-user-email") || ""
       );
     });
   });
-  document.querySelector("#logoutButton")?.addEventListener("click", logout);
-  document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);
 }
 
 function readSession() {

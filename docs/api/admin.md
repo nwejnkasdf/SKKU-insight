@@ -171,6 +171,10 @@ class AdminUserListItem(BaseModel):
     created_at: datetime
     consent_active: bool
     deletion_pending: bool
+    latest_collection_status: Literal["queued", "running", "succeeded", "failed", "skipped"] | None = None
+    latest_collection_created_at: datetime | None = None
+    latest_collection_started_at: datetime | None = None
+    latest_collection_finished_at: datetime | None = None
 
 class AdminUserInterestState(BaseModel):
     user_id: UUID
@@ -213,6 +217,7 @@ class AdminInterestTopicView(BaseModel):
     - **길이 ≥ 2**: 첫글자 + `***` + 마지막글자 + `@` + 도메인 (예: `gywnd123@gmail.com` → `g***3@gmail.com`)
     - **길이 = 1**: 전체 local part 마스킹 fallback (예: `a@gmail.com` → `***@gmail.com`)
 - `POST /admin/users/{user_id}/collection/run-now` 는 동의 활성 사용자에게만 허용한다. 내부적으로 사용자용 `trigger_run_now`와 같은 큐잉 로직을 재사용하므로 같은 사용자에 대해 이미 수집 대기/실행 중이면 409 `collection.already_running` 을 반환한다.
+- `/admin/users` 는 관리자 콘솔의 행 단위 운영 판단을 위해 사용자별 최신 `daily_collect` job 상태와 생성/시작/종료 시각을 함께 반환한다.
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
 
 ## 오류 응답

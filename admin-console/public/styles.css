@@ -453,13 +453,27 @@ button.tableAction {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) 110px 110px minmax(170px, 0.8fr) 112px;
+  grid-template-columns: minmax(180px, 1.15fr) 86px 90px minmax(170px, 0.95fr) minmax(132px, 0.65fr) 112px;
   gap: 12px;
   align-items: center;
   min-height: 54px;
   padding: 10px 12px;
   background: var(--surface-soft);
   border-radius: 8px;
+}
+
+.collectionMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collectionMeta em {
+  min-width: 0;
+  color: var(--muted);
+  font-style: normal;
+  overflow-wrap: anywhere;
 }
 
 .row.header {
@@ -481,6 +495,15 @@ button.tableAction {
   background: #f7f0e5;
   border: 1px solid #ead8bc;
   border-radius: 8px;
+}
+
+#messageArea {
+  min-height: 0;
+}
+
+#messageArea .notice {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 .notice.success {

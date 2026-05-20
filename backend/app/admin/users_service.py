@@ -20,8 +20,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collection import service as collection_service
 from app.collection.schemas import RunNowResponse
-from app.contracts import AdminRole, ErrorCode, PagedResponse, PageMeta, RedisKey
-from app.db.models import AdminUser, User, UserConsent
+from app.contracts import (
+    AdminRole,
+    CollectionJobStatus,
+    ErrorCode,
+    JobType,
+    PagedResponse,
+    PageMeta,
+    RedisKey,
+)
+from app.db.models import AdminUser, CollectionJob, User, UserConsent
 
 from .schemas import AdminUserListItem
 
@@ -94,11 +102,16 @@ async def list_users(
     else:
         active_user_ids = set()
 
+    latest_collection_jobs = await _latest_collection_jobs(
+        db, [row.user_id for row in rows]
+    )
+
     items = []
     for row in rows:
         deletion_pending = (
             await redis.exists(f"account_deletion:{row.user_id}")
         ) > 0
+        latest_job = latest_collection_jobs.get(row.user_id)
         items.append(
             AdminUserListItem(
                 user_id=row.user_id,
@@ -106,6 +119,18 @@ async def list_users(
                 created_at=row.created_at,
                 consent_active=row.user_id in active_user_ids,
                 deletion_pending=deletion_pending,
+                latest_collection_status=(
+                    CollectionJobStatus(latest_job.status) if latest_job else None
+                ),
+                latest_collection_created_at=(
+                    latest_job.created_at if latest_job else None
+                ),
+                latest_collection_started_at=(
+                    latest_job.started_at if latest_job else None
+                ),
+                latest_collection_finished_at=(
+                    latest_job.finished_at if latest_job else None
+                ),
             )
         )
 
@@ -121,6 +146,31 @@ async def list_users(
             next_cursor=next_cursor, has_more=has_more, page_size=len(items)
         ),
     )
+
+
+async def _latest_collection_jobs(
+    db: AsyncSession, user_ids: list[UUID]
+) -> dict[UUID, CollectionJob]:
+    if not user_ids:
+        return {}
+    stmt = (
+        select(CollectionJob)
+        .where(
+            CollectionJob.user_id.in_(user_ids),
+            CollectionJob.job_type == JobType.DAILY_COLLECT.value,
+        )
+        .order_by(
+            CollectionJob.user_id,
+            desc(CollectionJob.created_at),
+            desc(CollectionJob.job_id),
+        )
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    latest: dict[UUID, CollectionJob] = {}
+    for row in rows:
+        if row.user_id is not None and row.user_id not in latest:
+            latest[row.user_id] = row
+    return latest
 
 
 async def trigger_user_collection_now(

@@ -44,6 +44,7 @@ _HISTORY_WINDOW_DAYS = 7
 _DEFAULT_LIMIT = 20
 _MAX_LIMIT = 100
 _ENQUEUE_LOCK_TTL_SECONDS = 10
+_PENDING_JOB_WINDOW = timedelta(hours=2)
 
 
 def _encode_cursor(started_at: datetime, job_id: UUID) -> str:
@@ -176,6 +177,15 @@ async def trigger_run_now(
                 "message": "최근 트리거가 처리 중입니다. 잠시 후 다시 시도해주세요.",
             },
         )
+    pending_job = await _get_recent_pending_job(db, user_id)
+    if pending_job is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": ErrorCode.COLLECTION_ALREADY_RUNNING.value,
+                "message": "이미 대기 중이거나 실행 중인 수집 잡이 있습니다.",
+            },
+        )
     if await redis.exists(RedisKey.collection_lock(user_id)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -216,6 +226,27 @@ async def trigger_run_now(
     today = date.today()
     eta = deterministic_jitter_seconds(user_id, today) + 5
     return RunNowResponse(job_id=job.job_id, eta_seconds=eta)
+
+
+async def _get_recent_pending_job(db: AsyncSession, user_id: UUID) -> CollectionJob | None:
+    cutoff = datetime.now(UTC) - _PENDING_JOB_WINDOW
+    stmt = (
+        select(CollectionJob)
+        .where(
+            CollectionJob.user_id == user_id,
+            CollectionJob.job_type == JobType.DAILY_COLLECT.value,
+            CollectionJob.status.in_(
+                [
+                    CollectionJobStatus.QUEUED.value,
+                    CollectionJobStatus.RUNNING.value,
+                ]
+            ),
+            CollectionJob.created_at >= cutoff,
+        )
+        .order_by(desc(CollectionJob.created_at), desc(CollectionJob.job_id))
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def _get_sentinel_source_id(db: AsyncSession) -> UUID:

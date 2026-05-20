@@ -212,7 +212,7 @@ class AdminInterestTopicView(BaseModel):
   - `operator` / `read_only` 권한: local part 길이에 따라
     - **길이 ≥ 2**: 첫글자 + `***` + 마지막글자 + `@` + 도메인 (예: `gywnd123@gmail.com` → `g***3@gmail.com`)
     - **길이 = 1**: 전체 local part 마스킹 fallback (예: `a@gmail.com` → `***@gmail.com`)
-- `POST /admin/users/{user_id}/collection/run-now` 는 동의 활성 사용자에게만 허용한다. 내부적으로 사용자용 `trigger_run_now`와 같은 큐잉 로직을 재사용하므로 같은 사용자에 대해 이미 수집 중이면 409 `collection.already_running` 을 반환한다.
+- `POST /admin/users/{user_id}/collection/run-now` 는 동의 활성 사용자에게만 허용한다. 내부적으로 사용자용 `trigger_run_now`와 같은 큐잉 로직을 재사용하므로 같은 사용자에 대해 이미 수집 대기/실행 중이면 409 `collection.already_running` 을 반환한다.
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
 
 ## 오류 응답

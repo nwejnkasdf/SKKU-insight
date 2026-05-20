@@ -444,30 +444,32 @@ class CodexOAuthProvider:
         reasoning_effort = settings.LLM_REASONING_EFFORT_HIGH
         enable_search = settings.CODEX_WEB_SEARCH_MODE.lower() == "live"
 
-        with _write_temp_schema(_SEARCH_OUTPUT_SCHEMA) as schema_path:
-            argv = _build_base_argv(
-                model_name=model_name,
-                reasoning_effort=reasoning_effort,
-                output_schema_path=schema_path,
-                enable_search=enable_search,
+        # Codex CLI 0.131.0 can exit with code 1 and empty stderr when
+        # --output-schema is used. Keep search aligned with complete(json):
+        # let the prompt enforce JSON and validate the final agent message here.
+        argv = _build_base_argv(
+            model_name=model_name,
+            reasoning_effort=reasoning_effort,
+            output_schema_path=None,
+            enable_search=enable_search,
+        )
+        async with acquire_slot(user_id):
+            stdout, _stderr = await _run_codex_subprocess(
+                argv,
+                stdin_bytes=prompt.encode("utf-8"),
+                timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
             )
-            async with acquire_slot(user_id):
-                stdout, _stderr = await _run_codex_subprocess(
-                    argv,
-                    stdin_bytes=prompt.encode("utf-8"),
-                    timeout_seconds=settings.LLM_REQUEST_TIMEOUT_SECONDS,
-                )
 
         text, usage = _parse_jsonl_events(stdout)
         prompt_tokens, completion_tokens = _map_usage_to_tokens(usage)
         await record_token_usage(prompt_tokens + completion_tokens, redis)
 
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
+        parsed = _try_parse_json_relaxed(text)
+        if parsed is None:
+            snippet = text[:300].replace("\n", "\\n")
             raise ProviderError(
-                f"codex_search_json_parse_error: {exc}"
-            ) from exc
+                f"codex_search_json_parse_error: response did not contain JSON object: {snippet}"
+            )
         if not isinstance(parsed, dict):
             raise ProviderError(
                 f"codex_search_response_not_object: {type(parsed).__name__}"

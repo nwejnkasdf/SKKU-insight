@@ -20,7 +20,7 @@
 | POST | `/events/batch` | 여러 이벤트 한 번에 (dwell tick 등) | **HTTP 207 Multi-Status**. max 50 entries. 부분 성공 허용 — entry 단위 `error_code` |
 | POST | `/feedback/save` | 저장 (UI 명시 액션) | SavedDocument 생성 + UserEvent + Bayesian 갱신 (즉시 atomic UPSERT) |
 | POST | `/feedback/hide` | 숨김 | HiddenDocument 생성 + Bayesian 갱신 |
-| POST | `/feedback/not-interested` | 관심 없음 | 하이브리드: Bayesian P1-4 분배 (`UserInterestState`) + `NotInterestedTopic` 최고 confidence 1건 INSERT |
+| POST | `/feedback/not-interested` | 관심 없음 | 문서 단위 요청은 `HiddenDocument`도 함께 생성해 추천 큐에서 즉시 제외. 하이브리드: Bayesian P1-4 분배 (`UserInterestState`) + `NotInterestedTopic` 최고 confidence 1건 INSERT |
 | GET | `/feedback/saved` | 저장 목록 (UI-05) | cursor pagination |
 | GET | `/feedback/hidden` | 숨김 목록 (UI-05) | cursor pagination |
 | DELETE | `/feedback/saved/{document_id}` | 저장 해제 | 동의 비활성에도 허용 |

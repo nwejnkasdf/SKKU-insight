@@ -882,10 +882,22 @@ async def not_interested_feedback(
 
     Bayesian: ingest_event_atomic 가 P1-4 분배 (document 매핑 토픽 모두 -5*confidence).
     NotInterestedTopic: 최고 confidence 1 row (의도 마킹용).
+    HiddenDocument: document_id 가 있으면 해당 문서를 즉시 추천 큐에서 제거.
     - cso/leaf 직접 지정 시: 그 토픽 1 row INSERT.
     - document_id 단독: DocumentTopic 최고 confidence 1 row INSERT.
     """
-    # 1) NotInterestedTopic INSERT (의도 마킹)
+    # 1) 문서 단위 not-interested 는 사용자가 그 카드를 다시 보고 싶지 않다는 뜻이므로
+    # HiddenDocument 도 함께 INSERT 한다. 토픽 신호는 아래 NotInterestedTopic/Bayesian 이 담당.
+    if document_id is not None:
+        hidden_stmt = pg_insert(HiddenDocument).values(
+            user_id=user.user_id, document_id=document_id
+        )
+        hidden_stmt = hidden_stmt.on_conflict_do_nothing(
+            index_elements=["user_id", "document_id"]
+        )
+        await db.execute(hidden_stmt)
+
+    # 2) NotInterestedTopic INSERT (의도 마킹)
     target_cso = cso_topic_id
     target_leaf = leaf_topic_id
     if target_cso is None and target_leaf is None and document_id is not None:
@@ -902,7 +914,7 @@ async def not_interested_feedback(
             leaf_topic_id=target_leaf,
         )
 
-    # 2) Bayesian — P1-4 분배 (직접 지정 우선)
+    # 3) Bayesian — P1-4 분배 (직접 지정 우선)
     return await ingest_event_atomic(
         db,
         redis,
@@ -980,7 +992,13 @@ async def delete_not_interested_for_document(
         where_clauses.append(NotInterestedTopic.leaf_topic_id == picked.leaf_topic_id)
     stmt = sa_delete(NotInterestedTopic).where(*where_clauses)
     result = await db.execute(stmt)
-    return (result.rowcount or 0) > 0
+    hidden_result = await db.execute(
+        sa_delete(HiddenDocument).where(
+            HiddenDocument.user_id == user_id,
+            HiddenDocument.document_id == document_id,
+        )
+    )
+    return (result.rowcount or 0) > 0 or (hidden_result.rowcount or 0) > 0
 
 
 async def flush_buffered_events(

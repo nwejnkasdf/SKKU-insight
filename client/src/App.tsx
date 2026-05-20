@@ -448,9 +448,11 @@ function DashboardView({
   const [error, setError] = useState<string | null>(null);
   const topicRanks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
 
-  async function load(refresh = false) {
-    setLoading(true);
-    setError(null);
+  async function load(refresh = false, silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const nextDashboard = refresh ? await api.refreshDashboard() : await api.dashboard();
       const [nextInterest, nextTraces] = await Promise.all([
@@ -461,10 +463,16 @@ function DashboardView({
       setInterest(nextInterest);
       setTraces(nextTraces?.items ?? []);
     } catch (err) {
-      setDashboard(null);
-      setError(messageForError(err));
+      if (silent) {
+        showToast({ tone: "error", text: messageForError(err) });
+      } else {
+        setDashboard(null);
+        setError(messageForError(err));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -500,6 +508,14 @@ function DashboardView({
                   rank={index + 1}
                   setView={setView}
                   showToast={showToast}
+                  onFeedbackApplied={(action, documentId) => {
+                    if (action !== "hide" && action !== "not_interested") return;
+                    setDashboard((current) => current ? {
+                      ...current,
+                      cards: current.cards.filter((item) => item.document_id !== documentId)
+                    } : current);
+                    void load(false, true);
+                  }}
                 />
               ))}
             </div>
@@ -515,13 +531,15 @@ function RecommendationCardView({
   card,
   rank,
   setView,
-  showToast
+  showToast,
+  onFeedbackApplied
 }: {
   api: InsightApi;
   card: RecommendationCard;
   rank: number;
   setView: (view: View) => void;
   showToast: (toast: Toast) => void;
+  onFeedbackApplied?: (action: FeedbackAction, documentId: UUID) => void;
 }) {
   const displayTopics = card.related_topics
     .map(displayTopicChip);
@@ -581,6 +599,7 @@ function RecommendationCardView({
         } else {
           await api.hideDocument(card.document_id);
           showToast({ tone: "ok", text: "숨김 처리했습니다." });
+          onFeedbackApplied?.(action, card.document_id);
         }
       } else {
         if (active) {
@@ -589,6 +608,7 @@ function RecommendationCardView({
         } else {
           await api.notInterestedDocument(card.document_id);
           showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+          onFeedbackApplied?.(action, card.document_id);
         }
       }
     } catch (err) {

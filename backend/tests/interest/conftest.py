@@ -44,7 +44,6 @@ async def seeded_cso_topics(db_session: AsyncSession) -> list[CSOTopic]:
             label=label,
             uri=f"http://test/{label}",
             cluster_labels=["AI"],
-            depth_from_seed=1,
         )
         topics.append(t)
         db_session.add(t)

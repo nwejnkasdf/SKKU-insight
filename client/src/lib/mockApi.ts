@@ -351,6 +351,7 @@ export class MockInsightApi implements Partial<InsightApi> {
 
   async notInterestedDocument(documentId: UUID): Promise<EventResponse> {
     notInterested.add(documentId);
+    hidden.add(documentId);
     return eventResponse();
   }
 
@@ -374,6 +375,7 @@ export class MockInsightApi implements Partial<InsightApi> {
 
   async deleteNotInterested(documentId: UUID): Promise<void> {
     notInterested.delete(documentId);
+    hidden.delete(documentId);
   }
 
   private ensureUser(): MockUser {
@@ -409,12 +411,14 @@ export class MockInsightApi implements Partial<InsightApi> {
 function dashboardResponse(cache: "hit" | "miss"): DashboardResponse {
   return {
     user_id: user?.userId ?? mockId("user-demo"),
-    cards: cards.map((card) => ({
-      ...card,
-      saved: saved.has(card.document_id),
-      hidden: hidden.has(card.document_id),
-      not_interested: notInterested.has(card.document_id)
-    })),
+    cards: cards
+      .filter((card) => !hidden.has(card.document_id))
+      .map((card) => ({
+        ...card,
+        saved: saved.has(card.document_id),
+        hidden: hidden.has(card.document_id),
+        not_interested: notInterested.has(card.document_id)
+      })),
     slots: [
       { slot_type: "core", target_count: 5, actual_count: 5, fallback_reason: null },
       { slot_type: "adjacent", target_count: 3, actual_count: 3, fallback_reason: null },

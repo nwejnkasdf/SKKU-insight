@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db.models import (
     CSOTopic,
     Document,
+    HiddenDocument,
     NotInterestedTopic,
     User,
     UserInterestState,
@@ -35,7 +36,7 @@ async def test_document_id_only_creates_single_not_interested_topic(
     seeded_system_config,
     empty_graph: nx.DiGraph,
 ) -> None:
-    """document_id 만 호출 → 최고 confidence (0.6) 토픽 1건 NotInterestedTopic INSERT."""
+    """document_id 만 호출 → 문서 숨김 + 최고 confidence 토픽 1건 NotInterestedTopic INSERT."""
     settings = get_settings()
     params, weights = await load_system_config(db_session, redis_client)
     await not_interested_feedback(
@@ -64,6 +65,15 @@ async def test_document_id_only_creates_single_not_interested_topic(
     assert len(nit_rows) == 1
     # 최고 confidence 는 seeded_cso_topics[0] (0.6)
     assert nit_rows[0].cso_topic_id == seeded_cso_topics[0].cso_topic_id
+    hidden_doc = (
+        await db_session.execute(
+            select(HiddenDocument).where(
+                HiddenDocument.user_id == seeded_user.user_id,
+                HiddenDocument.document_id == seeded_document.document_id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert hidden_doc is not None
 
     # Bayesian 은 P1-4 분배 → 3 row 모두 beta 가산 (negative weight)
     uis_rows = (

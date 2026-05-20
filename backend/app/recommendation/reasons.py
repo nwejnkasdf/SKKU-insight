@@ -150,7 +150,7 @@ async def generate_reasons(
                     if _is_valid_reason(cleaned):
                         result[doc_id] = cleaned
     except (ProviderError, LLMBudgetExceeded, json.JSONDecodeError) as exc:
-        logger.warning("generate_reasons LLM failed; rule fallback: %s", exc)
+        logger.debug("generate_reasons used rule template after provider miss: %s", exc)
     except Exception as exc:
         logger.warning(
             "generate_reasons unexpected failure; rule fallback: %s: %s",

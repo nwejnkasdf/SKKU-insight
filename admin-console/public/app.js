@@ -12,6 +12,7 @@ const state = {
   collectionBusyUserId: "",
   collectionRowMessages: {},
   collectionPollTimer: null,
+  collectionTickTimer: null,
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -223,9 +224,8 @@ async function runCollectionForUser(userId, email) {
       method: "POST"
     });
     const shortJobId = String(result.job_id || "").slice(0, 8);
-    const eta = Number(result.eta_seconds ?? 0);
     const label = email ? `${email} · ` : "";
-    setCollectionRowMessage(userId, `${label}job ${shortJobId} · 예상 ${eta}초`, "loading");
+    setCollectionRowMessage(userId, `${label}job ${shortJobId} · 처리 중`, "loading");
     await refreshUsersTable();
     startCollectionPolling();
   } catch (error) {
@@ -287,6 +287,41 @@ function latestCollectionTime(user) {
     || "";
 }
 
+function collectionStartTime(user) {
+  return user.latest_collection_started_at || user.latest_collection_created_at || "";
+}
+
+function collectionElapsedMs(user) {
+  const start = collectionStartTime(user);
+  if (!start) return null;
+  const end = isCollectionInFlight(user)
+    ? Date.now()
+    : (user.latest_collection_finished_at ? new Date(user.latest_collection_finished_at).getTime() : Date.now());
+  const startMs = new Date(start).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - startMs);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}초`;
+  return `${minutes}분 ${String(seconds).padStart(2, "0")}초`;
+}
+
+function collectionTimeText(user) {
+  const elapsed = collectionElapsedMs(user);
+  if (isCollectionInFlight(user)) {
+    return elapsed === null ? "경과 계산 중" : `경과 ${formatDuration(elapsed)}`;
+  }
+  if (user.latest_collection_status === "succeeded" && elapsed !== null) {
+    return `소요 ${formatDuration(elapsed)}`;
+  }
+  const time = latestCollectionTime(user);
+  return time ? formatDate(time) : "-";
+}
+
 function collectionStatusLabel(status) {
   return {
     queued: "대기",
@@ -309,7 +344,6 @@ function isCollectionInFlight(user) {
 
 function collectionMeta(user) {
   const status = user.latest_collection_status || "";
-  const time = latestCollectionTime(user);
   const inline = state.collectionRowMessages[user.user_id];
   const loading = state.collectionBusyUserId === user.user_id || inline?.tone === "loading" || isCollectionInFlight(user);
   return `
@@ -317,7 +351,7 @@ function collectionMeta(user) {
       <span class="collectionLine">
         ${loading ? `<i class="spinner" aria-hidden="true"></i>` : ""}
         <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
-        <em>${time ? formatDate(time) : "-"}</em>
+        <em>${collectionTimeText(user)}</em>
       </span>
       ${inline ? `<small class="collectionInline ${inline.tone}">${escapeHtml(inline.text)}</small>` : ""}
     </span>
@@ -360,7 +394,11 @@ function reconcileCollectionRowMessages() {
     const inline = state.collectionRowMessages[user.user_id];
     if (!inline) return;
     if (user.latest_collection_status === "succeeded") {
-      state.collectionRowMessages[user.user_id] = { text: "수집 완료", tone: "success" };
+      const elapsed = collectionElapsedMs(user);
+      state.collectionRowMessages[user.user_id] = {
+        text: elapsed === null ? "수집 완료" : `수집 완료 · 소요 ${formatDuration(elapsed)}`,
+        tone: "success"
+      };
     } else if (user.latest_collection_status === "failed") {
       state.collectionRowMessages[user.user_id] = { text: "수집 실패", tone: "warn" };
     } else if (isCollectionInFlight(user)) {
@@ -391,12 +429,31 @@ function startCollectionPolling() {
       stopCollectionPolling();
     }
   }, 5000);
+  startCollectionTicking();
 }
 
 function stopCollectionPolling() {
   if (!state.collectionPollTimer) return;
   window.clearInterval(state.collectionPollTimer);
   state.collectionPollTimer = null;
+  stopCollectionTicking();
+}
+
+function startCollectionTicking() {
+  if (state.collectionTickTimer) return;
+  state.collectionTickTimer = window.setInterval(() => {
+    if (!hasCollectionPollingWork()) {
+      stopCollectionTicking();
+      return;
+    }
+    renderUsersTableOnly();
+  }, 1000);
+}
+
+function stopCollectionTicking() {
+  if (!state.collectionTickTimer) return;
+  window.clearInterval(state.collectionTickTimer);
+  state.collectionTickTimer = null;
 }
 
 function updateCollectionPolling() {

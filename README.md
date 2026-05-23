@@ -13,6 +13,7 @@
 | 1차 목표 | 풀스택 동작 데모 (10-20명 동시 사용자) |
 | 도메인 | CS/AI 기술 동향 (학술 논문 + 빅테크 공식 채널 + 테크 뉴스) |
 | 산출물 | **54+ 문서 + 데모용 코드** (코드는 멀티 에이전트로 작성 예정) |
+| 외부 데이터 | [Computer Science Ontology (CSO) 3.5](https://cso.kmi.open.ac.uk/) — KMI, The Open University, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). 자세히는 [`NOTICE.md`](NOTICE.md). |
 
 ## 무엇을 만들고 있나
 

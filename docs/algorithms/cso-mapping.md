@@ -41,7 +41,7 @@ CSO에는 명시적 12개 cluster 메타데이터가 없으므로, 우리는 다
 
 import 시 BFS로 후손을 cluster_label로 라벨링. 한 토픽이 여러 cluster의 후손이면 라벨 set 유지 (예: `cluster_labels = {"AI", "IR"}`).
 
-> **v13 round 3 R3-C03 fix (2026-05-16)**: CSO 3.4.1 에는 원래 seed 라벨 5종 (`Computer Systems Organization` / `Theory of Computation` / `Computer Graphics` / `Multimedia` / `Computational Science`) 이 존재하지 않아 BFS 시작점 부재 → cluster 라벨 부재. 실제 CSO 3.4.1 에 존재하는 5종 (`Operating Systems` / `Automata Theory` / `Interactive Computer Graphics` / `Multimedia Systems` / `Scientific Computing`) 으로 교체. SOR = `backend/app/config/broad_interests.toml` + `backend/app/topic/mapping.py:SEEDS`. `Hardware` → `Computer Hardware`, `Security and Privacy` → `Computer Security` 도 동시 교체.
+> **v13 round 3 R3-C03 fix (2026-05-16, CSO 3.4.1+ 현 3.5)**: CSO 3.4.1 에는 원래 seed 라벨 5종 (`Computer Systems Organization` / `Theory of Computation` / `Computer Graphics` / `Multimedia` / `Computational Science`) 이 존재하지 않아 BFS 시작점 부재 → cluster 라벨 부재. 실제 CSO 3.4.1 에 존재하는 5종 (`Operating Systems` / `Automata Theory` / `Interactive Computer Graphics` / `Multimedia Systems` / `Scientific Computing`) 으로 교체. SOR = `backend/app/config/broad_interests.toml` + `backend/app/topic/mapping.py:SEEDS`. `Hardware` → `Computer Hardware`, `Security and Privacy` → `Computer Security` 도 동시 교체. **CSO 3.5 (C-46 2026-05-24 전환) 에서 본 라벨이 다시 추가됐는지 미검증** — 시연 시 cluster 부재 발견 시 두 SOR 동시 교체.
 
 ## 그래프 탐색 알고리즘
 

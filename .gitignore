@@ -113,6 +113,9 @@ redis_data/
 *.bak
 docs.zip
 CSO.*.csv
+# (C-46, 2026-05-24) data/cso/ 는 git-tracked CSO 본체 (CC BY 4.0, NOTICE.md 참조).
+# 위 CSO.*.csv 패턴이 data/cso/ 도 ignore 하지 않도록 명시적 unignore.
+!data/cso/CSO.*.csv
 
 # --- 시연 fixture 캡처 (의도적으로 commit하는 경우 주석 처리) ---
 # tests/fixtures/mock_llm/captured/

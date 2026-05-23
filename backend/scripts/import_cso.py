@@ -1,4 +1,4 @@
-"""CSO 3.4.1 임포트 CLI. A3 (CSO Topic Engine).
+"""CSO 3.5 임포트 CLI. A3 (CSO Topic Engine).
 
 backend 컨테이너 안에서 실행. WORKDIR=/app (= backend/) 이므로 `python -m scripts.import_cso`
 패턴 통일. 캐시 디렉토리는 컨테이너 내부의 /app/.cache/cso/ — docker-compose 가
@@ -49,7 +49,7 @@ BROAD_INTERESTS_TOML = Path(__file__).resolve().parent.parent / "app" / "config"
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CSO 3.4.1 importer")
+    parser = argparse.ArgumentParser(description="CSO 3.5 importer")
     parser.add_argument(
         "--reset",
         action="store_true",

@@ -161,9 +161,9 @@ docker compose exec api alembic upgrade head --sql > /tmp/migration.sql
 docker compose down -v       # 모든 데이터 삭제
 docker compose up -d postgres redis
 make migrate
-# (선택, C-43, 2026-05-19) 호스트의 CSO.3.4.1.csv 를 컨테이너 cso_cache volume 에 카피.
-# KMI 서버 다운로드 skip — 오프라인 시연 + 트래픽 절감. 본 단계 생략 시 import-cso 가 자동 다운로드.
-# make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv
+# (권장, C-46, 2026-05-24) git-tracked data/cso/CSO.3.5.csv 를 컨테이너 cso_cache volume 에 카피.
+# KMI 서버 다운로드 skip — 오프라인 시연 + 트래픽 절감. 본 단계 생략 시 import-cso 가 자동 다운로드 fallback.
+make seed-cso-cache             # FILE 생략 시 git-tracked data/cso/CSO.3.5.csv 자동 사용
 make import-cso              # CSO 임포트
 make create-admin            # admin 1
 # make seed                  # A12 ⬜ 미구현 — Makefile 타깃 없음, backend/scripts/seed_personas.py 도 부재.

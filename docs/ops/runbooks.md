@@ -2,6 +2,18 @@
 
 본 파일은 SKKU InSight에서 자주 일어날 운영 시나리오에 대한 대응 절차를 정리한다. 시연 환경 + 개발 단계에서 발생할 수 있는 흔한 이슈만 다룬다. 관련: [`docker-compose.md`](docker-compose.md), [`env-vars.md`](env-vars.md), [`../security/threat-model.md`](../security/threat-model.md).
 
+## 실행 환경 — Docker = WSL only (C-47, 2026-05-24)
+
+본 문서의 모든 `docker` / `docker compose` / `make` (docker 호출 포함) 명령은 **반드시 WSL 안에서 실행**한다.
+
+| 환경 | 결과 |
+|---|---|
+| WSL native docker engine (`unix:///var/run/docker.sock`, Docker Engine Community 29.x) | ✅ 정상 |
+| PowerShell / git bash 에서 직접 `docker compose` | ❌ `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine` |
+| Windows Docker Desktop Linux engine | ❌ 사용 안 함 (사용자 환경 기준) |
+
+host file 접근은 `/mnt/c/Users/.../SKKU-InSight/...` path (WSL 의 windows mount). 컨테이너 이름은 worktree 별로 다름 — `docker ps -a` 로 확인 후 `wsl docker logs <container>`.
+
 ## 1. 일일 수집 잡 실패
 
 ### 증상

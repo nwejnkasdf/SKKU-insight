@@ -568,9 +568,9 @@ class SystemConfig(Base):
 
 전체 JSON 은 [`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md) §구성 파일 스키마.
 
-### ReprocessRequest (A10 ⬜ 미완 — admin 본문에서 생성)
+### ReprocessRequest (A10 🟡 진행 중 — admin 본문에서 생성)
 
-> admin router 의 `POST /admin/collection/jobs/{id}/reprocess` 는 stub (NotImplementedError). A10 admin-console 머지 시 본 ORM + admin 본문 활성 — A8 는 본 테이블 범위 외 (recommendation engine 만).
+> admin router 의 `POST /admin/collection/jobs/{id}/reprocess` 는 stub (NotImplementedError). A10 admin-console 가 main 에 다수 보강 머지됐으나 reprocess ORM + admin 본문 활성은 아직 — A8 는 본 테이블 범위 외 (recommendation engine 만).
 
 ```python
 class ReprocessRequest(Base):

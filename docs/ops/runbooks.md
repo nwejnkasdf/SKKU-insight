@@ -170,7 +170,7 @@ make create-admin            # admin 1
                              # 1차 시연 (~A6 단계) 은 수동 데이터 삽입 또는 signup → onboarding → /events 호출로 대체.
                              # A12 머지 후 본 명령 활성 예정 — 5+ 페르소나 + 14일 인터랙션.
 docker compose up -d         # api/worker/admin-console 기동 (clickbait-detector 는 default 비활성)
-cd client && npm start       # Electron 앱 (A9 ⬜ 미구현 — A9 머지 후)
+cd client && npm start       # Electron 앱 (A9 🟡 진행 중 — `client/` 구축됨, main 다수 보강 머지. 시연 통과 검수 보류)
 ```
 
 소요: 약 5–10분 (CSO 임포트가 가장 길다 — 1차 다운로드 1분 + insert ~3분).

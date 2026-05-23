@@ -161,16 +161,16 @@ docker compose exec api alembic upgrade head --sql > /tmp/migration.sql
 docker compose down -v       # 모든 데이터 삭제
 docker compose up -d postgres redis
 make migrate
-# (선택, C-43, 2026-05-19) 호스트의 CSO.3.4.1.csv 를 컨테이너 cso_cache volume 에 카피.
-# KMI 서버 다운로드 skip — 오프라인 시연 + 트래픽 절감. 본 단계 생략 시 import-cso 가 자동 다운로드.
-# make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv
+# (권장, C-46, 2026-05-24) git-tracked data/cso/CSO.3.5.csv 를 컨테이너 cso_cache volume 에 카피.
+# KMI 서버 다운로드 skip — 오프라인 시연 + 트래픽 절감. 본 단계 생략 시 import-cso 가 자동 다운로드 fallback.
+make seed-cso-cache             # FILE 생략 시 git-tracked data/cso/CSO.3.5.csv 자동 사용
 make import-cso              # CSO 임포트
 make create-admin            # admin 1
 # make seed                  # A12 ⬜ 미구현 — Makefile 타깃 없음, backend/scripts/seed_personas.py 도 부재.
                              # 1차 시연 (~A6 단계) 은 수동 데이터 삽입 또는 signup → onboarding → /events 호출로 대체.
                              # A12 머지 후 본 명령 활성 예정 — 5+ 페르소나 + 14일 인터랙션.
 docker compose up -d         # api/worker/admin-console 기동 (clickbait-detector 는 default 비활성)
-cd client && npm start       # Electron 앱 (A9 ⬜ 미구현 — A9 머지 후)
+cd client && npm start       # Electron 앱 (A9 🟡 진행 중 — `client/` 구축됨, main 다수 보강 머지. 시연 통과 검수 보류)
 ```
 
 소요: 약 5–10분 (CSO 임포트가 가장 길다 — 1차 다운로드 1분 + insert ~3분).

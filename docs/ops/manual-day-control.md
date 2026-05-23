@@ -118,8 +118,8 @@ docker compose exec api python -m scripts.simulate_user_day weekly \
    ```
    사용자 trace path 끝 cso 의 그래프 자식 cso 에 매핑된 document 가 7 active day 안에 5건 이상 click/save/view/etc 받아야 trigger. **doc 매핑이 root cso 만이면 영원히 extend 안 됨** — collection 결과 매핑이 root 자체일 때 발생. 시뮬레이션/디버그 시 `document_topic` 에 child cso 매핑 행 수동 INSERT 가능 (P1-12 PR sim2/sim3 setup 참고).
 
-2. **`execute_archive` / `evaluate_archive` caller 도 P1-12 잔여**:
-   본 PR 의 extend/split caller fix 와 별개. `archive_if_eligible` 만 `_evaluate_trace_demotion_for_user` 안에서 호출되는 형태. 후속 PR 영역.
+2. **`execute_archive` caller — 본 PR 검증 시점 재확인**:
+   원래 P1-12 backlog 는 archive caller 도 누락이라 기록했으나 실제로는 protocol 메서드명이 `archive_if_eligible` (caller 가 `_evaluate_trace_demotion_for_user`) 라 grep false negative 였음. archive 는 별도 fix 불필요 — extend / split / retract / archive / merge 5종 모두 caller 존재. live 검증 (`archived=4`) 도 통과.
 
 3. **CSO 그래프 cycle**:
    일부 자식 cso 가 사이클 — `evaluate_extend` 의 atomic SQL 가드 (`array_position` 검사) + caller 의 `if child_cso in path: continue` 로 path 안에 이미 있는 노드는 skip. 즉 무한 루프 안 일어남.
@@ -153,4 +153,4 @@ docker compose logs -f worker
 
 - 신규 추가: 2026-05-20 (P1-12 fix PR — `A9-after-fix-extend`).
 - 결함 발견 경위: `decision-backlog.md` §P1-12 (C-45 라운드).
-- 관련 SOR: `docs/algorithms/cso-topic-traversal.md` §3 (extend/retract/split/archive 룰), `decisions.md` §4 (active day 시간 모델), `AGENTS.md` §에이전트 분할표 A7 항목 (부분 완료 표기).
+- 관련 SOR: `docs/algorithms/cso-topic-traversal.md` §3 (extend/retract/split/archive 룰), `decisions.md` §4 (active day 시간 모델), `AGENTS.md` §에이전트 분할표 A7 항목 (✅ 완료 표기, 2026-05-20 C-45 라운드 갱신).

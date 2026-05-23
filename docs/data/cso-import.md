@@ -21,8 +21,8 @@ CSO는 N3 (Notation3 RDF), TTL, CSV 포맷 제공. 1차는 CSV가 가장 다루�
 
 | 파일 | URL | 비고 |
 |---|---|---|
-| `CSO.3.4.1.csv` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv | CSV 형식. <subject, predicate, object> triple |
-| `CSO.3.4.1.nt` | https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.nt | RDF N-Triples 대안 |
+| `CSO.3.5.csv` | https://cso.kmi.open.ac.uk/downloads/CSO.3.5.csv | CSV 형식. <subject, predicate, object> triple. **1차 시연은 git-tracked `data/cso/CSO.3.5.csv` (CC BY 4.0, `NOTICE.md`) 사용 권장** (C-46 2026-05-24) |
+| `CSO.3.5.nt` | https://cso.kmi.open.ac.uk/downloads/CSO.3.5.nt | RDF N-Triples 대안 |
 
 `scripts/import_cso.py` 의사 코드:
 
@@ -31,12 +31,12 @@ import csv
 import httpx
 from pathlib import Path
 
-CSO_URL = "https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv"
+CSO_URL = "https://cso.kmi.open.ac.uk/downloads/CSO.3.5.csv"
 CACHE_DIR = Path("./.cache/cso")
 
 def download_cso():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    target = CACHE_DIR / "CSO.3.4.1.csv"
+    target = CACHE_DIR / "CSO.3.5.csv"
     if target.exists():
         return target
     with httpx.stream("GET", CSO_URL, follow_redirects=True) as r:
@@ -48,7 +48,7 @@ def download_cso():
 
 ## 2. 파싱
 
-CSO 3.4.1 의 CSV 형식은 실제로는 **csv-quoted N-Triples** (각 라인이 `"<URI>","<P>","label"@en .` 형태). v13 round 3 (2026-05-16, R3-C03 fix) 에서 발견되어 parser 재작성.
+CSO 3.4.1+ (현 3.5) 의 CSV 형식은 실제로는 **csv-quoted N-Triples** (각 라인이 `"<URI>","<P>","label"@en .` 형태). v13 round 3 (2026-05-16, R3-C03 fix) 에서 발견되어 parser 재작성.
 
 우리가 사용하는 predicate:
 
@@ -70,7 +70,7 @@ PRED_REL   = "http://cso.kmi.open.ac.uk/schema/cso#relatedEquivalent"
 _TOKEN_RE = re.compile(r'<([^>]+)>|"((?:[^"\\]|\\.)*)"(?:@\w+|\^\^<[^>]+>)?')
 
 def _strip_outer_csv_quote(line: str) -> str:
-    """CSO 3.4.1 의 라인은 보통 `"<URI>","<P>","label"@en` 처럼 outer csv quote 로 감싸져 있다.
+    """CSO 3.4.1+ (현 3.5) 의 라인은 보통 `"<URI>","<P>","label"@en` 처럼 outer csv quote 로 감싸져 있다.
     csv.reader 가 outer quote 를 벗기되 내부 escape 처리는 별도 필요."""
     return line.strip()
 
@@ -107,23 +107,23 @@ def _norm_label(label: str) -> str:
 
 ## 3. 12 cluster seed 매핑 (BFS)
 
-`algorithms/cso-mapping.md`의 12 seed 라벨을 URI로 변환 후 BFS. v13 round 3 (2026-05-16, R3-C03 fix) — CSO 3.4.1 에는 5 cluster 의 원래 seed 라벨이 없어 실제 존재하는 라벨로 교체.
+`algorithms/cso-mapping.md`의 12 seed 라벨을 URI로 변환 후 BFS. v13 round 3 (2026-05-16, R3-C03 fix) — CSO 3.4.1 에는 5 cluster 의 원래 seed 라벨이 없어 실제 존재하는 라벨로 교체. CSO 3.5 (2026-05-24 C-46 전환) 에서 본 라벨이 다시 추가됐는지는 미검증 — 시연 시 cluster 라벨 부재 발견되면 본 표 + `broad_interests.toml` 동시 교체.
 
 ```python
 SEEDS = {
     "Artificial Intelligence": "AI",
-    "Operating Systems": "Systems",                  # was "Computer Systems Organization" (CSO 3.4.1 부재)
+    "Operating Systems": "Systems",                  # was "Computer Systems Organization" (CSO 3.4.1+ 부재)
     "Computer Hardware": "Hardware",
-    "Automata Theory": "Theory",                     # was "Theory of Computation" (CSO 3.4.1 부재)
+    "Automata Theory": "Theory",                     # was "Theory of Computation" (CSO 3.4.1+ 부재)
     "Software Engineering": "SE",
     "Computer Networks": "Networks",
     "Information Systems": "IS·DB",
     "Information Retrieval": "IR",
     "Computer Security": "Security",
     "Human-Computer Interaction": "HCI",
-    "Interactive Computer Graphics": "Graphics·Multimedia",   # was "Computer Graphics" (CSO 3.4.1 부재)
-    "Multimedia Systems": "Graphics·Multimedia",     # was "Multimedia" (CSO 3.4.1 부재)
-    "Scientific Computing": "Computational Science", # was "Computational Science" (CSO 3.4.1 부재)
+    "Interactive Computer Graphics": "Graphics·Multimedia",   # was "Computer Graphics" (CSO 3.4.1+ 부재)
+    "Multimedia Systems": "Graphics·Multimedia",     # was "Multimedia" (CSO 3.4.1+ 부재)
+    "Scientific Computing": "Computational Science", # was "Computational Science" (CSO 3.4.1+ 부재)
 }
 
 def assign_cluster_labels(topics):
@@ -263,8 +263,6 @@ python -m scripts.import_cso --refresh --reset
 
 ## 8. 캐시 라이프사이클
 
-`./.cache/cso/CSO.3.4.1.csv`는 다운로드 결과 영속. 같은 버전이면 재다운로드 안 함. CSO 버전이 갱신되면 (3.4.1 → 3.5) `--reset` 플래그로 재임포트.
+`./.cache/cso/CSO.3.5.csv`는 다운로드 결과 영속. 같은 버전이면 재다운로드 안 함. CSO 버전이 갱신되면 (3.5 → 3.6+) `--reset` 플래그로 재임포트.
 
-호스트에 미리 다운로드 받은 `CSO.3.4.1.csv` 가 있으면 `make seed-cso-cache FILE=~/Downloads/CSO.3.4.1.csv` 로 컨테이너 `cso_cache` volume 에 직접 카피 → `import_cso` 가 URL 미접근. KMI 서버 트래픽 절감 + 오프라인 시연 가능.
-
-<!-- TODO: A3가 CSO 3.4.1 vs 최신 버전 차이를 확인해 시드 안정 버전 핀 -->
+1차 시연은 **git-tracked `data/cso/CSO.3.5.csv`** (25.7 MB, CC BY 4.0 attribution `NOTICE.md`, C-46 2026-05-24) 사용 — `make seed-cso-cache` (FILE 생략) 가 본 파일을 컨테이너 `cso_cache` volume 에 직접 카피 → `import_cso` 가 URL 미접근. clone 만으로 즉시 시연 가능, KMI 서버 트래픽 절감, 오프라인 시연 가능. 다른 버전은 `make seed-cso-cache FILE=~/Downloads/CSO.X.Y.csv` 또는 `CSO_DOWNLOAD_URL` env 교체.

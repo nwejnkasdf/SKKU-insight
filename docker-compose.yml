@@ -69,10 +69,10 @@ services:
       # 호스트에 ~/.codex 없으면 docker compose 가 빈 디렉토리 생성 → codex CLI
       # 가 unauthorized 로 ProviderError → lifespan 가드가 부트 시 잡음.
       - ${HOME}/.codex:/root/.codex
-      # CSO 3.4.1 CSV 캐시 (P2-19, 2026-05-19). `make import-cso` 가 컨테이너 안에서
-      # /app/.cache/cso/CSO.3.4.1.csv (~26MB) 다운로드 후 본 volume 에 영속화.
-      # 호스트에 미리 받은 파일은 `make seed-cso-cache FILE=...` 로 카피.
-      # 미선언 시 컨테이너 재시작마다 재다운로드 (CSO KMI 서버 트래픽 + 부트 지연).
+      # CSO 3.5 CSV 캐시 (P2-19 + C-46 git-tracked 전환, 2026-05-24). `make seed-cso-cache`
+      # (FILE 생략) 가 git-tracked data/cso/CSO.3.5.csv (~26MB) 를 본 volume 으로 카피.
+      # 캐시 미스 시 fallback: `make import-cso` 가 컨테이너 안에서 KMI URL 다운로드.
+      # 본 volume 미선언 시 컨테이너 재시작마다 재시드 필요 (KMI 서버 트래픽 + 부트 지연).
       # backend/scripts/import_cso.py:45 CACHE_DIR = /app/.cache/cso.
       - cso_cache:/app/.cache/cso
     depends_on:

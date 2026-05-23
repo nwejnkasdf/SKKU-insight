@@ -52,7 +52,7 @@ def _strip_brackets(value: str) -> str:
 
 
 def _strip_outer_csv_quote(token: str) -> str:
-    """CSO 3.4.1 csv-quoted N-Triples 의 outer `"` 한 쌍 제거.
+    """CSO 3.4.1+ (현 3.5 동일) csv-quoted N-Triples 의 outer `"` 한 쌍 제거.
 
     토큰 형태 변환:
         `"<URI>"`  →  `<URI>`     (URI 의 outer csv quote 만 제거, `<>` 보존)
@@ -80,7 +80,7 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
     검증 (10 KB 미만은 비정상).
 
     Args:
-        url: CSO_DOWNLOAD_URL env (예: https://cso.kmi.open.ac.uk/downloads/CSO.3.4.1.csv)
+        url: CSO_DOWNLOAD_URL env (예: https://cso.kmi.open.ac.uk/downloads/CSO.3.5.csv)
         cache_dir: 보통 워크트리 루트의 `.cache/cso/`
         refresh: True 면 캐시 무시 + 재다운로드
     """
@@ -98,7 +98,7 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
             with tmp.open("wb") as f:
                 for chunk in r.iter_bytes():
                     f.write(chunk)
-        # CSO 3.4.1 CSV 는 보통 수십 MB. 10 KB 미만은 비정상 응답.
+        # CSO 3.5 CSV 는 보통 수십 MB (~26 MB 시점 2026-05). 10 KB 미만은 비정상 응답.
         size = tmp.stat().st_size
         if size < 10_000:
             tmp.unlink(missing_ok=True)
@@ -113,7 +113,7 @@ def download_cso(url: str, cache_dir: Path, refresh: bool = False) -> Path:
     return target
 
 
-# CSO 3.4.1 (2026 시점) CSV-quoted N-Triples + 옛 unquoted N-Triples 둘 다 흡수.
+# CSO 3.4.1+ (2026 시점, 현 3.5) CSV-quoted N-Triples + 옛 unquoted N-Triples 둘 다 흡수.
 # 각 라인 = (subject, predicate, object) 3 token + 종결자 ` .`.
 # subject/predicate 는 URI (`<...>`), object 는 URI 또는 literal (`"text"@en`).
 # 옛: `<S> <P> <O> .`
@@ -128,7 +128,7 @@ def parse_cso_csv(path: Path) -> dict[str, dict[str, Any]]:
 
     superTopicOf 의 subject 는 부모, object 는 자식 — child[parent_uris].append(subject).
 
-    (2026-05-16 fix) CSO 3.4.1 이 각 field 를 outer quote 로 감싸기 시작 +
+    (2026-05-16 fix) CSO 3.4.1+ (현 3.5 동일) 이 각 field 를 outer quote 로 감싸기 시작 +
     `"label"@en .` 같은 trailing 텍스트가 csv.reader 의 quote 처리와 충돌.
     csv.reader 대신 라인별 regex 로 RDF triple token 3개 추출 → 양 형식 모두 흡수.
     """
@@ -142,7 +142,7 @@ def parse_cso_csv(path: Path) -> dict[str, dict[str, Any]]:
             tokens = _TOKEN_RE.findall(line)
             if len(tokens) < 3:
                 continue
-            # CSO 3.4.1 csv-quoted (`"<URI>"`) 형식의 outer quote 한 쌍 제거.
+            # CSO 3.4.1+ (현 3.5) csv-quoted (`"<URI>"`) 형식의 outer quote 한 쌍 제거.
             # literal token (`"label"@en`) 은 변환 안 됨 — _strip_brackets 가 처리.
             s_raw = _strip_outer_csv_quote(tokens[0])
             p_raw = _strip_outer_csv_quote(tokens[1])

@@ -38,13 +38,13 @@ Phase 1 (3 세션 병렬): A4 collection ✅ (PR #16), A5 clickbait ✅ (외부 
    ↓ 사용자 검수 + OpenAPI 갱신 확인 60분
 Phase 2 (2 세션 직렬): A7 leaf-lifecycle + traversal ✅ (2026-05-17, 7-commit PR-stack + Codex 3 라운드 23 fix) → A8 recommendation ✅ 시연 검증 완료 (2026-05-17, 7-commit PR-stack + Codex 3 라운드 audit + 실 GPT-5.5 통합 시연)
    ↓ 사용자 검수 + 시드 페르소나로 end-to-end 90분
-Phase 3 (2 세션 병렬): A9 electron-client ⬜ (codegen api.ts import), A10 admin-console ⬜
+Phase 3 (2 세션 병렬): A9 electron-client 🟡 진행 중 (codegen api.ts + main 다수 보강 머지), A10 admin-console 🟡 진행 중
    ↓ 사용자 검수 + 시연 리허설 60분
 Phase 4 (2 세션 병렬): A11 test-ci ⬜, A12 demo-seed ⬜
    ↓ 최종 검수 + 발표 자료
 ```
 
-**현재 위치**: Phase 2 A8 시연 검증 완료 (2026-05-17, 실 GPT-5.5 통합 시연 통과). 다음 진입 — **A9 electron-client** (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts).
+**현재 위치**: Phase 3 A9/A10 진행 중 (main 보강 머지 ~45+ 커밋). A7 P1-12 fix 완료 (2026-05-20, C-45, [PR #30](https://github.com/nwejnkasdf/SKKU-insight/pull/30)) — extend/split caller 보강 + alembic 0009 + 운영 도구 (simulate_user_day.py + manual-day-control.md). 다음 진입 — **A9/A10 시연 통과 검수 + Codex R2 재감사 + A11 (test-ci) + 5 persona × GPT-5.5 fusion 시연**.
 
 총 ~12 에이전트 세션 + 사용자 검수 시간 ~5시간.
 
@@ -90,8 +90,8 @@ A6 interest-bayesian ✅ — atomic UPSERT, propagation (env flag default false)
 A7 leaf-lifecycle + traversal ✅ (2026-05-17) — A6 (state) + A3 (graph) 의존. trace operation 4 → 5 (merge 신규) + `INTEREST_PROPAGATION_ENABLED=true` 토글 완료. 7-commit PR-stack + Codex 3 라운드 23 fix
 A8 recommendation ✅ 시연 검증 (2026-05-17) — A7 (current/adjacent) + A6 (bucket) + A4 (Document) 의존. 7-commit PR-stack + Codex 3 라운드 audit fix + 실 GPT-5.5 통합 시연. cold_start orchestrator + 첫 trace 생성 hook (A7 #6 plan TBD 완성). P2-23 functional index PostgreSQL 16 검증 해소
 
-A9 electron-client ⬜ — client/src/generated/api.ts (A2 OpenAPI codegen)
-A10 admin-console ⬜ — admin-console/src/generated/api.ts (A2 OpenAPI codegen). `system_config` UI 갱신 책임 (A6 read-only loader 와 분담)
+A9 electron-client 🟡 진행 중 — `client/` (Vite + React + TS + Electron) 구축, main 다수 보강 머지 (~30+ 커밋)
+A10 admin-console 🟡 진행 중 — `admin-console/` (Next.js + server.mjs) 구축, main 다수 보강 머지 (~15+ 커밋). `system_config` UI 갱신 책임 (A6 read-only loader 와 분담)
 
 A11 test-ci ⬜ — 모든 모듈
 A12 demo-seed ⬜ — 모든 모듈

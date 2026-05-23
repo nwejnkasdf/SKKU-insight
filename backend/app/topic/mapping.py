@@ -23,6 +23,10 @@ from typing import Any
 #   - "Multimedia"                    → "Multimedia Systems"
 #   - "Computational Science"         → "Scientific Computing"
 # cluster_label 자체는 보존 (BroadInterest.cso_cluster_label 호환).
+#
+# (C-46, 2026-05-24) CSO 3.5 전환 시 본 5 cluster 라벨이 다시 추가됐는지 미검증.
+# 시연 시 cluster 라벨 부재 (`Hardware` / `Theory` 등) 발견되면 본 SEEDS 와
+# `backend/app/config/broad_interests.toml` 동시 교체. 일단 3.4.1 호환 라벨 유지.
 SEEDS: dict[str, str] = {
     "Artificial Intelligence": "AI",
     "Operating Systems": "Systems",
@@ -46,7 +50,7 @@ EXPECTED_CLUSTERS: frozenset[str] = frozenset(SEEDS.values())
 def _norm_label(label: str) -> str:
     """label 매칭 정규화 — lowercase + underscore → space + 다중 공백 collapse + strip.
 
-    (2026-05-16 fix) CSO 3.4.1 이 토픽 라벨을 snake_case (`artificial_intelligence`) 로
+    (2026-05-16 fix) CSO 3.4.1+ (현 3.5) 가 토픽 라벨을 snake_case (`artificial_intelligence`) 로
     저장 → 기존 lowercase+strip 만으로는 broad_interests.toml 의 `"Artificial Intelligence"`
     와 매칭 실패. underscore → space 변환 추가 + 다중 공백 정리로 양쪽 형태 모두 흡수.
     """

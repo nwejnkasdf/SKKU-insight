@@ -71,8 +71,8 @@ services:
     volumes:
       # (C-41, 2026-05-18) CodexOAuthProvider — 호스트 ~/.codex 토큰 재사용. rw 마운트.
       - ${HOME}/.codex:/root/.codex
-      # (C-43 P2-19, 2026-05-19) CSO 3.4.1 CSV 캐시 영속화 (~26MB). 호스트 사용자 파일을
-      # 본 volume 에 카피하려면 `make seed-cso-cache FILE=...`.
+      # (C-46, 2026-05-24) CSO 3.5 CSV 캐시 영속화 (~26MB). git-tracked data/cso/CSO.3.5.csv
+      # 를 본 volume 에 카피: `make seed-cso-cache` (FILE 생략 시 git-tracked 자동 사용).
       - cso_cache:/app/.cache/cso
     depends_on:
       postgres: { condition: service_healthy }
@@ -141,7 +141,7 @@ services:
 volumes:
   pg_data: {}
   redis_data: {}
-  # (C-43 P2-19, 2026-05-19) CSO 3.4.1 CSV 캐시 영속화.
+  # (C-46, 2026-05-24) CSO 3.5 CSV 캐시 영속화. git-tracked `data/cso/CSO.3.5.csv` 시드 권장.
   cso_cache: {}
 ```
 

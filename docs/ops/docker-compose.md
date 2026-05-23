@@ -2,6 +2,10 @@
 
 본 파일은 `docker-compose.yml`의 서비스 정의 골격이다. 환경변수는 [`env-vars.md`](env-vars.md), 배포 절차는 [`../sdd/deployment.md`](../sdd/deployment.md), 관리자 부트스트랩은 [`admin-bootstrap.md`](admin-bootstrap.md).
 
+## 실행 환경 — Docker = WSL only (C-47, 2026-05-24)
+
+본 프로젝트의 모든 `docker` / `docker compose` 호출은 **반드시 WSL 안에서 실행**한다. 사용자 환경은 WSL native Docker Engine Community 29.x (`unix:///var/run/docker.sock`) 사용. PowerShell·git bash 에서 직접 `docker compose` 호출은 `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine` 로 실패. 자세히는 [`runbooks.md §실행 환경`](runbooks.md). AGENTS.md "시연 30분 전 최종 체크" 박스도 동일 가정.
+
 ## 파일 위치
 
 - `docker-compose.yml` (프로젝트 루트)

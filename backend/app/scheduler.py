@@ -103,6 +103,17 @@ JOB_REGISTRATIONS: list[_JobRegistration] = [
         "queue": "default",
         "timeout": 5400,
     },
+    # === C-53 신규 (2026-05-24) ===
+    # discovery/adjacent → core 부활 promotion. 직전 7-day UserEvent.save 분석.
+    # 일요일 18 UTC (= 월요일 03 KST) — 사용자 활동 적은 시간대 + 다른 cron 과 분리.
+    # timeout 1800s — 사용자당 SQL UPDATE/INSERT 만 (LLM 호출 없음) — 짧음.
+    {
+        "id": "weekly_promotion_job",
+        "cron_attr": "WEEKLY_PROMOTION_CRON",
+        "func": "app.worker.jobs.weekly_promotion.weekly_promotion_job",
+        "queue": "default",
+        "timeout": 1800,
+    },
 ]
 
 

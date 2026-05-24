@@ -130,6 +130,10 @@ class JobType(str, Enum):
     INTEREST_DECAY = "interest_decay"
     TRACE_MERGE = "trace_merge"
     DAILY_USER_PROFILE_GENERATION = "daily_user_profile_generation"
+    # (C-53, 2026-05-24) discovery/adjacent → core promotion 주 1회 cron.
+    # 직전 7-day UserEvent.save 분석 → origin metadata 기반 promotion:
+    # Reincarnation = trace.status archived→active / Fusion = 새 active trace INSERT
+    WEEKLY_PROMOTION = "weekly_promotion"
 
 
 class AdminRole(str, Enum):

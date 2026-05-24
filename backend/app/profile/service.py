@@ -54,16 +54,19 @@ from app.profile.prompt_builder import (
     build_user_prompt,
     to_input_payload,
 )
+from app.profile.sampling import softmax_sample_archived_trace
 from app.profile.schemas import (
     ActiveTraceSummary,
     ArchivedTraceSummary,
     CSOTopicCandidate,
     CSOTopicCandidatePool,
+    FusionCandidate,
     InterestStateSummary,
     ProfileLLMInput,
     UserProfilePayload,
 )
 from app.traversal import queries as trav_queries
+from app.traversal.fusion_bridge import find_fusion_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +519,94 @@ async def generate_profile_payload(
             "broadening_seeds": valid_broadening,
         }
     )
+
+
+async def apply_fusion_bridge_override(
+    db: AsyncSession,
+    cso_graph: nx.DiGraph,
+    payload: UserProfilePayload,
+    *,
+    user_id: UUID,
+    archive_score_tail_min: float,
+    input_archive_max: int,
+    softmax_temperature: float,
+    path_top_k: int,
+    max_hops: int,
+) -> UserProfilePayload:
+    """(C-53, 2026-05-24) LLM 결과의 fusion_candidates 를 BFS 결과로 override.
+
+    사용자 결정 (디자인 논의):
+    - bridge_cso 결정 = trace↔trace meet in the middle BFS (LLM 의존 X, deterministic)
+    - Reincarnation 다양성 = archived trace softmax sampling (T=0.3 default)
+    - active trace 선택 = score_tail DESC top 1 (신호 가장 강한 1개)
+
+    BFS bridge 못 찾으면 fusion_candidates=[] — query_discovery_fusion 이 빈 풀 →
+    fallback trend.
+
+    LLM 결과의 다른 부분 (persona / deepening / broadening) 은 그대로. fusion 만 override.
+    """
+    # 1. active trace 선택 — score_tail DESC top 1.
+    active_orm = await trav_queries.get_active_traces(db, user_id)
+    if not active_orm:
+        return payload.model_copy(update={"fusion_candidates": []})
+    active_trace = max(active_orm, key=lambda t: t.score_tail)
+
+    # 2. archived trace 선택 — softmax sampling.
+    archived_pool = await trav_queries.get_archived_traces_with_score(
+        db,
+        user_id,
+        score_tail_min=archive_score_tail_min,
+        limit=input_archive_max,
+    )
+    archived_trace = softmax_sample_archived_trace(
+        archived_pool, temperature=softmax_temperature
+    )
+    if archived_trace is None:
+        return payload.model_copy(update={"fusion_candidates": []})
+
+    # 3. BFS — bridge_cso 결정.
+    bridge_cso = await find_fusion_bridge(
+        db,
+        cso_graph,
+        user_id,
+        archived_trace,
+        active_trace,
+        top_k=path_top_k,
+        max_hops=max_hops,
+    )
+    if bridge_cso is None:
+        return payload.model_copy(update={"fusion_candidates": []})
+
+    # 4. FusionCandidate build — LLM 결과 무시, BFS 결과 우선.
+    label_lookup = await _build_cso_label_lookup(
+        db,
+        set(active_trace.path) | set(archived_trace.path) | {bridge_cso},
+    )
+    bridge_label = label_lookup.get(bridge_cso) or str(bridge_cso)
+    from_archived = [
+        label_lookup.get(cid, str(cid)) for cid in list(archived_trace.path)[-3:]
+    ]
+    from_active = [
+        label_lookup.get(cid, str(cid)) for cid in list(active_trace.path)[-3:]
+    ]
+    fusion = FusionCandidate(
+        from_archived=from_archived or [str(archived_trace.path[-1])],
+        from_active=from_active or [str(active_trace.path[-1])],
+        bridge_label=bridge_label[:80],
+        bridge_cso_topic_id=bridge_cso,
+        bridge_reasoning=(
+            "meet in the middle BFS — archived trace 와 active trace 의 외향 frontier "
+            "첫 만남 노드. 두 영역의 의미적 외부 교차."
+        ),
+    )
+    logger.info(
+        "user_profile fusion_bridge BFS user=%s archived_trace=%s active_trace=%s bridge_cso=%s",
+        user_id,
+        archived_trace.trace_id,
+        active_trace.trace_id,
+        bridge_cso,
+    )
+    return payload.model_copy(update={"fusion_candidates": [fusion]})
 
 
 async def upsert_user_profile(

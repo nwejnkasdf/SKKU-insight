@@ -1019,11 +1019,17 @@ async def _persist_recommendations(
     user_id: UUID,
     filled: FilledSlots,
     reasons: dict[UUID, str],
+    *,
+    origin_metadata: dict[UUID, tuple[str, UUID]] | None = None,
 ) -> dict[UUID, UUID]:
     """Recommendation + RecommendationSlot rows INSERT.
 
     §11.#2 방어: daily UNIQUE race — `pg_insert(...).on_conflict_do_nothing()` 패턴.
     같은 (user, doc, slot, date) 가 이미 있으면 skip (refresh fallback 경로 안전).
+
+    (C-53, 2026-05-24) `origin_metadata: dict[document_id, (origin_type, origin_ref)]`
+    인자 — discovery sub-slot 카드의 promotion 추적. Reincarnation 카드 = (`reincarnation`,
+    archived_trace_id). Fusion 카드 = (`fusion`, bridge_cso_topic_id). 미매핑 = NULL.
 
     반환: dict[document_id, recommendation_id] — caller (engine) 가 카드의
     recommendation_id 매핑. on_conflict 시 기존 row id lookup.
@@ -1035,10 +1041,14 @@ async def _persist_recommendations(
         (SlotType.FALLBACK_TREND, filled.fallback_trend),
     ]
     doc_to_rec_id: dict[UUID, UUID] = {}
+    origin_metadata = origin_metadata or {}
     for slot, cards in bucket_iter:
         for c in cards:
             new_id = uuid4()
             reason = reasons.get(c.document_id, "")
+            origin = origin_metadata.get(c.document_id)
+            origin_type = origin[0] if origin else None
+            origin_ref = origin[1] if origin else None
             stmt = (
                 pg_insert(Recommendation)
                 .values(
@@ -1048,6 +1058,8 @@ async def _persist_recommendations(
                     slot_type=slot.value,
                     reason=reason[:255] if reason else None,
                     score=c.score,
+                    origin_type=origin_type,
+                    origin_ref=origin_ref,
                 )
                 .on_conflict_do_nothing()
                 .returning(Recommendation.recommendation_id)
@@ -1229,13 +1241,17 @@ async def _build_fusion_subslot(
     *,
     user_id: UUID,
     trace_path_csos: set[UUID],
-) -> list[CandidateRow]:
+) -> tuple[list[CandidateRow], UUID | None]:
     """slot 1 (Fusion) — fusion_candidates → broadening_seeds → trend fallback.
 
     Codex R1 Critical #2 + Suggested #3 + #4 fix (2026-05-19):
     - fusion_candidates 의 bridge_cso 가 trace_path_csos 안이면 거부 (Suggested #3)
     - 후보 풀이 doc 0개면 다음 fallback 진행 (Suggested #4)
     - 별도 sub-slot 반환 → engine 이 slot 별 1개씩 강제 (Critical #2)
+
+    (C-53, 2026-05-24) 반환 tuple — `(rows, bridge_cso_id)` 형태.
+    bridge_cso_id = 본 sub-slot 의 origin metadata (promotion 추적). fallback
+    경로 (broadening seed / trend) 진입 시 None — promotion 비대상.
     """
     if profile is not None:
         for candidate in profile.fusion_candidates or []:
@@ -1248,7 +1264,7 @@ async def _build_fusion_subslot(
                 continue
             rows = await query_discovery_fusion(db, user_id, bridge_id)
             if rows:
-                return rows
+                return rows, bridge_id
         for seed in profile.broadening_seeds or []:
             seed_id = _resolve_seed_id(
                 seed, cso_graph, excluded=trace_path_csos
@@ -1257,8 +1273,11 @@ async def _build_fusion_subslot(
                 continue
             rows = await query_discovery_fusion(db, user_id, seed_id)
             if rows:
-                return rows
-    return await query_discovery_trend(db, user_id, list(trace_path_csos))
+                return rows, None  # broadening seed = promotion 비대상
+    return (
+        await query_discovery_trend(db, user_id, list(trace_path_csos)),
+        None,
+    )
 
 
 async def _build_reincarnation_subslot(
@@ -1269,18 +1288,28 @@ async def _build_reincarnation_subslot(
     *,
     user: User,
     trace_path_csos: set[UUID],
-) -> list[CandidateRow]:
-    """slot 2 (Reincarnation) — top_archived_trace → deepening_seeds → trend fallback.
+) -> tuple[list[CandidateRow], UUID | None]:
+    """slot 2 (Reincarnation) — softmax sampled archived trace → deepening_seeds → trend.
 
     Codex R1 Critical #2 + Suggested #4 (2026-05-19): 별도 sub-slot 반환 + doc 결과
     기반 fallback 판단.
+
+    (C-53, 2026-05-24) get_top_archived_trace (deterministic top-1) → softmax sampling
+    교체. 매일 다양한 archived trace 부활 — "매일 새 발견" 본질 정합.
+    반환 tuple — `(rows, archived_trace_id)` 형태. 후자 = promotion metadata (Reincarnation
+    카드 save 시 status archived→active 대상). fallback 경로 진입 시 None.
     """
-    archived_trace = await trav_queries.get_top_archived_trace(
+    from app.profile.sampling import softmax_sample_archived_trace
+
+    archived_pool = await trav_queries.get_archived_traces_with_score(
         db,
         user.user_id,
         score_tail_min=settings.USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN,
-        gap_days_min=settings.USER_PROFILE_REINCARNATION_GAP_DAYS_MIN,
-        current_active_day=int(user.active_day_counter),
+        limit=settings.USER_PROFILE_INPUT_ARCHIVE_MAX,
+    )
+    archived_trace = softmax_sample_archived_trace(
+        archived_pool,
+        temperature=settings.REINCARNATION_SAMPLING_TEMPERATURE,
     )
     if archived_trace is not None and archived_trace.path:
         archived_leaves = await trav_queries.get_descendant_archived_leaves(
@@ -1292,7 +1321,7 @@ async def _build_reincarnation_subslot(
             db, user.user_id, tail_cso, archived_leaf_ids
         )
         if rows:
-            return rows
+            return rows, archived_trace.trace_id
     if profile is not None:
         for seed in profile.deepening_seeds or []:
             seed_id = _resolve_seed_id(
@@ -1302,8 +1331,11 @@ async def _build_reincarnation_subslot(
                 continue
             rows = await query_discovery_fusion(db, user.user_id, seed_id)
             if rows:
-                return rows
-    return await query_discovery_trend(db, user.user_id, list(trace_path_csos))
+                return rows, None  # deepening seed = promotion 비대상
+    return (
+        await query_discovery_trend(db, user.user_id, list(trace_path_csos)),
+        None,
+    )
 
 
 async def _build_discovery_pools(
@@ -1314,8 +1346,8 @@ async def _build_discovery_pools(
     *,
     user: User,
     trace_path_csos: set[UUID],
-) -> tuple[list[CandidateRow], list[CandidateRow]]:
-    """A8-v2 discovery slot 본문 — `(fusion_pool, reincarnation_pool)` 별도 반환.
+) -> tuple[list[CandidateRow], list[CandidateRow], UUID | None, UUID | None]:
+    """A8-v2 discovery slot 본문 — `(fusion_pool, reincarnation_pool, bridge_cso, archived_trace_id)` 반환.
 
     Codex R1 Critical #2 fix (2026-05-19): 직전 `_build_discovery_pool_raw` 가 두
     source 를 untagged pool 로 통합 → ranking 시점에 의도된 "Fusion 1 + Reincarnation
@@ -1336,10 +1368,10 @@ async def _build_discovery_pools(
         user.user_id,
         cache_ttl_seconds=profile_config.cache_ttl_seconds,
     )
-    fusion_pool = await _build_fusion_subslot(
+    fusion_pool, fusion_bridge_id = await _build_fusion_subslot(
         db, profile, cso_graph, user_id=user.user_id, trace_path_csos=trace_path_csos
     )
-    reincarnation_pool = await _build_reincarnation_subslot(
+    reincarnation_pool, reincarnation_trace_id = await _build_reincarnation_subslot(
         db,
         profile,
         cso_graph,
@@ -1347,7 +1379,7 @@ async def _build_discovery_pools(
         user=user,
         trace_path_csos=trace_path_csos,
     )
-    return fusion_pool, reincarnation_pool
+    return fusion_pool, reincarnation_pool, fusion_bridge_id, reincarnation_trace_id
 
 
 async def _build_discovery_pool_raw(
@@ -1363,7 +1395,7 @@ async def _build_discovery_pool_raw(
 
     backward-compat 만 유지. 신규 caller 는 `_build_discovery_pools` 직접 사용 권장.
     """
-    fusion_pool, reincarnation_pool = await _build_discovery_pools(
+    fusion_pool, reincarnation_pool, _, _ = await _build_discovery_pools(
         db, redis, cso_graph, settings, user=user, trace_path_csos=trace_path_csos
     )
     return fusion_pool + reincarnation_pool
@@ -1415,9 +1447,13 @@ async def build_dashboard(
     )
     # Codex R1 Critical #2 fix (2026-05-19): fusion + reincarnation 별도 sub-slot →
     # ranking + diversify 별도 → 각 [:1] concat → fill_slots 가 source 별 1개씩 강제.
+    # (C-53, 2026-05-24) 추가 metadata 반환: bridge_cso (fusion) / archived_trace_id
+    # (reincarnation) — _persist_recommendations 가 origin_type/origin_ref 저장.
     (
         fusion_pool_raw,
         reincarnation_pool_raw,
+        fusion_bridge_cso_id,
+        reincarnation_archived_trace_id,
     ) = await _build_discovery_pools(
         db,
         redis,
@@ -1490,6 +1526,20 @@ async def build_dashboard(
     # 2개를 discovery 슬롯에 채우므로 fusion 1 + reincarnation 1 보장.
     discovery_pool = fusion_pool[:1] + reincarnation_pool[:1]
 
+    # (C-53, 2026-05-24) origin metadata 매핑 — discovery sub-slot 카드의 promotion 추적.
+    # fusion_pool[0] 의 document_id → ('fusion', bridge_cso_id)
+    # reincarnation_pool[0] 의 document_id → ('reincarnation', archived_trace_id)
+    # caller (_persist_recommendations) 가 INSERT 시 origin_type/origin_ref 채움.
+    origin_metadata: dict[UUID, tuple[str, UUID]] = {}
+    if fusion_pool and fusion_bridge_cso_id is not None:
+        origin_metadata[fusion_pool[0].document_id] = (
+            "fusion", fusion_bridge_cso_id,
+        )
+    if reincarnation_pool and reincarnation_archived_trace_id is not None:
+        origin_metadata[reincarnation_pool[0].document_id] = (
+            "reincarnation", reincarnation_archived_trace_id,
+        )
+
     # 5. fill_slots — emerging quota + threshold + FR-42 fallback.
     filled = fill_slots(
         core_pool=core_pool,
@@ -1549,7 +1599,7 @@ async def build_dashboard(
 
     # 8. persist — db.commit 은 caller 책임.
     doc_to_rec_id = await _persist_recommendations(
-        db, user.user_id, filled, reasons
+        db, user.user_id, filled, reasons, origin_metadata=origin_metadata,
     )
     # 9. materialize cards (chip fetch + score 마스킹).
     chips = await _fetch_topic_chips(db, list(doc_to_rec_id.keys()))

@@ -221,6 +221,10 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 | `USER_PROFILE_REINCARNATION_GAP_DAYS_MIN` | `7` | **(A8-v2 신규)** archived_at 직후 본 active day 미만 archive 는 reincarnation 후보 제외 — 자연 망각 시간 부재. |
 | `USER_PROFILE_LOCK_TTL_SECONDS` | `360` | **(A8-v2 신규)** daily cron `RedisKey.user_profile_generation_lock` TTL. LLM 호출 동반이라 2x LLM timeout 마진 (Codex R1 Critical #1 fix 2026-05-19 — 직전 180=LLM timeout 였음). |
 | `USER_PROFILE_CACHE_TTL_SECONDS` | `3600` | **(A8-v2 신규)** `RedisKey.user_profile_cache` SETEX TTL — engine.build_dashboard fetch 후 1h. daily cron 완료 시 DEL invalidate. |
+| `REINCARNATION_SAMPLING_TEMPERATURE` | `0.3` | **(C-53 신규)** Reincarnation archived trace softmax sampling temperature. `P(trace_i) = exp(score_tail_i / T) / Σ`. T → 0 deterministic (top 1) / T → ∞ uniform / **T=0.3** 추천 (score 0.6~1.0 분포 기준 top 70~80% weight, 다양성 충분). `backend/app/profile/sampling.py`. |
+| `FUSION_BRIDGE_PATH_TOP_K` | `5` | **(C-53 신규)** Fusion bridge BFS 의 각 path 출발점 개수. `user_interest_state.long_score` DESC top_k. path 길이 ≤ K 면 전부 사용. |
+| `FUSION_BRIDGE_MAX_HOPS` | `3` | **(C-53 신규)** Fusion bridge meet-in-the-middle BFS 외향 깊이. CSO 14k 노드 sparse 그래프 (avg deg ~6) 기준 충분. 만나지 않으면 None → trend fallback. |
+| `WEEKLY_PROMOTION_CRON` | `0 18 * * 0` | **(C-53 신규)** discovery/adjacent → core promotion 주 1회 cron. 일요일 18 UTC = 월요일 03 KST. UserEvent.save 7-day window + Recommendation.origin_type/origin_ref JOIN. `backend/app/worker/jobs/weekly_promotion.py`. |
 
 ## 외부 소스 키 (있을 때만 채움)
 

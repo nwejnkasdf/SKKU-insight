@@ -93,6 +93,7 @@ class JobType(str, Enum):
     INTEREST_DECAY = "interest_decay"   # A6 daily decay + 14-day boost 만료 (2026-05-17 추가)
     TRACE_MERGE = "trace_merge"          # A7 daily trace merge (18 UTC, 2026-05-17 추가)
     DAILY_USER_PROFILE_GENERATION = "daily_user_profile_generation"  # A8-v2 daily 19 UTC, archive×current fusion + seeds (2026-05-19 추가)
+    WEEKLY_PROMOTION = "weekly_promotion"  # (C-53, 2026-05-24) discovery/adjacent → core 부활 주 1회 cron (일요일 18 UTC). UserEvent.save 7-day window + Recommendation.origin_type/origin_ref JOIN
 
 
 class AdminRole(str, Enum):

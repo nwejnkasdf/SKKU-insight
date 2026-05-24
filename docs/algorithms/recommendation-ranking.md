@@ -54,7 +54,7 @@ candidates_adjacent = SELECT documents WHERE topic IN adjacent_csos ...
 
 **(A8-v2 라운드 본문 pivot, 2026-05-19, [`../decisions.md §15`](../decisions.md))** — discovery slot 2 의 본질을 "trust=high trend 정렬" 에서 "사용자 흥미 *궤적의 교차점*에서 새 방향성 발굴" 로 변경. FR-41 의 "**잠재적으로 관심 있을 수 있는**" 의도를 회복.
 
-**slot 1 (Fusion)**: 사용자 active trace × archived trace 의 cross-product 교차점. daily 19 UTC LLM cron (`worker/jobs/user_profile.py`) 이 `UserProfile.fusion_candidates` JSONB array (0-3개) 를 생성. `engine.build_dashboard` 의 `_build_discovery_pool_raw` 가 첫 valid candidate (`bridge_cso_topic_id ∈ cso_graph`) 로 `query_discovery_fusion()` 호출.
+**slot 1 (Fusion)**: 사용자 active trace × archived trace 의 cross-product 교차점. **(C-53 라운드 2026-05-24, [`../decisions.md §16`](../decisions.md))** — LLM 의 bridge_cso 결정을 **trace↔trace meet-in-the-middle BFS** 로 교체. daily 19 UTC LLM cron 이 LLM 호출 후 `apply_fusion_bridge_override` 가 bridge_cso 만 BFS 결과로 덮음. algorithm: archived + active path 의 `user_interest_state.long_score` DESC top_5 출발 + path 전체 visited + 외향 BFS (superTopicOf + relatedEquivalent edge 양방향). 첫 만남 노드 = bridge. LCA root 자연 회피. max_hops=3 안 만나지 않으면 None → trend fallback. `backend/app/traversal/fusion_bridge.py:find_fusion_bridge`.
 
 ```
 profile = await get_user_profile(user_id)
@@ -69,7 +69,7 @@ if not pool and profile.broadening_seeds:
     pool += await query_discovery_fusion(user_id, profile.broadening_seeds[0].cso_topic_id)
 ```
 
-**slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 부활. Serendipity 3-dim framework (RecSys '25) 의 "taste reincarnation" — "강한 신호로 종료된 영역에서 다시 흥미 자료 제시". `gap_days_min=7` 가드로 너무 최근 archive 제외.
+**slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 부활. Serendipity 3-dim framework (RecSys '25) 의 "taste reincarnation" — "강한 신호로 종료된 영역에서 다시 흥미 자료 제시". **(C-53 라운드 2026-05-24)** — `get_top_archived_trace` (deterministic top-1) → **`softmax_sample_archived_trace`** (T=`REINCARNATION_SAMPLING_TEMPERATURE=0.3` default) 교체. 매일 다양한 archived trace — "매일 새 발견" 본질 정합. `backend/app/profile/sampling.py:softmax_sample_archived_trace`.
 
 ```
 archived_trace = await get_top_archived_trace(user_id,
@@ -93,6 +93,11 @@ if not pool:
 **UserProfile schema** (`backend/app/db/models/user_profile.py` + `data/schema.md` UserProfile §, alembic 0007): 6 필드 — 3 자유 텍스트 (recent_signals / persistent_tendencies / likely_dislikes summary) + 3 JSONB array (fusion_candidates / deepening_seeds / broadening_seeds). daily 19 UTC LLM cron 이 생성·영속, ORM/schema 만 (endpoint·UI 부재 — 사용자 결정 #4).
 
 **Anti-pattern 회피**: LLM hallucination (cso_graph 부재 bridge_cso_topic_id) 매핑 가드 + cache-before-commit 회피 + per-user try/except + Lua atomic CAS release ([`decisions.md §15`](../decisions.md) 매트릭스).
+
+**(C-53 라운드 2026-05-24) Promotion 메커니즘** — discovery/adjacent 카드의 강한 신호 (save) 시 core 부활:
+- **Recommendation origin metadata** (alembic 0010): `origin_type` ('reincarnation' | 'fusion' | NULL) + `origin_ref` (archived trace_id | bridge_cso_topic_id) 컬럼. `engine._persist_recommendations` 가 discovery sub-slot 카드 INSERT 시 영속화.
+- **`weekly_promotion_job`** (`WEEKLY_PROMOTION_CRON="0 18 * * 0"` 일요일 18 UTC): 직전 7-day UserEvent.save → origin metadata JOIN. Reincarnation save → `trace.status: archived → active` (path 보존). Fusion save → 새 active trace INSERT (path=[bridge_cso]). dedup + idempotent + cache invalidate. LLM 호출 X (빠름). active cap 무제한 (사용자 결정).
+- 사용자 디자인 의도: "discovery / adjacent 의 목적이 core 확대도 있다". `worker/jobs/weekly_promotion.py`.
 
 ## 신뢰도 임계 (`recommendation.toml`)
 

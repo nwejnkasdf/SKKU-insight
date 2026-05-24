@@ -26,6 +26,7 @@ import networkx as nx
 import redis.asyncio as aioredis
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, text
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -231,6 +232,152 @@ async def _ensure_active_state_for_decay(
     )
     insert_stmt = insert_stmt.on_conflict_do_nothing()
     await db.execute(insert_stmt)
+
+
+# (C-56, 2026-05-24) leaf 활성 신호 — ingest hook 즉시.
+# rule_evaluator.py 명세: "활성 신호 (emerging→active, stale→active): ingest 직후 즉시 (no LLM)".
+# 직전까지 caller 부재로 production 에서 leaf 가 active 로 자라지 않던 결함 (A7 P1-12 와
+# 같은 패턴) fix. C-45 의 trace extend/split caller 보강 답습.
+_LEAF_PROMOTION_EVENT_TYPES = frozenset(
+    {EventType.CLICK.value, EventType.SAVE.value, EventType.DWELL_TICK.value}
+)
+
+
+async def _update_leaf_last_signal(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    document_id: UUID,
+    active_day: int,
+) -> list[UUID]:
+    """이벤트의 Document 매핑 leaf 들의 last_signal_active_day = active_day UPDATE.
+
+    return: 갱신된 leaf_topic_id list (promotion 평가 후보). status 가 emerging/active/stale
+    인 것만 갱신 (merged/archived 는 영구 상태이므로 신호 무시).
+    """
+    from app.contracts import LeafTopicStatus
+    from app.db.models import DynamicLeafTopic
+
+    stmt = (
+        sa_update(DynamicLeafTopic)
+        .where(
+            DynamicLeafTopic.user_id == user_id,
+            DynamicLeafTopic.status.in_(
+                [
+                    LeafTopicStatus.EMERGING.value,
+                    LeafTopicStatus.ACTIVE.value,
+                    LeafTopicStatus.STALE.value,
+                ]
+            ),
+            DynamicLeafTopic.leaf_topic_id.in_(
+                select(DocumentTopic.leaf_topic_id).where(
+                    DocumentTopic.document_id == document_id,
+                    DocumentTopic.leaf_topic_id.is_not(None),
+                )
+            ),
+        )
+        .values(last_signal_active_day=active_day)
+        .returning(DynamicLeafTopic.leaf_topic_id)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _evaluate_leaf_promotion(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    candidate_leaf_ids: list[UUID],
+    active_day: int,
+) -> int:
+    """candidate leaf 의 window_promotion / reactivation 평가 + apply.
+
+    rule_evaluator.evaluate_rule_transitions 의 emerging→active / stale→active 룰만 적용
+    (강등은 daily cron 의 _evaluate_leaf_demotion_for_user 책임).
+
+    window 카운터:
+    - documents_in_window_7d = Document.created_at 최근 7 wallclock days (명세 정합 —
+      leaf 에 자료 자체가 충분히 있는지 판정, 사용자 활동과 독립)
+    - interest_signals_in_window_7d = UserEvent click/save/dwell_tick 의 active_day_at_event
+      기준 최근 7 active days (잠수 처리 정합)
+    - idle 은 본 함수 직전 _update_leaf_last_signal 로 0 보장 (방금 갱신).
+
+    return: 승격된 leaf 수.
+    """
+    from app.db.models import Document, DynamicLeafTopic
+    from app.leaf_lifecycle.protocol import LifecycleSignals
+    from app.leaf_lifecycle.rule_evaluator import (
+        apply_transitions,
+        evaluate_rule_transitions,
+    )
+
+    if not candidate_leaf_ids:
+        return 0
+
+    # 1. window 카운터 fetch (단일 SQL JOIN).
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT
+                    dlt.leaf_topic_id AS leaf_topic_id,
+                    COUNT(DISTINCT d.document_id) FILTER (
+                        WHERE d.created_at >= NOW() - INTERVAL '7 days'
+                    ) AS docs_count,
+                    COUNT(DISTINCT ue.event_id) FILTER (
+                        WHERE ue.event_type IN ('click','save','dwell_tick')
+                          AND ue.active_day_at_event IS NOT NULL
+                          AND (:current_ad - ue.active_day_at_event) <= 7
+                    ) AS signals_count
+                FROM dynamic_leaf_topic dlt
+                LEFT JOIN document_topic dt ON dt.leaf_topic_id = dlt.leaf_topic_id
+                LEFT JOIN document d ON d.document_id = dt.document_id
+                LEFT JOIN user_event ue ON ue.document_id = d.document_id
+                  AND ue.user_id = dlt.user_id
+                WHERE dlt.leaf_topic_id = ANY(:leaf_ids)
+                GROUP BY dlt.leaf_topic_id
+                """
+            ),
+            {
+                "leaf_ids": candidate_leaf_ids,
+                "current_ad": active_day,
+            },
+        )
+    ).all()
+    if not rows:
+        return 0
+
+    # 2. leaf ORM lookup — rule_evaluator 가 DynamicLeafTopic 객체 list 받음.
+    leaves = list(
+        (
+            await db.execute(
+                select(DynamicLeafTopic).where(
+                    DynamicLeafTopic.leaf_topic_id.in_(candidate_leaf_ids)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # 3. LifecycleSignals 구성 (idle=0 ← 방금 last_signal 갱신).
+    signals = LifecycleSignals()
+    for row in rows:
+        signals.documents_in_window_7d[row.leaf_topic_id] = int(row.docs_count or 0)
+        signals.interest_signals_in_window_7d[row.leaf_topic_id] = int(
+            row.signals_count or 0
+        )
+    for leaf in leaves:
+        signals.idle_active_days[leaf.leaf_topic_id] = 0
+
+    # 4. evaluate + promotion 만 apply (강등은 daily cron 책임).
+    transitions = evaluate_rule_transitions(leaves, signals)
+    promotions = [
+        t for t in transitions if t.reason in ("window_promotion", "reactivation")
+    ]
+    if not promotions:
+        return 0
+    return await apply_transitions(db, promotions)
 
 
 async def _record_user_event(
@@ -653,6 +800,24 @@ async def ingest_event_atomic(
                 active_day=active_day,
             )
             posterior_applied = True
+
+    # 7.5) (C-56, 2026-05-24) leaf 활성 신호 — last_signal 갱신 + 즉시 승격 평가.
+    # rule_evaluator.py 명세 정합. 직전까지 caller 부재로 emerging→active 가 production
+    # 에서 일어나지 않던 결함 fix. 이벤트 type 이 click/save/dwell_tick 일 때만.
+    if event_type.value in _LEAF_PROMOTION_EVENT_TYPES and document_id is not None:
+        affected_leaf_ids = await _update_leaf_last_signal(
+            db,
+            user_id=user.user_id,
+            document_id=document_id,
+            active_day=active_day,
+        )
+        if affected_leaf_ids:
+            await _evaluate_leaf_promotion(
+                db,
+                user_id=user.user_id,
+                candidate_leaf_ids=affected_leaf_ids,
+                active_day=active_day,
+            )
 
     # 8) cache invalidate
     if cache_invalidate:

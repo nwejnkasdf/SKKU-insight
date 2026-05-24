@@ -115,7 +115,8 @@ async def apply_transitions(
     """전이 list 를 SQL UPDATE 일괄 적용.
 
     atomic UPDATE per leaf (small N). last_signal_active_day 는 별도 갱신
-    (active 신호 들어올 때만 — service.ingest 가 함).
+    (active 신호 들어올 때만 — service.ingest_event_atomic 안 _update_leaf_last_signal
+    가 click/save/dwell_tick 시점 갱신, C-56 라운드 fix).
     """
     now = datetime.now(UTC)
     applied = 0

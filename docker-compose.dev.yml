@@ -1,0 +1,37 @@
+# 시연·개발 모드 (C-50, 2026-05-24). backend mount + uvicorn --reload 자동.
+#
+# 사용:
+#   make dev                              # 자동 적용 (Makefile 이 -f 두 파일 모두 패스)
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d   # 수동
+#
+# production / 다른 PC 배포는 본 파일 제외:
+#   docker compose -f docker-compose.yml up -d
+#
+# 효과:
+# - backend 코드 (`./backend/app/...`) 수정 시 uvicorn --reload 가 0.5s 안 감지
+#   → api 컨테이너 안 module 재 import → 다음 API 요청부터 새 코드.
+# - RQ worker 도 watchmedo (watchdog) 로 *.py 변경 시 auto-restart. 다만 진행 중
+#   job 은 끊김 — LLM 호출 도중 코드 수정은 피하기.
+# - .env 변경은 별개 — 컨테이너 env_file 은 create 시점 박힘. force-recreate 필요.
+#
+# 코드 변경 후 워크플로우:
+#   1. backend/app/recommendation/cold_start.py 수정 + 저장
+#   2. (수동) docker logs gifted-vaughan-b92a01-api-1 --tail 5 — `Detected change` 로그 확인
+#   3. 다음 API 요청 (또는 RQ job) 부터 새 코드 적용
+
+services:
+  api:
+    volumes:
+      - ./backend:/app:rw
+    command:
+      - sh
+      - -c
+      - "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --reload"
+
+  worker:
+    volumes:
+      - ./backend:/app:rw
+    command:
+      - sh
+      - -c
+      - "pip install --quiet watchdog && watchmedo auto-restart --directory=/app --pattern=*.py --recursive -- python -m app.worker"

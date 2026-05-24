@@ -169,6 +169,10 @@ docker compose exec api alembic upgrade head --sql > /tmp/migration.sql
 
 ## 8. 시연 직전 깨끗한 데이터로 시작
 
+> **🐧 모든 명령은 WSL 안에서 실행** (C-47, 2026-05-24). 본 문서 상단 §실행 환경 참조.
+>
+> **시연·개발 모드 = `make dev`** (C-50, 2026-05-24): docker-compose.dev.yml 자동 적용 → backend mount + uvicorn --reload → 코드 수정 시 0.5s 안 자동 reload (image rebuild 불필요). production 모드는 `make prod-up` (mount X, image 안 빌드된 코드만 사용).
+
 ```bash
 docker compose down -v       # 모든 데이터 삭제
 docker compose up -d postgres redis
@@ -181,9 +185,30 @@ make create-admin            # admin 1
 # make seed                  # A12 ⬜ 미구현 — Makefile 타깃 없음, backend/scripts/seed_personas.py 도 부재.
                              # 1차 시연 (~A6 단계) 은 수동 데이터 삽입 또는 signup → onboarding → /events 호출로 대체.
                              # A12 머지 후 본 명령 활성 예정 — 5+ 페르소나 + 14일 인터랙션.
-docker compose up -d         # api/worker/admin-console 기동 (clickbait-detector 는 default 비활성)
+make dev                     # api/worker/admin-console 기동 + dev mount (backend 코드 수정 즉시 반영)
 cd client && npm start       # Electron 앱 (A9 🟡 진행 중 — `client/` 구축됨, main 다수 보강 머지. 시연 통과 검수 보류)
 ```
+
+### 8.0 새 환경 / 다른 PC 재현 (C-50, 2026-05-24)
+
+PR #33~#35 머지 후 main 코드 기준 — 추가 hot patch 불필요. `.env.example` 의 4 변수 (`COLD_START_MAX_PER_USER_LIFETIME=50`, `LLM_REQUEST_TIMEOUT_SECONDS=600`, `COLD_START_LLM_TIMEOUT_SECONDS=600`, `CORS_ALLOWED_ORIGINS` 에 127.0.0.1:5173 포함) 가 모두 영구화됨.
+
+```bash
+git clone <repo> && cd SKKU-InSight
+cp .env.example .env                # 4 변수 default 그대로 사용 (수정 불필요)
+make codex-login                    # ChatGPT OAuth (브라우저)
+make dev                            # 첫 build ~5분 + 부트
+make migrate && make seed-cso-cache && make import-cso && make create-admin
+cd client && npm install && npm start   # Electron client
+```
+
+### 8.1 같은 환경 reuse (가장 빠른 재시연)
+
+```bash
+make stop                    # 컨테이너 stop (volume 보존)
+# (다음 시연) wsl docker compose --project-name <YOUR_PROJECT> start
+```
+사용자 데이터 + rec + cso_topic 모두 그대로 (postgres + cso_cache volume 영속).
 
 소요: 약 5–10분 (CSO 임포트가 가장 길다 — 1차 다운로드 1분 + insert ~3분).
 

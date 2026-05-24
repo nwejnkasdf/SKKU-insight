@@ -57,6 +57,8 @@ SYSTEM_PROMPT_TEMPLATE = """\
 ## §2 중복 제거 hint
 - 동일 URL / DOI 가 보이면 1건만 포함.
 - 단순 URL 변형 (utm_*, fbclid, gclid) 도 같은 것으로 간주.
+- (있다면) 입력의 `seen_urls` 또는 `seen_titles` 리스트와 겹치는 자료 회피 — 사용자가
+  이미 받은 추천 카드 중복 방지. 동일 자료의 다른 source (예: arxiv vs 학회 publish) 도 회피.
 
 ## §3 신뢰도 기준
 - 학술 (arxiv.org/openalex.org/doi.org) — confidence ≥ 0.85

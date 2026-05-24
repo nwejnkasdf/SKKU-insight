@@ -518,7 +518,12 @@ async def _select_today_recommendations(
 async def _select_latest_recommendations(
     db: AsyncSession, user_id: UUID
 ) -> list[Recommendation]:
-    """UTC today rows 가 없으면 가장 최근 생성일의 Recommendation rows 를 복원."""
+    """UTC today rows 가 없으면 가장 최근 생성일의 Recommendation rows 를 복원.
+
+    (C-51, 2026-05-24) **discovery slot 제외** — discovery 본질이 "매일 새 발견"
+    (Fusion + Reincarnation 매일 새 select) 이라 어제 discovery 카드 표시 시 의미 깨짐.
+    core/adjacent/fallback_* 은 fallback 그대로 (사용자 안정성).
+    """
     latest_created = (
         await db.execute(
             select(func.max(Recommendation.created_at)).where(
@@ -542,6 +547,7 @@ async def _select_latest_recommendations(
             Recommendation.user_id == user_id,
             Recommendation.created_at >= day_start,
             Recommendation.created_at < day_end,
+            Recommendation.slot_type != SlotType.DISCOVERY.value,
         )
         .order_by(Recommendation.created_at.desc())
     )
@@ -1424,13 +1430,14 @@ async def build_dashboard(
         db, user.user_id, emerging_leaf_ids
     )
 
-    # 3. ranking (slot 별).
+    # 3. ranking (slot 별). (C-51, 2026-05-24) slot 별 freshness cfg 사용 — discovery
+    # half_life 7d / adjacent 14d / core 30d. recommendation.toml [freshness.*] sub-table.
     core_pool = score_candidates(
         core_pool_raw,
         state_index,
         params,
         config.ranking_weights,
-        config.freshness,
+        config.freshness_for_slot(SlotType.CORE.value),
         config.trust_level_weights,
         config.bucket_score,
     )
@@ -1439,7 +1446,7 @@ async def build_dashboard(
         state_index,
         params,
         config.ranking_weights,
-        config.freshness,
+        config.freshness_for_slot(SlotType.ADJACENT.value),
         config.trust_level_weights,
         config.bucket_score,
     )
@@ -1449,7 +1456,7 @@ async def build_dashboard(
         state_index,
         params,
         config.ranking_weights,
-        config.freshness,
+        config.freshness_for_slot(SlotType.DISCOVERY.value),
         config.trust_level_weights,
         config.bucket_score,
     )
@@ -1458,7 +1465,7 @@ async def build_dashboard(
         state_index,
         params,
         config.ranking_weights,
-        config.freshness,
+        config.freshness_for_slot(SlotType.DISCOVERY.value),
         config.trust_level_weights,
         config.bucket_score,
     )
@@ -1467,7 +1474,7 @@ async def build_dashboard(
         state_index,
         params,
         config.ranking_weights,
-        config.freshness,
+        config.freshness_for_slot(SlotType.CORE.value),
         config.trust_level_weights,
         config.bucket_score,
     )
@@ -1525,7 +1532,7 @@ async def build_dashboard(
             state_index,
             params,
             config.ranking_weights,
-            config.freshness,
+            config.freshness_for_slot(SlotType.FALLBACK_TREND.value),
             config.trust_level_weights,
             config.bucket_score,
         )

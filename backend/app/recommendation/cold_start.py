@@ -165,7 +165,11 @@ def _build_cold_start_prompt(
         "- 가짜 URL/DOI/제목을 만들지 마라. 모르면 null 로 둬라.\n"
         "- 한국어 사용자에게도 영어 원문 자료 추천이 자연스럽다. 단, reason_short_ko 는 "
         "반드시 한국어.\n"
-        "- 동일 publisher 가 한 슬롯에서 2개 이상 나오지 않도록.\n\n"
+        "- 동일 publisher 가 한 슬롯에서 2개 이상 나오지 않도록.\n"
+        "- **가능한 한 최신 자료 우선**: 최근 6개월 안 발표가 이상적, 1년 이내 권장. "
+        "단 cluster 의 canonical landmark 자료 (e.g. \"Attention Is All You Need\" 같은 "
+        "기준점) 는 예외 허용 — 사용자가 배경 지식으로 알아야 하는 경우만.\n"
+        "- (있다면) 입력의 `seen_urls` 또는 `seen_titles` 리스트와 겹치는 자료 회피.\n\n"
         "응답 형식: {\"items\": [...10개...]}"
     )
     return [

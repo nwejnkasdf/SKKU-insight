@@ -1486,7 +1486,7 @@ function DocumentList({ items, setView }: { items: DocumentSummary[]; setView: (
 
 async function pollColdStart(api: InsightApi, requestId: UUID): Promise<void> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 60_000) {
+  while (Date.now() - startedAt < 300_000) {
     const status = await api.coldStartStatus(requestId);
     if (status.status === "completed" && status.dashboard_ready) return;
     if (status.status === "failed") return;

@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bookmark,
   CheckCircle2,
+  CloudOff,
   EyeOff,
   ExternalLink,
   GitBranch,
@@ -21,6 +22,8 @@ import {
   Trash2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+
+import { subscribeStatus, type OfflineQueueStatus } from "./lib/offlineQueue";
 
 import type {
   ApiError,
@@ -145,9 +148,11 @@ function Shell({
   toast: Toast;
 }) {
   const authed = !["boot", "auth", "onboarding"].includes(view.name);
+  const offlineBanner = <OfflineBanner />;
   if (!authed) {
     return (
       <div className="entryApp">
+        {offlineBanner}
         <main className="entryMain">{children}</main>
         {toast && <div className={`toast ${toast.tone}`}>{toast.text}</div>}
       </div>
@@ -156,6 +161,7 @@ function Shell({
 
   return (
     <div className="app">
+      {offlineBanner}
       <aside className="sidebar">
         <div className="brand">
           <div className="brandMark"><GitBranch size={19} /></div>
@@ -1460,6 +1466,21 @@ function Header({ title, subtitle, children }: { title: string; subtitle: string
       </div>
       <div className="headerActions">{children}</div>
     </header>
+  );
+}
+
+/**
+ * (C-55, 2026-05-24) 네트워크 단절 시 상단 배너. queue internals (잔량 등) 는 노출 X
+ * — narrative 정책 정합 (사용자에게 추천 메커니즘 내부는 숨김). offline 상태만 표시.
+ */
+function OfflineBanner() {
+  const [status, setStatus] = useState<OfflineQueueStatus>({ online: true, pending: 0 });
+  useEffect(() => subscribeStatus(setStatus), []);
+  if (status.online) return null;
+  return (
+    <div className="offlineBanner" role="status" aria-live="polite">
+      <CloudOff size={14} /> 오프라인 — 작업은 연결 복구 시 자동 반영됩니다.
+    </div>
   );
 }
 

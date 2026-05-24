@@ -303,6 +303,17 @@ class Settings(BaseSettings):
     # UserProfile fetch 시 Redis cache TTL (초). engine.build_dashboard 가 1회 fetch
     # 후 SETEX. daily cron 완료 후 DEL 로 invalidate.
     USER_PROFILE_CACHE_TTL_SECONDS: int = 3600
+    # (C-54, 2026-05-24) Fusion bridge_cso 영역의 fresh Document fetch — UserProfile cron
+    # 안에서 BFS bridge 결정 직후 LLM web_search 호출 + Document/DocumentTopic INSERT.
+    # 사용자 결정 매트릭스 (decisions.md §17): A1 cron 안 / B2 trace saved + 직전 fetch
+    # 회피 / C1 collection schema / D bridge_cso 단일 매핑 / E1 매일 fresh / F1 실패
+    # 보존. 사용자당 LLM 1회/일 추가.
+    FUSION_FETCH_ENABLED: bool = True
+    # bridge fetch 1회 당 LLM 결과 Document 수 cap. collection_job 과 동일.
+    FUSION_FETCH_MAX_DOCUMENTS: int = 5
+    # P1 — prompt dedup hint 위해 prompt context 에 포함할 "직전 fusion fetch URL/title"
+    # 윈도우 (days). Recommendation 의 origin_type='fusion' + 본 window 안 row 조회 결과.
+    FUSION_FETCH_RECENT_URLS_WINDOW_DAYS: int = 30
 
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.

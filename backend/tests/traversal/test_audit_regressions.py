@@ -120,3 +120,37 @@ class TestMergeProtocolFields:
         assert "winner_trace_id" in fields
         assert "loser_trace_id" in fields
         assert "leaves_to_reassign" in fields
+
+
+class TestC57LeafDispatchLLM:
+    """C-57 retract/split LLM dispatch production caller 회귀 가드."""
+
+    def test_evaluate_retract_calls_llm_helper(self) -> None:
+        from app.traversal import default
+
+        src = _source(default.DefaultTraversalEngine.evaluate_retract)
+        assert "_llm_retract_decisions" in src
+        # stub fallback 직접 인라인은 제거 — helper 안에서 처리.
+        assert "1차 시연: 모두 new_path 의 새 말단 노드로 remap fallback" not in src
+
+    def test_evaluate_split_calls_llm_helper(self) -> None:
+        from app.traversal import default
+
+        src = _source(default.DefaultTraversalEngine.evaluate_split)
+        assert "_llm_split_decisions" in src
+        assert "1차 시연 stub: 모두 source 유지" not in src
+
+    def test_llm_retract_decisions_fallback_to_stub(self) -> None:
+        from app.traversal import default
+
+        src = _source(default.DefaultTraversalEngine._llm_retract_decisions)
+        # ProviderError / FixtureNotFound 시 None 반환 → stub fallback.
+        assert "_stub" in src
+        assert "call_retract_reposition" in src
+
+    def test_llm_split_decisions_fallback_to_stub(self) -> None:
+        from app.traversal import default
+
+        src = _source(default.DefaultTraversalEngine._llm_split_decisions)
+        assert "_stub" in src
+        assert "call_split_dispatch" in src

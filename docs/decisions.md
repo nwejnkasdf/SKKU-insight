@@ -889,3 +889,53 @@ PR [#45](https://github.com/nwejnkasdf/SKKU-insight/pull/45) merge commit `7fc8c
 
 PR [#46](https://github.com/nwejnkasdf/SKKU-insight/pull/46) merge commit `02f073c`.
 
+## 20. C-57 라운드 — split/retract LLM dispatch 본문화 (2026-05-24)
+
+### 배경
+
+A7 본문의 `default.evaluate_retract` / `evaluate_split` 가 1차 시연 stub (모두 동일 cso 로 fallback) — narrative 차원에서:
+- retract: 의미 잃은 leaf 도 새 path 끝으로 따라감 (archive 결정 부재)
+- split: new T' 가 leaf 0개 상태로 시작 (모든 leaf 가 source.child_A 한쪽)
+
+명세 ([leaf-topic-lifecycle.md §Retract LLM prompt](../docs/algorithms/leaf-topic-lifecycle.md), [cso-topic-traversal.md §3.3](../docs/algorithms/cso-topic-traversal.md)) 는 LLM 호출로 leaf 별 dispatch 결정을 요구.
+
+### 사용자 결정 6건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | model_slot = **high** | identify_emerging 패턴 답습 |
+| 2 | 호출 시점 = **inline** (evaluate_retract / evaluate_split 안) | 별도 worker job 부담 회피 |
+| 3 | 실패 처리 = **stub fallback 유지** | fail-safe + 현재 동작 보존 |
+| 4 | retract decision = **2종 (remap + archive)** | 명세의 "path 중간 노드 remap" 은 anchor 검증 복잡 — 단순화 |
+| 5 | split decision = **2종 (source + new, archive 제외)** | operations.execute_split 미수정 (surgical) |
+| 6 | scope = **retract + split 같이** | 같은 default.py 안 변경 — 한 PR |
+
+### 자체 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 신규 모듈 `traversal/leaf_dispatch_llm.py` (~270 line) | default.py 단일 클래스 비대화 회피, prompt template 별도 module |
+| 2 | LLM 응답에 모르는 leaf_id 가 있으면 무시 (hallucination 차단) | identify_emerging 의 Strict 검증 패턴 답습 |
+| 3 | LLM 응답 부분 처리 (LLM 이 결정 안 한 leaf 는 default remap/source) | LLM 결정 + stub fallback 혼합 — 안전성 우선 |
+| 4 | retract remap target = `new_path[-1]` 강제 (단순화) | 명세 "path 중간 노드 remap" 은 본 라운드 scope 밖 — 후속 라운드 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `LeafSummary` + `call_retract_reposition` + `call_split_dispatch` + 한국어 prompt template 2개 | `backend/app/traversal/leaf_dispatch_llm.py` (신규) |
+| `_llm_retract_decisions` + `_llm_split_decisions` + `_label_for` + `_fetch_leaf_summaries` helper | `backend/app/traversal/default.py:DefaultTraversalEngine` |
+| `evaluate_retract` / `evaluate_split` stub → LLM helper 호출 + stub fallback | `backend/app/traversal/default.py` |
+| 단위 테스트 7건 (round_trip / ProviderError fallback / hallucination 차단 / 빈 leaves short-circuit) | `backend/tests/traversal/test_leaf_dispatch_llm.py` (신규) |
+| 정적 source inspection 회귀 가드 4건 | `backend/tests/traversal/test_audit_regressions.py` |
+
+스키마 변경 0. Settings env 변경 0. provider 인터페이스 미확장 (`provider.complete` 재사용).
+
+### 검증
+
+- `python -c "import ast; ast.parse(...)"` exit 0 (신규 3 파일 모두)
+- 단위 테스트 7건 (단위) + 회귀 4건 (정적)
+- 1차 시연 stub 동작 (LLM 미연동 또는 실패 시) 모두 보존 — backward-compat 100%
+
+PR #(TBD) merge commit `(TBD)`.
+

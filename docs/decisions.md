@@ -722,7 +722,7 @@ A8-v2 (C-42, §15) 가 discovery slot 을 "Fusion 1 + Reincarnation 1" 으로 pi
 | 변경 | 위치 |
 |---|---|
 | `find_fusion_bridge` algorithm | `backend/app/traversal/fusion_bridge.py` (신규) |
-| `softmax_sample_archived_trace` | `backend/app/profile/sampling.py` (신규) |
+| `softmax_sample_trace` (C-53 followup rename — archived/active 공용) | `backend/app/profile/sampling.py` (신규) |
 | `apply_fusion_bridge_override` | `backend/app/profile/service.py` |
 | UserProfile job 통합 | `backend/app/worker/jobs/user_profile.py` |
 | Recommendation origin metadata | `backend/app/db/models/recommendation.py` + `backend/app/recommendation/engine.py` |

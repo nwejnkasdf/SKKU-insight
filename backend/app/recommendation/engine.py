@@ -1299,7 +1299,7 @@ async def _build_reincarnation_subslot(
     반환 tuple — `(rows, archived_trace_id)` 형태. 후자 = promotion metadata (Reincarnation
     카드 save 시 status archived→active 대상). fallback 경로 진입 시 None.
     """
-    from app.profile.sampling import softmax_sample_archived_trace
+    from app.profile.sampling import softmax_sample_trace
 
     archived_pool = await trav_queries.get_archived_traces_with_score(
         db,
@@ -1307,7 +1307,7 @@ async def _build_reincarnation_subslot(
         score_tail_min=settings.USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN,
         limit=settings.USER_PROFILE_INPUT_ARCHIVE_MAX,
     )
-    archived_trace = softmax_sample_archived_trace(
+    archived_trace = softmax_sample_trace(
         archived_pool,
         temperature=settings.REINCARNATION_SAMPLING_TEMPERATURE,
     )
@@ -1466,8 +1466,10 @@ async def build_dashboard(
         db, user.user_id, emerging_leaf_ids
     )
 
-    # 3. ranking (slot 별). (C-51, 2026-05-24) slot 별 freshness cfg 사용 — discovery
-    # half_life 7d / adjacent 14d / core 30d. recommendation.toml [freshness.*] sub-table.
+    # 3. ranking (slot 별). (C-51 / C-53 followup) slot 별 freshness cfg 사용 —
+    # core 30d / adjacent 14d / discovery = 1.0 강제 (코드 상수 _UNITY_FRESHNESS,
+    # decay 자체 부재 = "매일 새 발견" 본질). recommendation.toml [freshness.core/adjacent]
+    # sub-table + freshness_for_slot 내부 분기.
     core_pool = score_candidates(
         core_pool_raw,
         state_index,

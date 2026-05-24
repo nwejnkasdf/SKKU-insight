@@ -118,10 +118,27 @@ discovery_required_trust_level = "high"   # discovery는 trust_level=high만
 [freshness]
 # Document.published_at 기준 wallclock(달력) 일수 — 사용자 active day 무관.
 # 문서 자체의 신선도이므로 사용자 잠수 여부와 독립.
-# 24시간 이내 published_at은 1.0, 7일(wallclock) 이상은 0.5로 선형 감쇠
+# (C-51 baseline default, 2026-05-24) 미지정 slot fallback. core 와 동일.
+# 24시간 이내 1.0, 30일 이상 0.3 floor 로 선형 감쇠.
 fresh_full_hours = 24
-fresh_floor_after_wallclock_days = 7
-fresh_floor_value = 0.5
+fresh_floor_after_wallclock_days = 30
+fresh_floor_value = 0.3
+
+[freshness.core]
+# (C-51) 안정성 우선. 30일 후 floor 0.3.
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 30
+fresh_floor_value = 0.3
+
+[freshness.adjacent]
+# (C-51) 좀 더 fresh 우선. 14일 후 floor 0.2.
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 14
+fresh_floor_value = 0.2
+
+# (C-53 followup, 2026-05-24) [freshness.discovery] sub-table 폐기 — discovery 는
+# 코드 상수 `_UNITY_FRESHNESS` (factor 1.0 강제) 으로 처리. discovery = 매일 새 발견 +
+# Reincarnation 본질 (decay 의미 X). config_loader.freshness_for_slot("discovery") 분기 참조.
 
 [trust_level_weights]
 high = 1.0
@@ -130,8 +147,9 @@ low = 0.6
 
 [ranking_weights]
 # 최종 점수 = topic_match * w_match + freshness * w_fresh + trust * w_trust
-w_match = 0.7
-w_fresh = 0.2
+# (C-51, 2026-05-24) w_fresh 0.2 → 0.35 강화 — 사용자 의도 "최신성 추천 핵심" 부합.
+w_match = 0.55
+w_fresh = 0.35
 w_trust = 0.1
 
 [diversification]

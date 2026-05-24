@@ -54,7 +54,7 @@ from app.profile.prompt_builder import (
     build_user_prompt,
     to_input_payload,
 )
-from app.profile.sampling import softmax_sample_archived_trace
+from app.profile.sampling import softmax_sample_trace
 from app.profile.schemas import (
     ActiveTraceSummary,
     ArchivedTraceSummary,
@@ -538,27 +538,29 @@ async def apply_fusion_bridge_override(
     사용자 결정 (디자인 논의):
     - bridge_cso 결정 = trace↔trace meet in the middle BFS (LLM 의존 X, deterministic)
     - Reincarnation 다양성 = archived trace softmax sampling (T=0.3 default)
-    - active trace 선택 = score_tail DESC top 1 (신호 가장 강한 1개)
+    - active trace 선택 = softmax sampling (C-53 followup, archived 와 동일 기준 다양성)
 
     BFS bridge 못 찾으면 fusion_candidates=[] — query_discovery_fusion 이 빈 풀 →
     fallback trend.
 
     LLM 결과의 다른 부분 (persona / deepening / broadening) 은 그대로. fusion 만 override.
     """
-    # 1. active trace 선택 — score_tail DESC top 1.
+    # 1. active trace 선택 — softmax sampling (C-53 followup, max → softmax).
     active_orm = await trav_queries.get_active_traces(db, user_id)
-    if not active_orm:
+    active_trace = softmax_sample_trace(
+        active_orm, temperature=softmax_temperature
+    )
+    if active_trace is None:
         return payload.model_copy(update={"fusion_candidates": []})
-    active_trace = max(active_orm, key=lambda t: t.score_tail)
 
-    # 2. archived trace 선택 — softmax sampling.
+    # 2. archived trace 선택 — softmax sampling (동일 기준).
     archived_pool = await trav_queries.get_archived_traces_with_score(
         db,
         user_id,
         score_tail_min=archive_score_tail_min,
         limit=input_archive_max,
     )
-    archived_trace = softmax_sample_archived_trace(
+    archived_trace = softmax_sample_trace(
         archived_pool, temperature=softmax_temperature
     )
     if archived_trace is None:

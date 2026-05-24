@@ -732,3 +732,20 @@ A8-v2 (C-42, §15) 가 discovery slot 을 "Fusion 1 + Reincarnation 1" 으로 pi
 
 PR #39 (5 commits) + PR #40 (alembic revision id long name fix) merge commit `c9bb667` / `10ebaa5`.
 
+### C-53 followup — 직전 라운드 평가 fix 4건 (2026-05-24)
+
+직전 PR #39/#40/#41 머지 직후 자체 평가에서 빈틈 5건 식별, 사용자가 4건 fix 결정 (1번 = 표준 패턴 / 2번 = active 도 softmax / 4번 = 동시성 보강 / 5번 = discovery sub-table 제거). 3번 (path≤k 분기에서 long_score 무시) 은 현재 구현 유지.
+
+| # | fix | 위치 | 근거 |
+|---|---|---|---|
+| 1 | meet-in-the-middle BFS 표준 패턴 — 같은 depth 양방향 동시 확장 후 한 번에 meet 검사. 거리 비대칭 + next_a×next_b 동시 만남 모두 포착 | [`backend/app/traversal/fusion_bridge.py:147~`](../backend/app/traversal/fusion_bridge.py) | 직전 expand_a → check → expand_b → check 가 표준 bidirectional BFS 아님. tie_break (거리 sum 최소 + UUID lex) 그대로 유지 |
+| 2 | active_trace 선택 = `max(score_tail)` → softmax sampling (T=`REINCARNATION_SAMPLING_TEMPERATURE`). archived 와 동일 기준 다양성 | [`backend/app/profile/service.py:apply_fusion_bridge_override`](../backend/app/profile/service.py) | 사용자 결정 "active_trace 도 같은 기준의 softmax". `softmax_sample_archived_trace` → `softmax_sample_trace` rename (archived/active 공용) |
+| 3 | weekly_promotion 동시성 보강 — per-user `traversal_lock` (uuid4 token + NX SET + Lua atomic CAS release). daily_lifecycle / trace_merge / interest hook 와 같은 lock 키 공유 | [`backend/app/worker/jobs/weekly_promotion.py:_run`](../backend/app/worker/jobs/weekly_promotion.py) | 사용자 결정 "동시성 미흡하면 보강". 같은 사용자 trace mutation (status archived→active / 새 active INSERT) 이 다른 worker job 과 race 차단. asyncio.gather 병렬화는 lock contention 만 늘려 미적용 (10~20명 sequential 충분) |
+| 4 | `[freshness.discovery]` sub-table 폐기 + 코드 상수 `_UNITY_FRESHNESS` 도입. `freshness_for_slot("discovery")` 분기로 항상 1.0 반환 | [`backend/app/recommendation/config_loader.py`](../backend/app/recommendation/config_loader.py) + [`backend/app/config/recommendation.toml`](../backend/app/config/recommendation.toml) | 사용자 결정 "제거". discovery freshness 무의미 (C-52 정정 결과) 인데 toml placeholder sub-table 잔존 = drift. core/adjacent sub-table 은 유지 (각 30d/0.3, 14d/0.2) |
+
+### C-53 followup 빈틈 외 평가 보존 (3번 = 현재 유지)
+
+`_select_top_k_path_nodes` 의 path 길이 ≤ top_k 분기는 path 순서 사용 (long_score 정렬 X). 사용자 결정 "지금 구현 그대로". 짧은 path 는 BFS 부담 적어 실질 영향 X.
+
+PR #(TBD) merge commit `(TBD)`.
+

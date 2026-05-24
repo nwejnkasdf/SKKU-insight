@@ -804,5 +804,43 @@ C-53 의 §빈틈 #2 — "bridge_cso 가 valid 해도 DocumentTopic 매핑 0 →
 
 스키마 변경 0 (alembic 없음).
 
+PR [#43](https://github.com/nwejnkasdf/SKKU-insight/pull/43) merge commit `1b46938`.
+
+## 18. C-55 라운드 — 클라이언트 IndexedDB offline queue (2026-05-24)
+
+### 배경
+
+`docs/ux/client-behaviors.md §6` 본문 — 네트워크 단절 시 mutation 을 IndexedDB 에 누적, 재연결 시 batch flush. 명세 자체는 v1.0 부터 박혀 있었으나 클라이언트 코드 미구현. A9 prompt 의 9 책임 중 미충족 항목.
+
+### 사용자 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | flush 방식 = **단건 POST loop** (`/events` `/feedback/*` 그대로) | codegen 재실행 부담 회피. 10~20명 시연 + offline 가능성 낮음 = 단건 충분 |
+| 2 | flush 트리거 = **`online` event + 30s polling 둘 다** | online event 미발사 케이스 (백그라운드 sleep) 대비 |
+| 3 | UI 노출 = **작은 offline 배너 + 큐 internals 숨김** | narrative 정책 정합 (추천 메커니즘 internals 사용자 노출 X). 다만 offline 사실은 표시 — 사용자 혼란 방지 |
+| 4 | queue scope = **postEvent / saveDocument / hideDocument / notInterestedDocument** | 행동 로그 + 명시 피드백 손실 방지. signup/login/consent (offline 진입 불가능) + GET (캐시 처리) 제외 |
+
+### 자체 결정 5건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | failure 분기 — network error = enqueue + fake success / 4xx = drop / 5xx = enqueue + throw | UI 낙관 갱신 + 영구 실패 (409 EVENT_DUPLICATE / 403 consent_required) 재시도 무의미 |
+| 2 | 큐 row schema = `{ id, kind, payload, created_at }` | client_request_id 는 payload 안에 (서버 idempotency 와 정합) |
+| 3 | dispatcher dependency injection 패턴 | 큐 모듈이 InsightApi 직접 의존 X — 순환 import 회피 + 테스트 용이 |
+| 4 | TTL 7d + max 100 row pruning | 영구 누적 차단. oldest first drop |
+| 5 | Proxy 로 InsightApi 4 mutation wrap | generated/api.ts 미변경 (codegen 재실행 불필요) + 호출 사이트 변경 0 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `enqueue` / `flush` / `startAutoFlush` / `subscribeStatus` + pruning | `client/src/lib/offlineQueue.ts` (신규, ~210 line) |
+| InsightApi Proxy wrapper (mutation 4종 분기) | `client/src/lib/api.ts` |
+| `OfflineBanner` 컴포넌트 + Shell 상단 mount | `client/src/App.tsx` |
+| `.offlineBanner` style (fixed top strip) | `client/src/styles.css` |
+
+스키마 변경 0. backend 미수정. raw fetch 미도입. generated/api.ts 미변경.
+
 PR #(TBD) merge commit `(TBD)`.
 

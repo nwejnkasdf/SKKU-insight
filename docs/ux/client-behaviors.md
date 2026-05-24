@@ -101,6 +101,11 @@ async function pollColdStart(pollingUrl: string): Promise<void> {
   - `/auth/refresh` 자동 호출
   - 실패하면 로그인 화면
 
+**(C-55, 2026-05-24) 본 §의 구현 코드** ([`decisions.md §18`](../decisions.md)):
+- [`client/src/lib/offlineQueue.ts`](../../client/src/lib/offlineQueue.ts) — `enqueue` / `flush` / `startAutoFlush` (window `online` event + 30s polling) / TTL 7d + max 100 row pruning
+- [`client/src/lib/api.ts`](../../client/src/lib/api.ts) — InsightApi Proxy wrapper. mutation 4종 (postEvent / saveDocument / hideDocument / notInterestedDocument) 분기. network error 시 큐 enqueue + fake success (UI 낙관 갱신). 4xx (409 EVENT_DUPLICATE / 403 consent_required 포함) = 영구 실패 drop, 5xx = 큐 enqueue + throw
+- `OfflineBanner` 컴포넌트 (`App.tsx`) — `navigator.onLine === false` 시만 표시. 큐 잔량 / internals 숨김 (narrative 정책 정합 — 추천 메커니즘 internals 사용자 노출 X). 본 banner 외 큐 동작은 silent
+
 ## 7. JWT refresh 자동화
 
 ```typescript

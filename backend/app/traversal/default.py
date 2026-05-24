@@ -73,6 +73,160 @@ class DefaultTraversalEngine:
         val = result.scalar_one_or_none()
         return int(val) if val is not None else 0
 
+    def _label_for(self, cso_id: UUID) -> str:
+        """cso_graph node attr 의 label 조회. attr 없으면 str(UUID) fallback."""
+        if cso_id in self.graph:
+            attrs = self.graph.nodes[cso_id]
+            label = attrs.get("label")
+            if label:
+                return str(label)
+        return str(cso_id)
+
+    async def _fetch_leaf_summaries(
+        self, leaf_ids: list[UUID]
+    ) -> list[tuple[UUID, str]]:
+        """leaf_topic_id list → (id, label_ko) 튜플. C-57 LLM prompt context.
+
+        DynamicLeafTopic.label SELECT. 순서는 입력 보존.
+        """
+        if not leaf_ids:
+            return []
+        rows = (
+            await self.db.execute(
+                select(DynamicLeafTopic.leaf_topic_id, DynamicLeafTopic.label).where(
+                    DynamicLeafTopic.leaf_topic_id.in_(leaf_ids)
+                )
+            )
+        ).all()
+        by_id = {r.leaf_topic_id: r.label or "" for r in rows}
+        return [(lid, by_id.get(lid, "")) for lid in leaf_ids if lid in by_id]
+
+    async def _llm_retract_decisions(
+        self,
+        leaves_to_remap: list[UUID],
+        retracted_cso: UUID,
+        new_path: list[UUID],
+        remap_target: UUID,
+    ) -> list[dict[str, Any]]:
+        """(C-57) retract_reposition LLM 호출 + 응답 매핑. 실패 시 stub fallback.
+
+        stub fallback = 모두 remap to remap_target (직전 1차 시연 stub 동작 보존).
+        """
+        from app.traversal.leaf_dispatch_llm import (
+            LeafSummary,
+            call_retract_reposition,
+        )
+
+        def _stub() -> list[dict[str, Any]]:
+            return [
+                {
+                    "leaf_id": lid,
+                    "decision": "remap",
+                    "new_cso_topic_id": remap_target,
+                }
+                for lid in leaves_to_remap
+            ]
+
+        if not leaves_to_remap:
+            return []
+        trace_row = await self.db.execute(
+            select(UserCSOTraversal.user_id).where(
+                UserCSOTraversal.path.contains([retracted_cso])
+            )
+        )
+        user_id = trace_row.scalar_one_or_none()
+        if user_id is None:
+            return _stub()
+
+        summaries_raw = await self._fetch_leaf_summaries(leaves_to_remap)
+        leaf_summaries = [
+            LeafSummary(leaf_id=lid, label_ko=label) for lid, label in summaries_raw
+        ]
+        if not leaf_summaries:
+            return _stub()
+        new_path_labels = [self._label_for(cid) for cid in new_path]
+        result = await call_retract_reposition(
+            self.provider,
+            user_id=user_id,
+            retracted_label=self._label_for(retracted_cso),
+            new_path_labels=new_path_labels,
+            new_path_tail_cso=remap_target,
+            leaves=leaf_summaries,
+        )
+        if result is None:
+            return _stub()
+        # LLM 응답 dict ∪ stub — LLM 이 결정 안 한 leaf 는 default remap.
+        decided = {d["leaf_id"] for d in result}
+        result.extend(
+            {
+                "leaf_id": lid,
+                "decision": "remap",
+                "new_cso_topic_id": remap_target,
+            }
+            for lid in leaves_to_remap
+            if lid not in decided
+        )
+        return result
+
+    async def _llm_split_decisions(
+        self,
+        leaves_to_dispatch: list[UUID],
+        fork_cso: UUID,
+        source_child: UUID,
+        new_child: UUID,
+        user_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """(C-57) split_dispatch LLM 호출 + 응답 매핑. 실패 시 stub fallback.
+
+        stub fallback = 모두 source.child_A 로 매핑 (직전 1차 시연 stub 동작 보존).
+        """
+        from app.traversal.leaf_dispatch_llm import (
+            LeafSummary,
+            call_split_dispatch,
+        )
+
+        def _stub() -> list[dict[str, Any]]:
+            return [
+                {
+                    "leaf_id": lid,
+                    "target_trace": "source",
+                    "target_cso_topic_id": source_child,
+                }
+                for lid in leaves_to_dispatch
+            ]
+
+        if not leaves_to_dispatch:
+            return []
+        summaries_raw = await self._fetch_leaf_summaries(leaves_to_dispatch)
+        leaf_summaries = [
+            LeafSummary(leaf_id=lid, label_ko=label) for lid, label in summaries_raw
+        ]
+        if not leaf_summaries:
+            return _stub()
+        result = await call_split_dispatch(
+            self.provider,
+            user_id=user_id,
+            fork_label=self._label_for(fork_cso),
+            source_child_label=self._label_for(source_child),
+            new_child_label=self._label_for(new_child),
+            source_child_cso=source_child,
+            new_child_cso=new_child,
+            leaves=leaf_summaries,
+        )
+        if result is None:
+            return _stub()
+        decided = {d["leaf_id"] for d in result}
+        result.extend(
+            {
+                "leaf_id": lid,
+                "target_trace": "source",
+                "target_cso_topic_id": source_child,
+            }
+            for lid in leaves_to_dispatch
+            if lid not in decided
+        )
+        return result
+
     # --- write (mutation) ---
 
     async def ingest_event(
@@ -189,16 +343,12 @@ class DefaultTraversalEngine:
             new_path=new_path,
             leaves_to_remap=leaves_to_remap,
         )
-        # LLM 호출 (1차 시연: 모두 new_path 의 새 말단 노드로 remap fallback).
+        # (C-57, 2026-05-24) LLM dispatch — leaf 별 remap vs archive 결정.
+        # 실패 시 (FixtureNotFound / ProviderError / parse 실패) stub fallback 유지.
         remap_target = new_path[-1]
-        decisions: list[dict[str, Any]] = [
-            {
-                "leaf_id": lid,
-                "decision": "remap",
-                "new_cso_topic_id": remap_target,
-            }
-            for lid in leaves_to_remap
-        ]
+        decisions: list[dict[str, Any]] = await self._llm_retract_decisions(
+            leaves_to_remap, retracted_cso, new_path, remap_target
+        )
         await operations.execute_retract(
             self.db, plan, trace_row.last_activity_active_day, decisions
         )
@@ -247,15 +397,15 @@ class DefaultTraversalEngine:
             new_path=new_path,
             leaves_to_dispatch=[lf.leaf_topic_id for lf in leaves],
         )
-        # LLM dispatch decisions (1차 시연 stub: 모두 source 유지 — child_A 로 재매핑).
-        decisions: list[dict[str, Any]] = [
-            {
-                "leaf_id": lid,
-                "target_trace": "source",
-                "target_cso_topic_id": source_child,
-            }
-            for lid in plan.leaves_to_dispatch
-        ]
+        # (C-57, 2026-05-24) LLM dispatch — leaf 별 source vs new 결정.
+        # 실패 시 stub fallback (모두 source 의 child_A 로 매핑).
+        decisions: list[dict[str, Any]] = await self._llm_split_decisions(
+            plan.leaves_to_dispatch,
+            fork,
+            source_child,
+            new_child,
+            trace_row.user_id,
+        )
         await operations.execute_split(
             self.db,
             plan,

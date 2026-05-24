@@ -276,6 +276,13 @@ class Settings(BaseSettings):
     # daily LLM cron 시각 — A6 18 UTC + A7 18 UTC 와 분리해서 19 UTC. 사용자 활동
     # 적은 시간대 + A6/A7 의 user-mutex 와 충돌 회피.
     USER_PROFILE_CRON: str = "0 19 * * *"
+    # (C-53, 2026-05-24) Fusion bridge BFS / Reincarnation softmax sampling 파라미터.
+    # algorithm: backend/app/traversal/fusion_bridge.py + backend/app/profile/sampling.py.
+    REINCARNATION_SAMPLING_TEMPERATURE: float = 0.3  # softmax T (0.05~∞), top 70~80% weight
+    FUSION_BRIDGE_PATH_TOP_K: int = 5  # 각 path 의 long_score DESC top_k 출발점
+    FUSION_BRIDGE_MAX_HOPS: int = 3  # 외향 BFS 최대 깊이 (sparse 그래프 기준 충분)
+    # discovery/adjacent → core promotion 주 1회 cron. UserEvent.save 7-day window.
+    WEEKLY_PROMOTION_CRON: str = "0 18 * * 0"  # 일요일 18 UTC (= 월요일 03 KST)
     # LLM input archive 필터 — score_tail >= 본 임계 archived trace 만 input 포함.
     # 사용자 결정 #6 (2026-05-19): 강한 신호로 끝난 archive 만 reincarnation candidate
     # 풀에 들어가고, 자연 둔화로 끝난 archive 는 노이즈로 간주.

@@ -90,7 +90,7 @@ class ColdStartItem:
     source_type: str   # academic | vendor_blog | tech_news
     url_hint: str | None
     doi_hint: str | None
-    published_year: int | None
+    published_at: datetime | None
     related_csos_en: list[str]
     reason_short_ko: str
 
@@ -157,7 +157,7 @@ def _build_cold_start_prompt(
         "    \"source_type\": \"academic\" | \"vendor_blog\" | \"tech_news\",\n"
         "    \"url_hint\": \"정확한 URL 모르면 null. 추측 금지.\",\n"
         "    \"doi_hint\": \"DOI 알면 명시. 모르면 null.\",\n"
-        "    \"published_year\": 2024 | 2025 | 2026 | null,\n"
+        "    \"published_at\": \"2024-09-12\" | \"2025-03-21T00:00:00Z\" | null  (정확한 발행일 모르면 null. YYYY-MM-DD 또는 ISO 8601),\n"
         "    \"related_csos_en\": [\"Computer Vision\", \"Reinforcement Learning\"],\n"
         "    \"reason_short_ko\": \"한국어 한 문장 추천 이유 (60자 이내). "
         "점수나 알고리즘 언급 금지.\"\n"
@@ -251,8 +251,22 @@ def _validate_cold_start(parsed: Any) -> list[ColdStartItem]:
             if isinstance(doi_hint_raw, str) and doi_hint_raw.strip()
             else None
         )
-        year_raw = raw.get("published_year")
-        published_year = year_raw if isinstance(year_raw, int) else None
+        # (C-48 fix, 2026-05-24) published_year (year-only fallback 1/1 → 사용자 "수상" 느낌)
+        # → published_at (ISO 8601 or YYYY-MM-DD). LLM 이 정확한 날짜 줄 때만 사용, 아니면 None.
+        published_at_raw = raw.get("published_at") or raw.get("published_year")
+        published_at_parsed: datetime | None = None
+        if isinstance(published_at_raw, str):
+            try:
+                normalized = published_at_raw.replace("Z", "+00:00")
+                parsed_dt = datetime.fromisoformat(normalized)
+                if parsed_dt.tzinfo is None:
+                    parsed_dt = parsed_dt.replace(tzinfo=UTC)
+                published_at_parsed = parsed_dt
+            except (ValueError, TypeError):
+                published_at_parsed = None
+        elif isinstance(published_at_raw, int):
+            # backward-compat: 옛 published_year (정수) 만 받은 경우 1월 1일 fallback.
+            published_at_parsed = datetime(published_at_raw, 1, 1, tzinfo=UTC)
         related_csos_raw = raw.get("related_csos_en", [])
         related_csos = (
             [s for s in related_csos_raw if isinstance(s, str)]
@@ -281,7 +295,7 @@ def _validate_cold_start(parsed: Any) -> list[ColdStartItem]:
                 source_type=source_type,
                 url_hint=url_hint,
                 doi_hint=doi_hint,
-                published_year=published_year,
+                published_at=published_at_parsed,
                 related_csos_en=related_csos,
                 reason_short_ko=reason,
             )
@@ -317,8 +331,61 @@ async def _acquire_user_attempt_lock(db: AsyncSession, user_id: UUID) -> None:
     )
 
 
+_COLD_START_SOURCE_TYPE_MAP = {
+    "academic": "academic",
+    "vendor_blog": "vendor_blog",
+    "tech_news": "tech_news",
+}
+_COLD_START_CONTENT_TYPE_MAP = {
+    "academic": "academic_paper",
+    "vendor_blog": "vendor_blog",
+    "tech_news": "tech_news",
+}
+
+
+async def _upsert_real_source_from_item(
+    db: AsyncSession, *, item: "ColdStartItem"
+) -> UUID:
+    """LLM 응답의 publisher_label/domain/source_type 로 real Source upsert.
+
+    (C-48 fix, 2026-05-24) sentinel `cold_start_pseudo` source 사용 deprecation —
+    client UI 가 카드 하단에 source_name 그대로 표시 → 사용자가 "mock" 으로 인식.
+    LLM 응답 자체는 실 자료 (OpenAI / Anthropic / arXiv / NVIDIA 등) 이라 publisher
+    정보로 real Source 만들면 사용자가 진짜 출처 인식.
+    """
+    name = (item.publisher_label or item.publisher_domain or "Unknown").strip()[:120]
+    url = f"https://{item.publisher_domain}" if item.publisher_domain else "https://unknown.example"
+    src_type = _COLD_START_SOURCE_TYPE_MAP.get(item.source_type, "vendor_blog")
+    stmt = (
+        pg_insert(Source)
+        .values(
+            source_id=uuid4(),
+            name=name,
+            source_type=src_type,
+            url=url[:500],
+            trust_level="medium",
+            enabled=True,
+            extra={"cold_start_origin": True},
+        )
+        .on_conflict_do_nothing(index_elements=["name"])
+        .returning(Source.source_id)
+    )
+    result = await db.execute(stmt)
+    inserted = result.scalar_one_or_none()
+    if inserted is not None:
+        return inserted
+    existing = await db.execute(
+        select(Source.source_id).where(Source.name == name)
+    )
+    return existing.scalar_one()
+
+
 async def _get_sentinel_source_id(db: AsyncSession) -> UUID:
-    """sentinel `cold_start_pseudo` source_id lookup. alembic 0001 시드."""
+    """sentinel `cold_start_pseudo` source_id lookup. alembic 0001 시드.
+
+    (C-48 deprecation, 2026-05-24) `_upsert_real_source_from_item` 로 대체. 본 함수는
+    backward-compat 로 보존 — 호출자 없음 확인 후 제거 가능.
+    """
     stmt = select(Source.source_id).where(
         Source.name == SentinelSource.COLD_START_PSEUDO_NAME
     )
@@ -393,7 +460,7 @@ async def _lookup_existing_document(
 async def _insert_pseudo_document(
     db: AsyncSession,
     *,
-    sentinel_source_id: UUID,
+    sentinel_source_id: UUID | None = None,  # C-48 deprecation — _upsert_real_source_from_item 사용
     item: ColdStartItem,
     request_id: str,
     item_idx: int,
@@ -423,16 +490,18 @@ async def _insert_pseudo_document(
         return existing
     new_id = uuid4()
     url = item.url_hint or f"internal://cold-start/{request_id}/{item_idx}"
-    published_at = (
-        datetime(item.published_year, 1, 1, tzinfo=UTC)
-        if item.published_year
-        else None
+    # (C-48 fix, 2026-05-24) published_at = LLM 응답 직접 사용 (정확한 발행일). None 허용.
+    published_at = item.published_at
+    # (C-48, 2026-05-24) sentinel source 대신 LLM 응답 publisher 기반 real source 사용.
+    real_source_id = await _upsert_real_source_from_item(db, item=item)
+    real_content_type = _COLD_START_CONTENT_TYPE_MAP.get(
+        item.source_type, "vendor_blog"
     )
     stmt = (
         pg_insert(Document)
         .values(
             document_id=new_id,
-            source_id=sentinel_source_id,
+            source_id=real_source_id,
             title=item.title,
             normalized_title=normalize_title(item.title),
             url=url,
@@ -440,7 +509,7 @@ async def _insert_pseudo_document(
             doi=item.doi_hint,
             summary=item.title_ko or item.title,
             published_at=published_at,
-            content_type=ContentType.PSEUDO_COLD_START.value,
+            content_type=real_content_type,
             language="en",
             raw={
                 "publisher_domain": item.publisher_domain,

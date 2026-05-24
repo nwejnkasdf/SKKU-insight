@@ -30,11 +30,19 @@ help:
 	@echo "  make weekly-user EMAIL=user@x     - leaf_lifecycle + trace_merge + user_profile (LLM 3-4회)"
 
 dev:
-	docker compose up -d
+	# (C-50, 2026-05-24) docker-compose.dev.yml 자동 적용 — backend mount + uvicorn --reload.
+	# 코드 수정 시 컨테이너 안 0.5s reload — image rebuild 불필요.
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 	@echo "API: http://localhost:8000 | Admin: http://localhost:3001"
+	@echo "[DEV] backend mount + uvicorn --reload 활성 — backend/ 수정 시 즉시 반영"
 
 demo: dev
 	@echo "demo 모드 — COLLECTION_CRON_DEMO 가 적용되려면 .env 의 COLLECTION_CRON 을 COLLECTION_CRON_DEMO 값으로 swap"
+
+prod-up:
+	# (C-50, 2026-05-24) production 모드 — 본 image 안 빌드된 코드만 사용. 코드 수정 시 image rebuild 필요.
+	docker compose -f docker-compose.yml up -d
+	@echo "[PROD] image 안 코드 사용 — 코드 수정 시 'docker compose build' 후 force-recreate"
 
 migrate:
 	docker compose exec api alembic upgrade head

@@ -747,5 +747,62 @@ PR #39 (5 commits) + PR #40 (alembic revision id long name fix) merge commit `c9
 
 `_select_top_k_path_nodes` 의 path 길이 ≤ top_k 분기는 path 순서 사용 (long_score 정렬 X). 사용자 결정 "지금 구현 그대로". 짧은 path 는 BFS 부담 적어 실질 영향 X.
 
+PR [#42](https://github.com/nwejnkasdf/SKKU-insight/pull/42) merge commit `5ef0656`.
+
+## 17. C-54 라운드 — Fusion bridge_cso 영역 fresh Document fetch (2026-05-24)
+
+### 배경
+
+C-53 의 §빈틈 #2 — "bridge_cso 가 valid 해도 DocumentTopic 매핑 0 → fallback trend (자연, 디자인 결함 X)" 를 LLM web_search 도구로 채우는 흐름. 사용자 의도 4 ("두 trace 컨텍스트 LLM fetch") 실현.
+
+기존 흐름: BFS 결정한 bridge_cso 가 cso_graph 멤버라도 그 cso 와 매핑된 Document 가 0개면 `query_discovery_fusion` 빈 풀 → fallback trend. fusion narrative 가 카드로 안 나타남.
+
+본 라운드: UserProfile cron 안에서 `apply_fusion_bridge_override` 가 BFS bridge 결정 직후 LLM web_search 도구로 bridge 영역 fresh 자료 1~5건 fetch + Document/DocumentTopic INSERT. 다음 dashboard 조회 시 fusion 카드가 자연 채워짐.
+
+### 사용자 결정 6건
+
+| # | 결정 | 근거 |
+|---|---|---|
+| A | **A1** — UserProfile cron 안 (apply_fusion_bridge_override 끝에) | profile 영속화와 cohesion + dashboard 다음날 조회 시 이미 준비 + C-40 cold_start orchestrator 패턴 답습 |
+| B | **B2** — bridge_cso + 두 path 라벨 + 각 trace 최근 saved Document 제목 3개 | 사용자 신호 농도 + LLM 이 narrative 잡기 좋음 |
+| C | **C1** — 기존 collection_job 의 LLM schema 재사용 (provider.search_with_tools, prompt 본문 미수정) | 코드 단순 + parser/INSERT 흐름 통합 |
+| D | bridge 매핑은 CSO 노드 위에서만 시작, 이후 사용자 인터랙션 시 다른 trace 처럼 동적 leaf 생성 가능 | DocumentTopic INSERT 시점에는 bridge_cso 단일 매핑 (LeafTarget(parent=bridge, leaf=None)). weekly_promotion 으로 새 active trace `path=[bridge_cso]` 생성 후 사용자 인터랙션 시 leaf_lifecycle 자연 흡수 |
+| E | **E1** — 매일 fresh fetch (조건 가드 X) | narrative "매일 새 발견" 정합 |
+| F | **F1** — LLM 실패 시 fusion_candidates 보존 + Document INSERT 안 함 → dashboard 빈 풀 fallback trend | BFS 결정 살림 |
+
+### P1 (사용자 결정) — prompt dedup hint
+
+직전 30일 fusion 카드 의 Document.canonical_url + title list 를 prompt context `trace_json["seen_urls"]` / `["seen_titles"]` 에 박음. 기존 collection prompt §2 dedup hint ("입력의 seen_urls 또는 seen_titles 리스트와 겹치는 자료 회피") 가 자연 적용 — 매일 같은 자료 반복 차단 + LLM 자율적으로 다양성 확보.
+
+### 자체 결정 6건
+
+| # | 결정 | 근거 |
+|---|---|---|
+| 1 | provider 인터페이스 미확장 — `search_with_tools(trace_json, leaf_label, ...)` 그대로 재사용 | 5 provider 구현체 영향 0. leaf_label 자리에 bridge_label, trace_json 안에 fusion 맥락 |
+| 2 | anti-pattern 답습 — `_insert_document_idempotent` (on_conflict_do_nothing) + `_upsert_document_topic` (greatest confidence) | A4 R2-C01/C02/S04 패턴 |
+| 3 | fetch document max = 5 | collection_job cap 동일 |
+| 4 | `FUSION_FETCH_ENABLED` default true + `FUSION_FETCH_MAX_DOCUMENTS=5` + `FUSION_FETCH_RECENT_URLS_WINDOW_DAYS=30` Settings env | 운영 시점 토글 가능 |
+| 5 | `apply_fusion_bridge_override` 시그니처 — provider / enabled / 2 cap 인자 optional default off | 기존 caller 영향 0 (테스트 fixture 호출 등) |
+| 6 | F1 실행 — `try/except Exception: logger.warning` + 정상 흐름 유지 | BFS 결정 살림, 다음날 cron 재시도 |
+
+### 빈틈 — 시연 후 평가
+
+1. **bridge_cso 가 같으면 같은 자료 반복** — P1 dedup hint (직전 30일 fetch URL 회피) 가 해소. soft instruction 이므로 LLM 이 무시할 수 있으나 실측 시 강도 조정 (window_days 늘리거나 hard filter 도입)
+2. **LLM hallucination 으로 web 자료 0건** — 자연 빈 풀 fallback trend (F1 과 동일 처리)
+3. **cross-leaf 매핑 충돌** — `_insert_document_idempotent` 의 canonical_url UNIQUE + `_upsert_document_topic` greatest confidence 가 자연 해소
+4. **fetch 한 Document 가 사용자 dashboard 에 다음날 한 번만 노출** — Recommendation 의 (user, doc, slot, date) UNIQUE 가 자연 dedup. 같은 fusion 카드 가 다음날 사라지면 weekly_promotion 흐름과 정합
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `fetch_fusion_documents` + `fetch_trace_saved_titles` + helpers | `backend/app/profile/fusion_fetch.py` (신규) |
+| `apply_fusion_bridge_override` 시그니처 확장 + 호출 추가 | `backend/app/profile/service.py` |
+| `user_profile_generation_job` 호출 인자 확장 | `backend/app/worker/jobs/user_profile.py` |
+| Settings 3 env | `backend/app/config/__init__.py` |
+| `.env.example` 3 env | `.env.example` + `backend/.env.example` |
+
+스키마 변경 0 (alembic 없음).
+
 PR #(TBD) merge commit `(TBD)`.
 

@@ -56,6 +56,8 @@ candidates_adjacent = SELECT documents WHERE topic IN adjacent_csos ...
 
 **slot 1 (Fusion)**: 사용자 active trace × archived trace 의 cross-product 교차점. **(C-53 라운드 2026-05-24, [`../decisions.md §16`](../decisions.md))** — LLM 의 bridge_cso 결정을 **trace↔trace meet-in-the-middle BFS** 로 교체. daily 19 UTC LLM cron 이 LLM 호출 후 `apply_fusion_bridge_override` 가 bridge_cso 만 BFS 결과로 덮음. algorithm: archived + active path 의 `user_interest_state.long_score` DESC top_5 출발 + path 전체 visited + 외향 BFS (superTopicOf + relatedEquivalent edge 양방향). 첫 만남 노드 = bridge. LCA root 자연 회피. max_hops=3 안 만나지 않으면 None → trend fallback. `backend/app/traversal/fusion_bridge.py:find_fusion_bridge`.
 
+**(C-54 라운드 2026-05-24, [`../decisions.md §17`](../decisions.md))** — bridge_cso 결정 직후 같은 cron 안에서 **LLM web_search 도구로 bridge 영역 fresh Document 1~5건 fetch + DocumentTopic INSERT (bridge_cso 단일 매핑)**. bridge 가 valid 해도 매핑 Document 0개 = 빈 풀 risk 를 해소. 사용자 결정: prompt context = bridge_label + 두 path 라벨 + 각 trace 최근 saved Document 제목 3개 (B2) + 직전 30일 fusion 카드 URL/title 회피 hint (P1). 기존 `provider.search_with_tools` 인터페이스 + collection prompt 재사용 (C1). 실패 시 fusion_candidates 보존 + INSERT 0건 → dashboard 빈 풀 fallback trend (F1). `backend/app/profile/fusion_fetch.py:fetch_fusion_documents`.
+
 ```
 profile = await get_user_profile(user_id)
 # slot 1 — Fusion

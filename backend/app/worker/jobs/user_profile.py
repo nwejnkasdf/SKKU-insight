@@ -130,6 +130,13 @@ async def _run() -> int:
                     softmax_temperature=settings.REINCARNATION_SAMPLING_TEMPERATURE,
                     path_top_k=settings.FUSION_BRIDGE_PATH_TOP_K,
                     max_hops=settings.FUSION_BRIDGE_MAX_HOPS,
+                    # (C-54, 2026-05-24) bridge_cso 결정 직후 LLM web_search fresh fetch.
+                    provider=provider,
+                    fusion_fetch_enabled=settings.FUSION_FETCH_ENABLED,
+                    fusion_fetch_max_documents=settings.FUSION_FETCH_MAX_DOCUMENTS,
+                    fusion_fetch_recent_urls_window_days=(
+                        settings.FUSION_FETCH_RECENT_URLS_WINDOW_DAYS
+                    ),
                 )
                 # (C-44 P2-28, 2026-05-19) candidate_pool 영속화 — LLM 이 사용한
                 # 카테고리별 풀의 ID list 를 UserProfile.candidate_pool_ids JSONB 저장.

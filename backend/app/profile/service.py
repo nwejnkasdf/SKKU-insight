@@ -532,6 +532,10 @@ async def apply_fusion_bridge_override(
     softmax_temperature: float,
     path_top_k: int,
     max_hops: int,
+    provider: LLMProvider | None = None,
+    fusion_fetch_enabled: bool = False,
+    fusion_fetch_max_documents: int = 5,
+    fusion_fetch_recent_urls_window_days: int = 30,
 ) -> UserProfilePayload:
     """(C-53, 2026-05-24) LLM 결과의 fusion_candidates 를 BFS 결과로 override.
 
@@ -544,6 +548,11 @@ async def apply_fusion_bridge_override(
     fallback trend.
 
     LLM 결과의 다른 부분 (persona / deepening / broadening) 은 그대로. fusion 만 override.
+
+    (C-54, 2026-05-24) bridge_cso 결정 직후 LLM web_search 도구로 fresh Document fetch
+    + DocumentTopic INSERT (provider + fusion_fetch_enabled=True). 사용자 결정 매트릭스
+    decisions.md §17. 실패 시 F1 (fusion_candidates 보존, INSERT 0건). provider=None
+    또는 enabled=False 시 본 흐름 skip.
     """
     # 1. active trace 선택 — softmax sampling (C-53 followup, max → softmax).
     active_orm = await trav_queries.get_active_traces(db, user_id)
@@ -608,6 +617,41 @@ async def apply_fusion_bridge_override(
         active_trace.trace_id,
         bridge_cso,
     )
+
+    # (C-54, 2026-05-24) bridge_cso 영역 fresh Document fetch — LLM web_search + INSERT.
+    # 실패 모드 F1: 예외 발생해도 fusion_candidates 자체는 보존 (BFS 결정은 살림).
+    if fusion_fetch_enabled and provider is not None:
+        from app.profile import fusion_fetch as fusion_fetch_mod
+
+        try:
+            archived_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
+                db, user_id, list(archived_trace.path)
+            )
+            active_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
+                db, user_id, list(active_trace.path)
+            )
+            await fusion_fetch_mod.fetch_fusion_documents(
+                db,
+                provider,
+                user_id=user_id,
+                bridge_cso_topic_id=bridge_cso,
+                bridge_label=bridge_label,
+                archived_trace=archived_trace,
+                active_trace=active_trace,
+                archived_path_labels=from_archived,
+                active_path_labels=from_active,
+                archived_saved_titles=archived_saved_titles,
+                active_saved_titles=active_saved_titles,
+                max_documents=fusion_fetch_max_documents,
+                recent_urls_window_days=fusion_fetch_recent_urls_window_days,
+            )
+        except Exception:
+            logger.warning(
+                "fusion_fetch failed user=%s bridge=%s — fusion_candidates preserved",
+                user_id,
+                bridge_cso,
+            )
+
     return payload.model_copy(update={"fusion_candidates": [fusion]})
 
 

@@ -38,6 +38,17 @@ class FreshnessConfig:
     fresh_floor_value: float
 
 
+# (C-53 followup, 2026-05-24) discovery slot 은 freshness 계산 자체 부재 — 모든
+# Document factor 1.0 강제. C-52 의 `[freshness.discovery]` sub-table (placeholder)
+# 를 폐기하고 코드 상수로 정합. recommendation.toml 에 discovery sub-table 두지 않음.
+# fresh_full_hours=24 / floor_after_days=1 / floor=1.0 = 항상 1.0.
+_UNITY_FRESHNESS = FreshnessConfig(
+    fresh_full_hours=24,
+    fresh_floor_after_wallclock_days=1,
+    fresh_floor_value=1.0,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TrustLevelWeights:
     high: float
@@ -104,7 +115,8 @@ class RecommendationConfig:
     confidence_thresholds: ConfidenceThresholds
     freshness: FreshnessConfig
     # (C-51, 2026-05-24) slot 별 freshness override — engine.build_dashboard 가 slot 별
-    # 다른 cfg 로 score_candidates 호출. discovery half_life 짧게 = 매일 새 발견 본질.
+    # 다른 cfg 로 score_candidates 호출. core/adjacent 만 sub-table 명시. discovery 는
+    # C-53 followup 으로 코드 상수 `_UNITY_FRESHNESS` (1.0 강제).
     freshness_by_slot: dict[str, FreshnessConfig]
     trust_level_weights: TrustLevelWeights
     ranking_weights: RankingWeights
@@ -114,7 +126,11 @@ class RecommendationConfig:
     fallback: FallbackConfig
 
     def freshness_for_slot(self, slot_type: str) -> FreshnessConfig:
-        """slot 별 freshness — 미지정 시 default `freshness` fallback."""
+        """slot 별 freshness — discovery 는 _UNITY_FRESHNESS (1.0 강제), 그 외 dict /
+        default fallback. (C-53 followup, 2026-05-24)
+        """
+        if slot_type == "discovery":
+            return _UNITY_FRESHNESS
         return self.freshness_by_slot.get(slot_type, self.freshness)
 
 
@@ -184,9 +200,11 @@ def _parse(raw: dict[str, object]) -> RecommendationConfig:
             ),
             fresh_floor_value=float(f["fresh_floor_value"]),
         ),
-        # (C-51, 2026-05-24) [freshness.core] / [freshness.adjacent] / [freshness.discovery]
-        # 옵션 sub-table. tomllib 이 nested table 을 dict 안의 dict 로 반환. 없는 slot 은
-        # default `freshness` fallback (freshness_for_slot 메서드).
+        # (C-51, 2026-05-24) [freshness.core] / [freshness.adjacent] 옵션 sub-table.
+        # tomllib 이 nested table 을 dict 안의 dict 로 반환. 없는 slot 은 default
+        # `freshness` fallback (freshness_for_slot 메서드).
+        # (C-53 followup) [freshness.discovery] sub-table 은 폐기 — 코드 상수
+        # `_UNITY_FRESHNESS` 으로 강제 1.0 (freshness_for_slot 분기).
         freshness_by_slot={
             slot_name: FreshnessConfig(
                 fresh_full_hours=int(slot_cfg["fresh_full_hours"]),

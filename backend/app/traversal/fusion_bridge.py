@@ -143,20 +143,16 @@ async def find_fusion_bridge(
     if not frontier_a or not frontier_b:
         return None
 
-    # 4. 외향 BFS — frontier_a 와 frontier_b 교대 확장, 첫 만남이 bridge.
+    # 4. 외향 bidirectional BFS — 같은 depth 양방향 동시 확장 후 meet 검사 (표준 패턴).
+    #    두 영역 거리 비대칭 차단 + next_a × next_b 동시 만남도 포착.
     for depth in range(1, max_hops + 1):
-        # expand a
         next_a = _expand_neighbors(cso_graph, frontier_a) - visited_a.keys()
+        next_b = _expand_neighbors(cso_graph, frontier_b) - visited_b.keys()
         for n in next_a:
             visited_a[n] = depth
-        meet = next_a & visited_b.keys()
-        if meet:
-            return _tie_break(meet, visited_a, visited_b)
-        # expand b
-        next_b = _expand_neighbors(cso_graph, frontier_b) - visited_b.keys()
         for n in next_b:
             visited_b[n] = depth
-        meet = next_b & visited_a.keys()
+        meet = (next_a & visited_b.keys()) | (next_b & visited_a.keys())
         if meet:
             return _tie_break(meet, visited_a, visited_b)
         frontier_a, frontier_b = next_a, next_b

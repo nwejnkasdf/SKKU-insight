@@ -22,8 +22,10 @@ core slot 에 새 active trace 의 매핑 자료 자연 표시.
 
 Anti-pattern 회피:
 - (#1) cache-before-commit — db.commit() 성공 후 redis DEL
-- (#4) lock release race — per-user mutex 없음 (weekly batch, 단일 worker process)
-- (#3) per-user 실패 isolation — try/except + commit (다른 사용자 영향 X)
+- (#4) lock release race — uuid4 token + Lua atomic CAS release (A7 trace_merge 패턴)
+- (#3) per-user 실패 isolation — try/except/finally + commit (다른 사용자 영향 X)
+- (C-53 followup) per-user traversal_lock — daily_lifecycle / trace_merge / interest hook 와
+  같은 user-mutex 공유. trace mutation race 차단 (status archived→active / 신규 INSERT).
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ from datetime import datetime, timedelta, UTC
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.contracts import RedisKey, TraversalStatus
 from app.db.models import (
     Recommendation,
@@ -48,6 +51,12 @@ from app.redis import get_redis
 logger = logging.getLogger("weekly_promotion_job")
 
 _PROMOTION_WINDOW_DAYS = 7
+
+# (C-53 followup) lock release Lua atomic — 자기 token 일치 시만 DEL (TTL 만료 후 다른 worker
+# lock 잘못 해제 차단). A7 trace_merge 패턴 답습.
+_RELEASE_LOCK_LUA = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0"
+)
 
 
 async def _promote_reincarnation(
@@ -116,16 +125,34 @@ async def _promote_fusion(
 
 
 async def _run() -> int:
-    """모든 사용자 순회 — 주 1회 cron entry. return: promotion 발생 수."""
+    """모든 사용자 순회 — 주 1회 cron entry. return: promotion 발생 수.
+
+    (C-53 followup) 각 사용자마다 traversal_lock 획득. daily_lifecycle_evaluation /
+    trace_merge_job / interest hook 와 같은 lock 키 공유 — trace mutation 직렬화.
+    """
     redis = get_redis("default")
+    settings = get_settings()
     window_start = datetime.now(UTC) - timedelta(days=_PROMOTION_WINDOW_DAYS)
     promotions_total = 0
     reincarnation_total = 0
     fusion_total = 0
+    # weekly_promotion 은 SQL UPDATE/INSERT 만 — LLM 호출 없음. TRACE_MERGE_LOCK_TTL_SECONDS
+    # 보다 짧아도 충분하나, trace_merge 와 동일 lock 공유 의미상 같은 TTL 사용.
+    lock_ttl = settings.TRACE_MERGE_LOCK_TTL_SECONDS
 
     async with AsyncSessionLocal() as db:
         users = list((await db.execute(select(User))).scalars().all())
         for user in users:
+            lock_key = RedisKey.traversal_lock(user.user_id)
+            lock_token = str(uuid.uuid4())
+            acquired = await redis.set(
+                lock_key, lock_token, nx=True, ex=lock_ttl
+            )
+            if not acquired:
+                logger.info(
+                    "weekly_promotion lock busy user=%s — skip", user.user_id
+                )
+                continue
             try:
                 # 1. 직전 7-day save event 조회
                 save_events = list(
@@ -209,6 +236,17 @@ async def _run() -> int:
                     "weekly_promotion user=%s failed", user.user_id
                 )
                 await db.rollback()
+            finally:
+                # (C-53 followup) Lua atomic CAS — 자기 token 일치 시만 DEL.
+                try:
+                    await redis.eval(  # type: ignore[misc]
+                        _RELEASE_LOCK_LUA, 1, lock_key, lock_token
+                    )
+                except Exception:
+                    logger.warning(
+                        "weekly_promotion lock release race user=%s",
+                        user.user_id,
+                    )
     logger.info(
         "weekly_promotion_job total=%d reincarnation=%d fusion=%d",
         promotions_total,

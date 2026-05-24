@@ -38,20 +38,6 @@ fresh_full_hours = 24
 fresh_floor_after_wallclock_days = 14
 fresh_floor_value = 0.2
 
-[freshness.discovery]
-# (C-52 정정, 2026-05-24) discovery = 매일 새 발견 본질 + Reincarnation = 옛 trace
-# 영역의 fresh Document 추천. 둘 다 published_at decay 적용 부자연 — 의도:
-#   1. discovery slot = 매일 hard refresh (옛 카드 안 보임, _select_latest_recommendations 분기)
-#   2. Reincarnation = "옛 관심의 *새* 동향" 추천이라 Document 자체는 fresh 가 의미.
-#      "Document 옛 자료" 보호 명목 floor 유지는 디자인 오해 — Reincarnation 의 archive 는
-#      *trace* 차원이지 *Document* 차원 아님.
-# 따라서 freshness factor 항상 1.0 강제 (decay 자체 부재). 모든 Document 동일 freshness 점수.
-# fresh_full_hours / fresh_floor_after_wallclock_days 는 무의미한 placeholder.
-# 후속 PR (C-53?) 에서 강한 신호 시 discovery → core promotion 메커니즘 추가 예정.
-fresh_full_hours = 24
-fresh_floor_after_wallclock_days = 1
-fresh_floor_value = 1.0
-
 [trust_level_weights]
 high = 1.0
 medium = 0.85

@@ -636,3 +636,99 @@ if not pool:
 - Codex R2 재감사 (R1 fix 회귀 검증) + P2-26~29 본격 fix
 - A9 electron-client (UI-01~05 + safeStorage + 한국어 i18n + codegen api.ts)
 
+## 16. C-53 라운드 — Fusion bridge BFS + Reincarnation softmax + Weekly promotion (2026-05-24)
+
+### 배경
+
+A8-v2 (C-42, §15) 가 discovery slot 을 "Fusion 1 + Reincarnation 1" 으로 pivot. 다만 두 sub-slot 결정 알고리즘이:
+- **Fusion bridge**: LLM 1회로 결정 (candidate_pool 안에서 bridge_cso 선택) — LLM hallucination 위험 + LCA root 가까운 bridge 가능
+- **Reincarnation**: `get_top_archived_trace` deterministic top-1 — 매일 같은 archived trace 반복
+
+사용자 의도 (디자인 논의 — 본 PR 직전):
+1. "trace↔trace meet in the middle" 으로 bridge 결정 (그래프 알고리즘, LLM 의존 0)
+2. "반감기 없애고 매일매일 갱신" (discovery freshness decay 자체 제거)
+3. "reincarnation 다양성 = sigmoid + T" (softmax sampling)
+4. "강한 신호 (save) → core 부활" (discovery/adjacent → core promotion)
+
+### 결정
+
+**Fusion bridge_cso 결정** ([`backend/app/traversal/fusion_bridge.py`](../backend/app/traversal/fusion_bridge.py)):
+- trace↔trace meet in the middle BFS
+- 두 path 의 `user_interest_state.long_score` DESC top_k (default 5) 출발점
+- path 전체 visited 마킹 + 공유 노드 제외 (Fusion = path 밖 새 교차)
+- 외향 BFS — superTopicOf + relatedEquivalent edge 양방향 활용
+- 첫 만남 노드 = bridge. tie 시 두 path 거리 sum 최소
+- max_hops=3 안 만나지 않으면 None → query_discovery_trend fallback
+- LCA root 문제 자연 회피 — path 위 노드 visited 마킹으로 root 도 frontier 제외
+
+**Reincarnation softmax sampling** ([`backend/app/profile/sampling.py`](../backend/app/profile/sampling.py)):
+- `P(trace_i) = exp(score_tail_i / T) / Σ exp(score_tail_j / T)`
+- **T=0.3 default** — score 0.6~1.0 분포 기준 top 70~80% weight, 다양성 충분
+- 수치 안정 — max 정규화 (overflow 방지) + T clip (0.05 minimum, 극단값 회피)
+- `_build_reincarnation_subslot` 가 `get_top_archived_trace` → `softmax_sample_archived_trace` 교체
+
+**Weekly promotion** ([`backend/app/worker/jobs/weekly_promotion.py`](../backend/app/worker/jobs/weekly_promotion.py)):
+- 주 1회 cron (WEEKLY_PROMOTION_CRON="0 18 * * 0" 일요일 18 UTC = 월요일 03 KST)
+- 직전 7-day UserEvent.save → Recommendation.origin_type/origin_ref JOIN
+- **Reincarnation save** (origin_type='reincarnation') → `trace.status: archived → active`, path 보존
+- **Fusion save** (origin_type='fusion') → 새 active trace INSERT (path=[bridge_cso])
+- dedup ((origin_type, origin_ref) 같으면 1번만) + idempotent (이미 active 또는 같은 path 있으면 skip)
+- active cap 무제한 (사용자 결정)
+
+**Recommendation origin metadata** ([alembic 0010](../backend/alembic/versions/0010_c53_weekly_promotion.py)):
+- `recommendation.origin_type` (varchar(40) NULL) + `recommendation.origin_ref` (uuid NULL)
+- `ix_recommendation_origin` partial index (origin_type IS NOT NULL)
+- 'reincarnation' = archived trace_id / 'fusion' = bridge_cso_topic_id / NULL = core/adjacent/trend
+
+### 사용자 결정 9건 (디자인 논의)
+
+| # | 결정 | 출처 |
+|---|---|---|
+| 1 | bridge_cso = LLM 의존 X, 그래프 알고리즘 | 사용자 "trace↔trace 지향 탐색" |
+| 2 | meet in the middle BFS | 사용자 "meet in the middle 로는 어렵나?" |
+| 3 | path 전체 출발 (top_k=5 limit) | 사용자 "trace 길어질경우 감당 안되니까 top 5" |
+| 4 | edge = superTopicOf + relatedEquivalent | 사용자 "이거 뭐여" 질문 + 둘 다 사용 결정 |
+| 5 | Reincarnation softmax + T=0.3 | 사용자 "sigmoid 적용하고 T값 조절" |
+| 6 | active cap 무제한 | 사용자 "active cap 무제한" |
+| 7 | promotion 주 1회 | 사용자 "주 1회" |
+| 8 | Reincarnation = trace 그대로 부활 | 사용자 "기존 archived trace 그대로 부활" |
+| 9 | Fusion promotion = 새 active trace INSERT | 디자인 논의 결론 (path 위 grafting 부자연) |
+
+### 자체 결정 5건
+
+| # | 결정 | 근거 |
+|---|---|---|
+| 1 | sub-slot 별 freshness 차등 (C-51) | 사용자 의도 "최신성 추천 핵심" (discovery decay X = C-52) |
+| 2 | LLM fusion document fetch 별개 PR (C-54) | 사용자 의도 4 ("두 trace 컨텍스트 LLM fetch") = LLM 추가 호출 + DocumentTopic 매핑 협업, scope 분리 |
+| 3 | tie break = path 거리 sum 최소 → UUID lexicographic | 두 영역 균형 + deterministic |
+| 4 | softmax 수치 안정 (max 정규화 + T clip 0.05) | overflow 방지 + 극단값 회피 |
+| 5 | weekly_promotion_job LLM X | SQL UPDATE/INSERT 만 — 빠름, 실패 isolation 단순 |
+
+### 본 PR 범위 외 (C-54 별개 PR — 사용자 의도 4 따라)
+
+- LLM fusion document fetch — 두 trace + leaf 컨텍스트 → 신규 LLM 호출 → fusion 후보 document fetch + bridge_cso 매핑 DocumentTopic INSERT
+- 의문 #2 (bridge_cso 의 DocumentTopic 매핑 부재 가능성) 해결
+- 시연 narrative 강화 후 결정
+
+### 빈틈 4건 (운영 단계 — 시연 후 평가)
+
+1. BFS top_5 출발의 quality — `long_score` decay 후 narrow 분포 가능. 시연 결과 보고 조정 (tail-only / centroid / quartile sampling)
+2. bridge_cso valid 해도 DocumentTopic 매핑 0 → fallback trend (자연, 디자인 결함 X)
+3. softmax T 실 데이터 조정 (시연 sampling 분포 보고 0.1~0.5 사이 조정)
+4. promotion 무제한 cap 운영 단계 가드 (월 max promote / 자동 archive) — 별개 PR
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `find_fusion_bridge` algorithm | `backend/app/traversal/fusion_bridge.py` (신규) |
+| `softmax_sample_archived_trace` | `backend/app/profile/sampling.py` (신규) |
+| `apply_fusion_bridge_override` | `backend/app/profile/service.py` |
+| UserProfile job 통합 | `backend/app/worker/jobs/user_profile.py` |
+| Recommendation origin metadata | `backend/app/db/models/recommendation.py` + `backend/app/recommendation/engine.py` |
+| weekly_promotion_job | `backend/app/worker/jobs/weekly_promotion.py` (신규) + `backend/app/scheduler.py` (8 cron) |
+| Settings 4 env + JobType + alembic | `backend/app/config/__init__.py` + `backend/app/contracts.py` + `backend/alembic/versions/0010_c53_weekly_promotion.py` (신규) |
+| `.env.example` 4 env | `.env.example` + `backend/.env.example` |
+
+PR #39 (5 commits) + PR #40 (alembic revision id long name fix) merge commit `c9bb667` / `10ebaa5`.
+

@@ -412,8 +412,17 @@ class Recommendation(Base):
     slot_type: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(255))
     score: Mapped[float | None] = mapped_column(Float)   # 관리자 콘솔에만 노출 (NFR-04)
+    # (C-53, 2026-05-24, alembic 0010) discovery sub-slot 카드의 promotion 추적 metadata.
+    # origin_type: 'reincarnation' | 'fusion' | NULL (core/adjacent/trend = NULL)
+    # origin_ref: Reincarnation = archived trace_id / Fusion = bridge_cso_topic_id
+    # weekly_promotion_job 가 본 컬럼 기준으로 promotion (status archived→active /
+    # 새 active trace INSERT).
+    origin_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    origin_ref: Mapped[UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 ```
+
+`ix_recommendation_origin` partial index (`origin_type IS NOT NULL`) — weekly_promotion_job 의 7-day save JOIN 효율.
 
 UNIQUE(user_id, document_id, slot_type, (created_at AT TIME ZONE 'UTC')::date) — 같은 일자에 동일 문서 중복 추천 방지 (FR-28). alembic 0006 raw SQL `CREATE UNIQUE INDEX ux_recommendation_user_doc_slot_day` — functional expression 이라 ORM 메타에는 정의 X (autogenerate 정확 감지 불가).
 

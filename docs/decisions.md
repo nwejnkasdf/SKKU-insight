@@ -842,5 +842,50 @@ PR [#43](https://github.com/nwejnkasdf/SKKU-insight/pull/43) merge commit `1b469
 
 스키마 변경 0. backend 미수정. raw fetch 미도입. generated/api.ts 미변경.
 
+PR [#45](https://github.com/nwejnkasdf/SKKU-insight/pull/45) merge commit `7fc8cd4`.
+
+## 19. C-56 라운드 — leaf 활성 신호 ingest hook (2026-05-24)
+
+### 배경
+
+`rule_evaluator.py` 명세 ("활성 신호 emerging→active, stale→active 는 ingest 직후 즉시 — no LLM") 가 코드로 안 박혀 있던 결함. dynamic leaf 가 production 에서 **active 단계를 거치지 않고 14일 idle 만료 시 archived 로 직강등**. A7 P1-12 fix (trace extend/split caller 부재) 와 같은 패턴이 leaf 영역에 잔존.
+
+코드 정밀 검증 (grep evidence):
+- `evaluate_rule_transitions` 의 production caller = `daily_lifecycle_evaluation.py:268` **단 한 곳**
+- 그 caller 는 `demotions` 만 필터링해 `apply_transitions` 호출 — `window_promotion` / `reactivation` reason 의 transition 은 버려짐
+- `last_signal_active_day` UPDATE caller = INSERT 1곳만, UPDATE 0건 (idle 누적이 INSERT 시점 기준 — 사용자 활동 반영 X)
+
+### 사용자 결정 3건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 승격 평가 시점 = **(B) ingest hook 즉시** | 명세 정합 ("active 신호 ingest 직후") + 시연 narrative 즉시성 |
+| 2 | `last_signal_active_day` 갱신 시점 = **(P) ingest hook 즉시** | 의미상 마지막 활성 신호 시점이 정확해야 idle 계산 정합 |
+| 3 | 갱신 trigger event 범위 = **넓게 (click + save + dwell_tick)** | `_LEAF_PROMOTION_EVENT_TYPES` 가 LEAF_*_MIN_INTEREST_SIGNALS 의 "interest_signals" 정의와 일치 |
+
+### 자체 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | hook 위치 = `ingest_event_atomic` step 7.5 (베이지안 직후 / cache invalidate 직전) | bayesian 직후가 자연 + cache invalidate 가 다음이라 새 leaf status 반영 |
+| 2 | window 카운터 SQL 단일 JOIN — docs (`Document.created_at >= NOW() - INTERVAL '7 days'`) + signals (`UserEvent.active_day_at_event` 7 active days) | 명세 정합 — docs 는 wallclock (사용자 활동 무관 "자료가 있는지"), signals 는 active_day (잠수 처리) |
+| 3 | idle=0 강제 (방금 last_signal 갱신) | 단순화 — 룰 evaluator 의 idle 누적 계산 회피 |
+| 4 | promotion 만 apply (강등 reason 은 제외) | 강등은 daily cron `_evaluate_leaf_demotion_for_user` 책임 — surgical 분리 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `_LEAF_PROMOTION_EVENT_TYPES` 상수 + `_update_leaf_last_signal` + `_evaluate_leaf_promotion` helper | `backend/app/interest/service.py` (신규 ~135 line) |
+| `ingest_event_atomic` step 7.5 hook 호출 | `backend/app/interest/service.py` |
+| `rule_evaluator.py:117` 주석 — caller 가 `service.ingest_event_atomic` 안 존재 명시 | `backend/app/leaf_lifecycle/rule_evaluator.py` |
+| 회귀 가드 5건 (정적 source inspection) | `backend/tests/leaf_lifecycle/test_audit_regressions.py` (신규) |
+
+### 검증
+
+- `python -c "import ast; ast.parse(...)" ` exit 0 (syntax)
+- 회귀 테스트 5건 — production caller 존재 + event type 범위 + status filter + promotions only
+- 스키마 변경 0 (alembic 없음). Settings env 변경 0.
+
 PR #(TBD) merge commit `(TBD)`.
 

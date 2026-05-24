@@ -102,6 +102,7 @@ class NotInterestedRequest(BaseModel):
 - `client_request_id` 기반 idempotency. 같은 ID로 재호출 시 기존 row 반환.
 - Bayesian 갱신은 `event_weights.toml` 정의 가중치 사용 ([`../algorithms/interest-bayesian.md`](../algorithms/interest-bayesian.md)). atomic SQL UPSERT 패턴 ([`../sdd/concurrency.md §4.1`](../sdd/concurrency.md)).
 - 모든 이벤트는 user-level Redis lock 안에서 처리 ([`../sdd/concurrency.md §3`](../sdd/concurrency.md)). dwell_tick·click·view는 batch buffer로 묶음 (5초 윈도우, [`../sdd/concurrency.md §6`](../sdd/concurrency.md)). save/hide/not_interested는 즉시.
+- **(C-56, 2026-05-24, [`../decisions.md §19`](../decisions.md))** `ingest_event_atomic` step 7.5 — event type ∈ {click, save, dwell_tick} AND document_id is not None 시 이벤트 매핑 leaf 의 `last_signal_active_day = active_day` UPDATE + 즉시 leaf promotion 평가 (`window_promotion` / `reactivation` reason 만 apply). 강등은 daily cron 책임. [`../algorithms/leaf-topic-lifecycle.md §룰 기반 전이 의사 코드`](../algorithms/leaf-topic-lifecycle.md) 참조.
 - `/interest/state` 응답에서 점수 자체는 절대 반환하지 않음 (NFR-04). 클라이언트는 bucket만 사용.
 - 관리자 API (`/admin/users/{user_id}/interest-state`)는 별도. 본 파일에 미포함 ([`admin.md`](admin.md) 참조).
 

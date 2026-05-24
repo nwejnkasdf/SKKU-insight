@@ -225,6 +225,9 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 | `FUSION_BRIDGE_PATH_TOP_K` | `5` | **(C-53 신규)** Fusion bridge BFS 의 각 path 출발점 개수. `user_interest_state.long_score` DESC top_k. path 길이 ≤ K 면 전부 사용. |
 | `FUSION_BRIDGE_MAX_HOPS` | `3` | **(C-53 신규)** Fusion bridge meet-in-the-middle BFS 외향 깊이. CSO 14k 노드 sparse 그래프 (avg deg ~6) 기준 충분. 만나지 않으면 None → trend fallback. |
 | `WEEKLY_PROMOTION_CRON` | `0 18 * * 0` | **(C-53 신규)** discovery/adjacent → core promotion 주 1회 cron. 일요일 18 UTC = 월요일 03 KST. UserEvent.save 7-day window + Recommendation.origin_type/origin_ref JOIN. `backend/app/worker/jobs/weekly_promotion.py`. |
+| `FUSION_FETCH_ENABLED` | `true` | **(C-54 신규)** UserProfile cron 안 fusion bridge_cso 영역 fresh Document fetch toggle. `apply_fusion_bridge_override` 가 BFS bridge 결정 직후 LLM web_search 호출 + DocumentTopic INSERT. false 시 fetch skip — fusion 카드 빈 풀 시 fallback trend. `backend/app/profile/fusion_fetch.py`. |
+| `FUSION_FETCH_MAX_DOCUMENTS` | `5` | **(C-54 신규)** bridge fetch 1회 당 LLM 결과 Document 수 cap. collection_job (`COLLECTION_TOP_N`) 과 동일. |
+| `FUSION_FETCH_RECENT_URLS_WINDOW_DAYS` | `30` | **(C-54 신규, P1 dedup hint)** prompt context 에 회피 hint 로 박을 "직전 fusion 카드 URL/title" 윈도우 (days). Recommendation.origin_type='fusion' + 본 window 안 row 조회 → `trace_json["seen_urls"]`/`["seen_titles"]`. 기존 collection prompt §2 dedup hint 자연 적용. |
 
 ## 외부 소스 키 (있을 때만 채움)
 
@@ -429,6 +432,17 @@ USER_PROFILE_INPUT_ARCHIVE_MAX=8
 USER_PROFILE_REINCARNATION_GAP_DAYS_MIN=7
 USER_PROFILE_LOCK_TTL_SECONDS=180
 USER_PROFILE_CACHE_TTL_SECONDS=3600
+
+# === C-53 Fusion bridge BFS + Reincarnation softmax + weekly promotion (2026-05-24) ===
+REINCARNATION_SAMPLING_TEMPERATURE=0.3
+FUSION_BRIDGE_PATH_TOP_K=5
+FUSION_BRIDGE_MAX_HOPS=3
+WEEKLY_PROMOTION_CRON=0 18 * * 0
+
+# === C-54 Fusion bridge_cso 영역 fresh Document fetch (2026-05-24) ===
+FUSION_FETCH_ENABLED=true
+FUSION_FETCH_MAX_DOCUMENTS=5
+FUSION_FETCH_RECENT_URLS_WINDOW_DAYS=30
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

@@ -71,7 +71,7 @@ if not pool and profile.broadening_seeds:
     pool += await query_discovery_fusion(user_id, profile.broadening_seeds[0].cso_topic_id)
 ```
 
-**slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 부활. Serendipity 3-dim framework (RecSys '25) 의 "taste reincarnation" — "강한 신호로 종료된 영역에서 다시 흥미 자료 제시". **(C-53 라운드 2026-05-24)** — `get_top_archived_trace` (deterministic top-1) → **`softmax_sample_archived_trace`** (T=`REINCARNATION_SAMPLING_TEMPERATURE=0.3` default) 교체. 매일 다양한 archived trace — "매일 새 발견" 본질 정합. `backend/app/profile/sampling.py:softmax_sample_archived_trace`.
+**slot 2 (Reincarnation)**: `score_tail >= 0.6` archived trace 의 path 끝 노드 + 산하 archived leaf 부활. Serendipity 3-dim framework (RecSys '25) 의 "taste reincarnation" — "강한 신호로 종료된 영역에서 다시 흥미 자료 제시". **(C-53 라운드 2026-05-24)** — `get_top_archived_trace` (deterministic top-1) → **`softmax_sample_trace`** (T=`REINCARNATION_SAMPLING_TEMPERATURE=0.3` default) 교체. 매일 다양한 archived trace — "매일 새 발견" 본질 정합. **(C-53 followup, 2026-05-24)** — 함수명 `softmax_sample_archived_trace` → `softmax_sample_trace` rename (active_trace 도 같은 기준 softmax — Fusion 의 active trace 선택도 매일 다양). `backend/app/profile/sampling.py:softmax_sample_trace`.
 
 ```
 archived_trace = await get_top_archived_trace(user_id,

@@ -119,4 +119,18 @@ class DocumentSummaryResponse(BaseModel):
 | code | HTTP | 의미 |
 |---|---|---|
 | `profile.llm_output_invalid` | — | LLM 응답 JSON parse 실패 또는 Pydantic schema 검증 실패. cron 본 사용자 profile 갱신 skip. |
-| `profile.bridge_cso_not_found` | — | LLM 응답의 `bridge_cso_topic_id` 가 cso_graph 에 부재. 해당 fusion candidate 만 제거, 다른 candidates 는 유지. 전체 매핑 실패 시 본 코드 + profile.llm_output_invalid 와 함께 skip. |
+| `profile.bridge_cso_not_found` | — | LLM 응답의 `bridge_cso_topic_id` 가 cso_graph 에 부재. 해당 fusion candidate 만 제거, 다른 candidates 는 유지. 전체 매핑 실패 시 본 코드 + profile.llm_output_invalid 와 함께 skip. **(C-53 라운드, 2026-05-24)** — LLM 의 bridge_cso 결정 자체는 trace↔trace meet-in-the-middle BFS 로 교체 (`apply_fusion_bridge_override`). LLM 응답의 fusion_candidates 는 BFS 결과로 덮어쓰므로 본 ErrorCode 는 BFS 가 None (max_hops 안 만나기) 반환 시에만 발생 — 자연 fallback trend. |
+
+### C-54 fusion bridge 영역 fresh Document fetch (UserProfile cron 안)
+
+**(C-54 라운드, 2026-05-24, [`../decisions.md §17`](../decisions.md))** — `apply_fusion_bridge_override` 가 BFS bridge 결정 직후 LLM web_search 호출 + Document/DocumentTopic INSERT (bridge_cso 단일 매핑). dashboard 다음 조회 시 fusion 카드 자연 채워짐.
+
+흐름:
+1. BFS 결정 bridge_cso (cso_graph 멤버 검증됨)
+2. 두 trace path 의 최근 saved Document 제목 각 3개 + 직전 30일 fusion fetch URL/title (P1 dedup hint) 을 `trace_json` 에 박음
+3. `provider.search_with_tools(trace_json, bridge_label, top_n=FUSION_FETCH_MAX_DOCUMENTS, user_id=...)` 호출
+4. SearchResult → `_insert_document_idempotent` + `_upsert_document_topic(LeafTarget(parent=bridge_cso, leaf=None))` — D 사용자 결정: bridge 매핑은 cso_topic 단일
+
+실패 모드 (F1): `Exception` catch → `logger.warning("fusion_fetch failed ... — fusion_candidates preserved")` + 정상 흐름 유지 (fusion_candidates 보존, Document INSERT 0건). dashboard 빈 풀 시 fallback trend.
+
+비용: 사용자당 LLM 1회/일 추가. provider 인터페이스 미확장 (`search_with_tools` 그대로 재사용). 코드: [`../../backend/app/profile/fusion_fetch.py`](../../backend/app/profile/fusion_fetch.py).

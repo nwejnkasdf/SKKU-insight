@@ -34,6 +34,7 @@ from app.db.session import AsyncSessionLocal
 from app.llm_provider import get_provider
 from app.profile.config_loader import load_profile_config
 from app.profile.service import (
+    apply_fusion_bridge_override,
     fetch_profile_llm_input,
     generate_profile_payload,
     upsert_user_profile,
@@ -115,6 +116,21 @@ async def _run() -> int:
                     )
                     total_skipped_llm += 1
                     continue
+                # (C-53, 2026-05-24) fusion_candidates 만 BFS 결과로 override.
+                # LLM 의 fusion 결정은 LCA root 문제 + LLM hallucination 위험 — deterministic
+                # graph 알고리즘 (meet in the middle) 으로 교체. archived trace 도 softmax
+                # sampling 으로 매일 다른 후보. LLM 의 persona / deepening / broadening 은 그대로.
+                payload = await apply_fusion_bridge_override(
+                    db,
+                    graph,
+                    payload,
+                    user_id=user.user_id,
+                    archive_score_tail_min=config.archive_score_tail_min,
+                    input_archive_max=config.input_archive_max,
+                    softmax_temperature=settings.REINCARNATION_SAMPLING_TEMPERATURE,
+                    path_top_k=settings.FUSION_BRIDGE_PATH_TOP_K,
+                    max_hops=settings.FUSION_BRIDGE_MAX_HOPS,
+                )
                 # (C-44 P2-28, 2026-05-19) candidate_pool 영속화 — LLM 이 사용한
                 # 카테고리별 풀의 ID list 를 UserProfile.candidate_pool_ids JSONB 저장.
                 await upsert_user_profile(

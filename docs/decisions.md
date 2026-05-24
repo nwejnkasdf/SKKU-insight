@@ -887,5 +887,5 @@ PR [#45](https://github.com/nwejnkasdf/SKKU-insight/pull/45) merge commit `7fc8c
 - 회귀 테스트 5건 — production caller 존재 + event type 범위 + status filter + promotions only
 - 스키마 변경 0 (alembic 없음). Settings env 변경 0.
 
-PR #(TBD) merge commit `(TBD)`.
+PR [#46](https://github.com/nwejnkasdf/SKKU-insight/pull/46) merge commit `02f073c`.
 

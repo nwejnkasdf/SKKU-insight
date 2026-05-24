@@ -134,6 +134,11 @@ User 프롬프트 (구조):
 
 > `signals.idle_active_days(leaf)` = `user.active_day_counter - leaf.last_signal_active_day`
 
+**(C-56 라운드, 2026-05-24, [`../decisions.md §19`](../decisions.md))** — 본 의사 코드의 production caller 2건:
+
+- **승격 (`window_promotion` / `reactivation`)** = `interest/service.py:ingest_event_atomic` step 7.5 hook. 이벤트 type ∈ {click, save, dwell_tick} AND document_id is not None 시 `_update_leaf_last_signal` (매핑 leaf 의 `last_signal_active_day = active_day` UPDATE) 직후 `_evaluate_leaf_promotion` (단일 SQL JOIN docs 7d wallclock + signals 7d active_day → `evaluate_rule_transitions` → promotion reason 만 apply). 직전까지 caller 부재 (A7 P1-12 와 같은 패턴) 였던 결함 fix.
+- **강등 (`idle_demotion` / `stale_archived` / `emerging_idle_archived`)** = `worker/jobs/daily_lifecycle_evaluation.py:_evaluate_leaf_demotion_for_user` 18 UTC daily cron. demotion reason 만 apply (승격은 본 hook 책임).
+
 ```python
 def evaluate_transitions(user, leaves, signals, params) -> list[StateTransition]:
     transitions = []

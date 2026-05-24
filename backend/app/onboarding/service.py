@@ -344,7 +344,7 @@ def _enqueue_cold_start_job(
             user_class,
             locale,
         ),
-        job_timeout=180,
+        job_timeout=480,
         failure_ttl=86_400,
         result_ttl=COLD_START_STATUS_TTL,
     )

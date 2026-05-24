@@ -2739,6 +2739,24 @@ select:focus {
   box-shadow: none;
 }
 
+/* (C-55, 2026-05-24) offline banner — Shell 상단 fixed strip. */
+.offlineBanner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: #fff;
+  background: #6b4d2a;
+  letter-spacing: 0.01em;
+}
+
 .toast.error {
   background: #9b392c;
 }

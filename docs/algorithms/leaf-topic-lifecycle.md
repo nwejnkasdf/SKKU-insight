@@ -197,6 +197,8 @@ JSON 응답:
 { "remap": [...], "archive": [...] }
 ```
 
+**(C-57 라운드, 2026-05-24, [`../decisions.md §20`](../decisions.md))** 본문 구현 = [`backend/app/traversal/leaf_dispatch_llm.py:call_retract_reposition`](../../backend/app/traversal/leaf_dispatch_llm.py). 사용자 결정으로 retract decision 은 2종 (`remap` to `new_path[-1]` | `archive`) 단순화 — "path 중간 노드 remap" (위 §3) 은 후속 라운드 scope. LLM 실패 시 stub fallback (모두 `new_path[-1]` 로 remap, 1차 시연 동작 보존). 응답 hallucination 차단 (모르는 `leaf_id` 무시).
+
 ### Trace Merge Verify (A7 신규, model_slot="high", daily 18 UTC cron)
 
 ```

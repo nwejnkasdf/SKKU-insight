@@ -126,6 +126,8 @@ trace 자체의 operation은 **룰 기반**. LLM은 operation에 수반되는 dy
 각자 trace 로 분리되어 추천 슬롯에서 양쪽 다 cover. 기존 시도 (T 그대로 유지 + child_B
 신규) 는 child_A 방향이 산하 leaf 매핑에만 머무는 단점 → A7 round 1 결정으로 변경.
 
+**(C-57 라운드, 2026-05-24, [`../decisions.md §20`](../decisions.md))** 본문 구현 = [`backend/app/traversal/leaf_dispatch_llm.py:call_split_dispatch`](../../backend/app/traversal/leaf_dispatch_llm.py). 사용자 결정으로 split decision 은 2종 (`target_trace = source | new`) — archive 결정은 본 라운드 scope 밖 (`operations.execute_split` 미수정). LLM 실패 시 stub fallback (모두 source 의 child_A 로 매핑, 1차 시연 동작 보존).
+
 ### 3.4 archive
 
 **트리거**: trace.status가 stale인 채 N active day(default 90) 누적, 또는 path 길이 0이 됨.

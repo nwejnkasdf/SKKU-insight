@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowLeft,
+  ArrowRight,
   BarChart3,
   Bookmark,
   CheckCircle2,
@@ -59,6 +60,15 @@ type DisplayLabel = { label: string; rawLabel: string };
 type ModelNode = { label: string; tone: string; meta?: string; rawLabel?: string; badge?: string };
 type ModelLayer = { key: string; title: string; kicker: string; nodes: ModelNode[] };
 type DisplayTopic<T extends { label: string }> = T & { rawLabel: string };
+type SlotSummaryItem = DashboardResponse["slots"][number];
+
+const baseSlotTargets = {
+  core: 5,
+  adjacent: 3,
+  discovery: 2
+} as const;
+
+const slotOrder = ["core", "adjacent", "discovery", "fallback_adjacent", "fallback_trend"];
 
 const userClassOptions = [
   { value: "general", label: "일반" },
@@ -438,9 +448,11 @@ function DashboardView({
   const [error, setError] = useState<string | null>(null);
   const topicRanks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
 
-  async function load(refresh = false) {
-    setLoading(true);
-    setError(null);
+  async function load(refresh = false, silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const nextDashboard = refresh ? await api.refreshDashboard() : await api.dashboard();
       const [nextInterest, nextTraces] = await Promise.all([
@@ -451,10 +463,16 @@ function DashboardView({
       setInterest(nextInterest);
       setTraces(nextTraces?.items ?? []);
     } catch (err) {
-      setDashboard(null);
-      setError(messageForError(err));
+      if (silent) {
+        showToast({ tone: "error", text: messageForError(err) });
+      } else {
+        setDashboard(null);
+        setError(messageForError(err));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -490,6 +508,14 @@ function DashboardView({
                   rank={index + 1}
                   setView={setView}
                   showToast={showToast}
+                  onFeedbackApplied={(action, documentId) => {
+                    if (action !== "hide") return;
+                    setDashboard((current) => current ? {
+                      ...current,
+                      cards: current.cards.filter((item) => item.document_id !== documentId)
+                    } : current);
+                    void load(false, true);
+                  }}
                 />
               ))}
             </div>
@@ -505,20 +531,34 @@ function RecommendationCardView({
   card,
   rank,
   setView,
-  showToast
+  showToast,
+  onFeedbackApplied
 }: {
   api: InsightApi;
   card: RecommendationCard;
   rank: number;
   setView: (view: View) => void;
   showToast: (toast: Toast) => void;
+  onFeedbackApplied?: (action: FeedbackAction, documentId: UUID) => void;
 }) {
   const displayTopics = card.related_topics
     .map(displayTopicChip);
   const visibleTopics = displayTopics.slice(0, 2);
   const hiddenTopicCount = Math.max(0, displayTopics.length - visibleTopics.length);
-  const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    saved: card.saved,
+    hidden: card.hidden,
+    notInterested: card.not_interested
+  });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
+
+  useEffect(() => {
+    setFeedback({
+      saved: card.saved,
+      hidden: card.hidden,
+      notInterested: card.not_interested
+    });
+  }, [card.document_id, card.saved, card.hidden, card.not_interested]);
 
   async function eventAndOpen() {
     await api.postEvent({
@@ -559,6 +599,7 @@ function RecommendationCardView({
         } else {
           await api.hideDocument(card.document_id);
           showToast({ tone: "ok", text: "숨김 처리했습니다." });
+          onFeedbackApplied?.(action, card.document_id);
         }
       } else {
         if (active) {
@@ -567,6 +608,7 @@ function RecommendationCardView({
         } else {
           await api.notInterestedDocument(card.document_id);
           showToast({ tone: "ok", text: "관심 없음으로 반영했습니다." });
+          onFeedbackApplied?.(action, card.document_id);
         }
       }
     } catch (err) {
@@ -629,30 +671,49 @@ function SignalOverview({
   interest: InterestStateResponse | null;
   traces: TraversalTraceSummary[];
 }) {
-  const core = dashboard.slots.find((slot) => slot.slot_type === "core")?.actual_count ?? 0;
-  const adjacent = dashboard.slots.find((slot) => slot.slot_type === "adjacent")?.actual_count ?? 0;
-  const discovery = dashboard.slots.find((slot) => slot.slot_type === "discovery")?.actual_count ?? 0;
+  const visibleSlots = buildVisibleSlots(dashboard.slots, true, dashboard.cards);
+  const maxSlotCount = Math.max(1, ...visibleSlots.map((slot) => slot.actual_count));
   const visibleInterestTopics = (interest?.topics ?? [])
     .map(displayTopicChip);
   const trackedTopics = visibleInterestTopics.filter((topic) => topic.bucket !== "neutral");
   const trackedNodes = buildTrackedNodeItems(dashboard, interest, traces);
+  const mapNodes = trackedNodes.slice(0, 5);
+  const mapPoints = mapNodes.map((_, index) => signalMapPoint(index, mapNodes.length));
   const activeTraceCount = traces.filter((trace) => trace.status === "active").length;
   return (
     <div className="signalOverview">
       <div className="signalMap" aria-label="추적 관심사 그래프">
-        {trackedNodes.slice(1).map((node, index) => (
-          <i key={`line-${node.rawLabel}-${index}`} className={`mapLine line${index + 1}`} />
-        ))}
-        {trackedNodes.map((node, index) => (
-          <span key={`${node.rawLabel}-${index}`} className={`mapNode node${index + 1} ${index === trackedNodes.length - 1 ? "active" : ""}`} title={node.rawLabel}>
+        <svg className="signalMapLines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {mapNodes.slice(1).map((node, index) => {
+            const from = mapPoints[index];
+            const to = mapPoints[index + 1];
+            return <line key={`line-${node.rawLabel}-${index}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+          })}
+        </svg>
+        {mapNodes.map((node, index) => (
+          <span
+            key={`${node.rawLabel}-${index}`}
+            className={`mapNode ${index === mapNodes.length - 1 ? "active" : ""}`}
+            style={{ left: `${mapPoints[index].x}%`, top: `${mapPoints[index].y}%` }}
+            title={node.rawLabel}
+            data-full-label={node.rawLabel}
+          >
             {compactTopicLabel(node.label)}
           </span>
         ))}
       </div>
       <div className="slotColumns" aria-label="추천 슬롯 분포">
-        <span style={{ height: `${Math.max(18, core * 12)}px` }}><b>중심</b></span>
-        <span className="adjacent" style={{ height: `${Math.max(18, adjacent * 12)}px` }}><b>인접</b></span>
-        <span className="discovery" style={{ height: `${Math.max(18, discovery * 12)}px` }}><b>탐색</b></span>
+        {visibleSlots.map((slot) => (
+          <span
+            key={slot.slot_type}
+            className={`${slot.slot_type} ${slot.actual_count === 0 ? "empty" : ""}`}
+            title={`${slotLabel(slot.slot_type)} ${slotMeta(slot.actual_count, slot.target_count)}`}
+            style={{ height: `${Math.max(18, (slot.actual_count / maxSlotCount) * 64)}px` }}
+          >
+            <b>{slotLabel(slot.slot_type)}</b>
+            <em>{slotMeta(slot.actual_count, slot.target_count)}</em>
+          </span>
+        ))}
       </div>
       <div className="trackedPanel">
         <span className="panelMiniLabel">추적 관심사</span>
@@ -664,9 +725,9 @@ function SignalOverview({
         <small>{activeTraceCount > 0 ? `${activeTraceCount}개 trace 활성` : "trace 생성 대기"} · {interest?.updated_at ? formatDate(interest.updated_at) : "초기 상태"}</small>
       </div>
       <div className="signalStats">
-        <span><b>{dashboard.cards.length}</b> 추천</span>
-        <span><b>{trackedTopics.length || topicCount}</b> 관심</span>
-        <span><b>{dashboard.cold_start ? "활성" : "종료"}</b> 초기</span>
+        <span title="현재 추천 큐에 표시되는 문서 수"><b>{dashboard.cards.length}</b><em>추천 문서</em></span>
+        <span title="관심 상태에서 추적 중인 토픽 수"><b>{trackedTopics.length || topicCount}</b><em>추적 관심</em></span>
+        <span title="현재 활성 상태인 관심 경로 수"><b>{activeTraceCount}</b><em>활성 경로</em></span>
       </div>
     </div>
   );
@@ -707,16 +768,17 @@ function InterestStructurePanel({
 }
 
 function SlotBars({ dashboard }: { dashboard: DashboardResponse }) {
-  const total = Math.max(1, dashboard.slots.reduce((sum, slot) => sum + slot.actual_count, 0));
+  const slots = buildVisibleSlots(dashboard.slots, true, dashboard.cards);
+  const total = Math.max(1, slots.reduce((sum, slot) => sum + slot.actual_count, 0));
   return (
     <div className="insightPanel">
       <PanelHeading icon={<BarChart3 size={16} />} title="슬롯 분포" />
       <div className="slotBars">
-        {dashboard.slots.map((slot) => (
+        {slots.map((slot) => (
           <div key={slot.slot_type} className="barRow">
             <div className="barLabel">
               <span>{slotLabel(slot.slot_type)}</span>
-              <b>{slot.actual_count}/{slot.target_count}</b>
+              <b>{slotMeta(slot.actual_count, slot.target_count)}</b>
             </div>
             <div className="barTrack">
               <span className={`barFill ${slot.slot_type}`} style={{ width: `${(slot.actual_count / total) * 100}%` }} />
@@ -812,6 +874,7 @@ function DocumentView({
 }) {
   const [detail, setDetail] = useState<DocumentDetailResponse | null>(null);
   const [summary, setSummary] = useState<DocumentSummaryResponse | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({ saved: false, hidden: false, notInterested: false });
   const [busyAction, setBusyAction] = useState<FeedbackAction | null>(null);
@@ -821,14 +884,21 @@ function DocumentView({
     startDwell(documentId);
     void api.documentDetail(documentId).then(setDetail).catch((err) => setError(messageForError(err)));
     void api.documentSummary(documentId).then(setSummary).catch(() => undefined);
+    void api.dashboard().then(setDashboard).catch(() => undefined);
     void api.traces().then((res) => setTraces(res.items)).catch(() => undefined);
     return stopDwell;
   }, [api, documentId]);
 
   useEffect(() => {
     if (!detail) return;
-    setFeedback({ saved: detail.saved, hidden: detail.hidden, notInterested: false });
+    setFeedback({
+      saved: detail.saved,
+      hidden: detail.hidden,
+      notInterested: detail.not_interested
+    });
   }, [detail]);
+
+  const queueCards = useMemo(() => uniqueRecommendationCards(dashboard?.cards ?? []), [dashboard]);
 
   if (error) return <Empty title="문서를 불러오지 못했습니다" body={error} />;
   if (!detail) return <Loading label="문서를 불러오는 중" />;
@@ -838,6 +908,23 @@ function DocumentView({
     .slice(0, 3);
   const sourceTone = detail.source_type;
   const externalUrl = getExternalUrl(detail.canonical_url ?? detail.url);
+  const queueIndex = queueCards.findIndex((card) => card.document_id === documentId);
+  const previousCard = queueIndex > 0 ? queueCards[queueIndex - 1] : null;
+  const nextCard = queueIndex >= 0 && queueIndex < queueCards.length - 1 ? queueCards[queueIndex + 1] : null;
+  const queuePosition = queueIndex >= 0 && queueCards.length > 0 ? `${queueIndex + 1}/${queueCards.length}` : "큐";
+  const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
+  const matchedTrace =
+    traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
+    traces.find((t) => t.status === "active") ??
+    traces[0];
+  const traceNodes = matchedTrace?.path_labels ?? [];
+  const traceTitle = traceNodes.length > 1 ? "추천 경로" : "매칭 관심사";
+
+  function openQueuedDocument(card: RecommendationCard | null) {
+    if (!card) return;
+    setView({ name: "document", documentId: card.document_id });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   function openOriginal() {
     if (!externalUrl) {
@@ -919,7 +1006,17 @@ function DocumentView({
       <button className="backLink" onClick={() => setView({ name: "dashboard" })}>
         <ArrowLeft size={17} /> 추천으로 돌아가기
       </button>
-      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`} />
+      <Header title="문서 보기" subtitle={`${sourceTypeLabel(detail.source_type)} · ${formatPublishedDate(detail.published_at, detail.source_name)}`}>
+        <div className="documentHeaderNav" aria-label="추천 문서 이동">
+          <button disabled={!previousCard} title={previousCard?.title ?? "추천 큐의 처음입니다"} onClick={() => openQueuedDocument(previousCard)}>
+            <b>이전</b>
+          </button>
+          <em title="추천 큐 위치">{queuePosition}</em>
+          <button disabled={!nextCard} title={nextCard?.title ?? "추천 큐의 마지막입니다"} onClick={() => openQueuedDocument(nextCard)}>
+            <b>다음</b>
+          </button>
+        </div>
+      </Header>
       <div className="documentShell">
         <section className="panel documentHero">
           <div className={`docCover ${sourceTone}`} aria-hidden="true">
@@ -983,24 +1080,16 @@ function DocumentView({
               </button>
             </div>
             <div className="panel docTraceCard">
-              <PanelHeading icon={<GitBranch size={16} />} title="추천 경로" />
-              <div className="docTraceMini">
-                {(() => {
-                  const relatedLabels = (detail.related_topics ?? []).map((t) => t.label.toLowerCase());
-                  const matched =
-                    traces.find((t) => t.path_labels.some((p) => relatedLabels.includes(p.toLowerCase()))) ??
-                    traces.find((t) => t.status === "active") ??
-                    traces[0];
-                  const nodes = matched?.path_labels ?? [];
-                  if (nodes.length === 0) {
-                    return <span>경로 형성 대기</span>;
-                  }
-                  return nodes.map((node, index) => (
-                    <span key={`${node}-${index}`} className={index === nodes.length - 1 ? "active" : ""}>
-                      {node}
-                    </span>
-                  ));
-                })()}
+              <PanelHeading icon={<GitBranch size={16} />} title={traceTitle} />
+              <div className={`docTraceMini ${traceNodes.length <= 1 ? "single" : ""}`}>
+                {traceNodes.length === 0 ? (
+                  <p className="docTraceEmpty">경로 형성 대기</p>
+                ) : traceNodes.map((node, index) => (
+                  <span key={`${node}-${index}`} className={index === traceNodes.length - 1 ? "active" : ""} title={node}>
+                    <b>{compactTopicLabel(node)}</b>
+                    <small>{cleanTopicLabel(node)}</small>
+                  </span>
+                ))}
               </div>
             </div>
           </aside>
@@ -1205,6 +1294,7 @@ function RankingView({ api, setView }: { api: InsightApi; setView: (view: View) 
 function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) => void }) {
   const [saved, setSaved] = useState<DocumentSummary[]>([]);
   const [hidden, setHidden] = useState<DocumentSummary[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
 
   useEffect(() => {
     void api.savedDocuments().then((res) => setSaved(res.items)).catch(() => undefined);
@@ -1219,8 +1309,12 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
           <Bookmark size={26} />
           <div>
             <h2>{saved.length}개 저장됨</h2>
-            <p>숨긴 문서 {hidden.length}건은 오른쪽 복구 목록에서 다시 열 수 있습니다.</p>
+            <p>숨긴 문서 {hidden.length}건은 버튼을 눌러 복구할 수 있습니다.</p>
           </div>
+          <button className="libraryHiddenTrigger" onClick={() => setShowHidden(true)}>
+            <EyeOff size={17} />
+            숨긴 문서 {hidden.length}개
+          </button>
         </div>
         <div className="libraryColumns">
           <div className="panel librarySavedPanel">
@@ -1236,6 +1330,20 @@ function LibraryView({ api, setView }: { api: InsightApi; setView: (view: View) 
           </aside>
         </div>
       </div>
+      {showHidden && (
+        <div className="libraryModalBackdrop" role="presentation" onClick={() => setShowHidden(false)}>
+          <section className="libraryModal panel" role="dialog" aria-modal="true" aria-label="숨긴 문서 복구" onClick={(event) => event.stopPropagation()}>
+            <div className="libraryModalHead">
+              <div>
+                <h2>숨긴 문서 복구</h2>
+                <p className="muted">문서를 열어 숨김 상태를 해제할 수 있습니다.</p>
+              </div>
+              <button className="ghostButton" onClick={() => setShowHidden(false)}>닫기</button>
+            </div>
+            {hidden.length === 0 ? <p className="muted">숨긴 문서가 없습니다.</p> : <DocumentList items={hidden} setView={setView} />}
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -1482,8 +1590,48 @@ function slotBadge(slot: string): string {
   }[slot] ?? compactTopicLabel(slot);
 }
 
-function slotMeta(actualCount: number, targetCount: number): string {
-  return targetCount > 0 ? `${actualCount}/${targetCount}` : `${actualCount}개`;
+function slotMeta(actualCount: number, _targetCount: number): string {
+  return `${actualCount}`;
+}
+
+function buildVisibleSlots(
+  slots: SlotSummaryItem[],
+  includeEmptyBase: boolean,
+  cards: RecommendationCard[] = []
+): SlotSummaryItem[] {
+  const byType = new Map(slots.map((slot) => [slot.slot_type, slot]));
+  const cardCounts = cards.reduce((counts, card) => {
+    counts.set(card.slot_type, (counts.get(card.slot_type) ?? 0) + 1);
+    return counts;
+  }, new Map<SlotSummaryItem["slot_type"], number>());
+  const baseSlots = Object.entries(baseSlotTargets)
+    .map(([slotType, targetCount]) => {
+      const typedSlot = slotType as SlotSummaryItem["slot_type"];
+      const actualCount = cardCounts.get(typedSlot) ?? byType.get(typedSlot)?.actual_count ?? 0;
+      return byType.get(typedSlot) ?? {
+        slot_type: typedSlot,
+        actual_count: actualCount,
+        target_count: targetCount,
+        fallback_reason: null
+      };
+    })
+    .map((slot) => ({ ...slot, actual_count: cardCounts.get(slot.slot_type) ?? slot.actual_count }))
+    .filter((slot) => includeEmptyBase || slot.actual_count > 0);
+  const fallbackSlots = slotOrder
+    .filter((slotType) => slotType.startsWith("fallback_"))
+    .map((slotType) => {
+      const typedSlot = slotType as SlotSummaryItem["slot_type"];
+      const existing = byType.get(typedSlot);
+      return {
+        slot_type: typedSlot,
+        target_count: existing?.target_count ?? 0,
+        actual_count: cardCounts.get(typedSlot) ?? existing?.actual_count ?? 0,
+        fallback_reason: existing?.fallback_reason ?? null
+      };
+    })
+    .filter((slot) => slot.actual_count > 0);
+  return [...baseSlots, ...fallbackSlots]
+    .sort((a, b) => slotOrder.indexOf(a.slot_type) - slotOrder.indexOf(b.slot_type));
 }
 
 function sourceTypeLabel(sourceType: string): string {
@@ -1532,6 +1680,15 @@ function buildTrackedNodeItems(
   );
 
   return displayTopicNodes(labels).slice(0, 5);
+}
+
+function signalMapPoint(index: number, total: number): { x: number; y: number } {
+  if (total <= 1) return { x: 50, y: 54 };
+  const yPattern = [64, 32, 56, 34, 62];
+  return {
+    x: 12 + (76 * index) / (total - 1),
+    y: yPattern[index] ?? 50
+  };
 }
 
 function buildInterestModelLayers(
@@ -1583,8 +1740,7 @@ function buildInterestModelLayers(
       key: "slots",
       kicker: "4",
       title: "추천 슬롯",
-      nodes: dashboard.slots
-        .filter((slot) => slot.actual_count > 0)
+      nodes: buildVisibleSlots(dashboard.slots, true, dashboard.cards)
         .map((slot) => ({
           label: slotLabel(slot.slot_type),
           tone: slot.slot_type,
@@ -1608,11 +1764,10 @@ function uniqueLabels(labels: string[]): string[] {
 function cleanTopicLabel(label: string): string {
   const stripped = label
     .trim()
-    .replace(/^\([^)]{1,40}\)\s*/, "")
-    .replace(/^[^0-9A-Za-z가-힣]+/, "")
+    .replace(/^[^\p{L}\p{N}(+]+/u, "")
     .trim();
-  const alphaCount = (stripped.match(/[A-Za-z가-힣]/g) ?? []).length;
-  if (alphaCount < 2) return "수식 토픽";
+  const alphaCount = (stripped.match(/\p{L}/gu) ?? []).length;
+  if (alphaCount < 2 && !/[0-9+]/.test(stripped)) return "수식 토픽";
   return stripped;
 }
 
@@ -1639,10 +1794,20 @@ function displayTopicChip<T extends { label: string }>(topic: T): DisplayTopic<T
 
 function compactTopicLabel(label: string): string {
   const cleanLabel = cleanTopicLabel(label) ?? label;
-  const words = cleanLabel.split(/[\s/.-]+/).filter(Boolean);
+  const graphLabel = cleanLabel.replace(/^\(([^)]{1,40})\)\s*/, "$1 ").trim();
+  const words = graphLabel.split(/[\s/.,()+-]+/).filter((word) => /\p{L}|\p{N}/u.test(word));
   if (words.length === 0) return cleanLabel.slice(0, 3).toUpperCase();
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
   return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+}
+
+function uniqueRecommendationCards(cards: RecommendationCard[]): RecommendationCard[] {
+  const seen = new Set<UUID>();
+  return cards.filter((card) => {
+    if (seen.has(card.document_id)) return false;
+    seen.add(card.document_id);
+    return true;
+  });
 }
 
 function buildTopicRanks(cards: RecommendationCard[]): TopicRank[] {

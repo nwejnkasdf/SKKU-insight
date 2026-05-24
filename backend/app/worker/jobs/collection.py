@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -29,8 +29,8 @@ from app.collection.orchestrator import (
     run_collection_for_user,
 )
 from app.config import get_settings
-from app.contracts import LLMProviderType
-from app.db.models import User
+from app.contracts import CollectionJobStatus, LLMProviderType
+from app.db.models import CollectionJob, User
 from app.llm_provider import get_provider
 from app.llm_provider.protocol import LLMBudgetExceeded, ProviderError
 from app.redis import get_redis
@@ -86,7 +86,9 @@ async def _async_collection_job(
 
         async def _run_one(uid: UUID) -> None:
             async with sem:
-                sleep_for = deterministic_jitter_seconds(uid, today)
+                # Manual run-now should feel immediate in the admin console.
+                # Cron fan-out keeps deterministic jitter to avoid a thundering herd.
+                sleep_for = 0 if is_run_now else deterministic_jitter_seconds(uid, today)
                 if sleep_for > 0:
                     await asyncio.sleep(sleep_for)
                 async with session_factory() as session:
@@ -110,6 +112,10 @@ async def _async_collection_job(
                             result.documents_inserted,
                         )
                     except CollectionAlreadyRunning:
+                        if existing_job_id is not None:
+                            await _mark_existing_job_skipped(
+                                session, existing_job_id
+                            )
                         logger.info(
                             "collection_job skipped (already running) user=%s", uid
                         )
@@ -141,6 +147,19 @@ async def _select_active_users(session: AsyncSession) -> list[UUID]:
     )
     rows = (await session.execute(stmt)).scalars().all()
     return list(rows)
+
+
+async def _mark_existing_job_skipped(
+    session: AsyncSession, job_id: UUID
+) -> None:
+    stmt = select(CollectionJob).where(CollectionJob.job_id == job_id)
+    job = (await session.execute(stmt)).scalar_one_or_none()
+    if job is None:
+        return
+    job.status = CollectionJobStatus.SKIPPED.value
+    job.finished_at = datetime.now(UTC)
+    job.failure_reason = "collection_already_running"
+    await session.commit()
 
 
 __all__ = ["collection_job"]

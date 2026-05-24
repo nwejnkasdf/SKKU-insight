@@ -34,6 +34,9 @@ class RecommendationCard(BaseModel):
     reason_short: str                 # 한국어, 1문장. NFR-03
     published_at: datetime
     thumbnail_url: str | None
+    saved: bool
+    hidden: bool
+    not_interested: bool
     # 점수 미노출 (NFR-04)
     # source_type 은 contracts.py SourceType enum 사용 (sdd/contracts.md §2)
 
@@ -68,6 +71,7 @@ class DocumentDetailResponse(BaseModel):
     related_topics: list[TopicChip]
     saved: bool
     hidden: bool
+    not_interested: bool
     # 행동 로그/관심 점수 노출 X (FR-53)
 
 class DocumentSummarySection(BaseModel):

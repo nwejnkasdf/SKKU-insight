@@ -98,13 +98,13 @@ async def test_core_antijoin_excludes_hidden_and_clickbait(
 
 
 @pytest.mark.asyncio
-async def test_core_antijoin_excludes_not_interested_topic(
+async def test_core_keeps_current_topic_even_if_not_interested_marker_exists(
     db_session: AsyncSession,
     rec_user: User,
     rec_cso_topics,
     rec_documents,
 ) -> None:
-    """NotInterestedTopic 에 매핑된 cso_topic 의 Document 제외."""
+    """core 는 active trace 가 우선이라 NotInterestedTopic 을 절대 차단으로 쓰지 않는다."""
     db_session.add(
         NotInterestedTopic(
             id=uuid.uuid4(),
@@ -117,7 +117,34 @@ async def test_core_antijoin_excludes_not_interested_topic(
     current_csos = [rec_cso_topics[0].cso_topic_id]
     rows = await query_core(db_session, rec_user.user_id, current_csos, [])
     doc_ids = {r.document_id for r in rows}
-    assert rec_documents[0].document_id not in doc_ids
+    assert rec_documents[0].document_id in doc_ids
+
+
+@pytest.mark.asyncio
+async def test_adjacent_antijoin_excludes_not_interested_topic(
+    db_session: AsyncSession,
+    rec_user: User,
+    rec_cso_topics,
+    rec_documents,
+) -> None:
+    """adjacent/discovery 는 NotInterestedTopic 을 후보 제외로 유지한다."""
+    db_session.add(
+        NotInterestedTopic(
+            id=uuid.uuid4(),
+            user_id=rec_user.user_id,
+            cso_topic_id=rec_cso_topics[2].cso_topic_id,
+            leaf_topic_id=None,
+        )
+    )
+    await db_session.flush()
+    rows = await query_adjacent(
+        db_session,
+        rec_user.user_id,
+        [rec_cso_topics[2].cso_topic_id],
+        current_csos=[],
+    )
+    doc_ids = {r.document_id for r in rows}
+    assert rec_documents[2].document_id not in doc_ids
 
 
 @pytest.mark.asyncio

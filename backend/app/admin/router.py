@@ -14,6 +14,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.collection.schemas import RunNowResponse
 from app.config import get_settings
 from app.contracts import CollectionJobStatus, PagedResponse
 from app.db.models import AdminUser
@@ -312,6 +313,29 @@ async def admin_user_events(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> PagedResponse[AdminEventView]:
     raise NotImplementedError("Phase 0b A6에서 구현")
+
+
+@router.post(
+    "/users/{user_id}/collection/run-now",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=RunNowResponse,
+    summary="사용자 문서 수집 즉시 실행",
+)
+@limiter.limit("10/hour")
+async def admin_run_user_collection_now(
+    request: Request,
+    user_id: UUID,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> RunNowResponse:
+    """관리자 콘솔에서 동의 활성 사용자 1명의 collection job을 큐잉한다."""
+    _ = request
+    return await users_service.trigger_user_collection_now(
+        admin,
+        user_id=user_id,
+        db=db,
+        redis=_redis_default(),
+    )
 
 
 # ============================================================

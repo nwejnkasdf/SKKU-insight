@@ -16,6 +16,7 @@ from app.collection.schemas import CollectionJobView
 from app.contracts import (
     AdminRole,
     ClickbaitDecision,
+    CollectionJobStatus,
     EventType,
     InterestBucket,
     SourceType,
@@ -167,6 +168,10 @@ class AdminUserListItem(BaseModel):
     created_at: datetime
     consent_active: bool
     deletion_pending: bool
+    latest_collection_status: CollectionJobStatus | None = None
+    latest_collection_created_at: datetime | None = None
+    latest_collection_started_at: datetime | None = None
+    latest_collection_finished_at: datetime | None = None
 
 
 class AdminInterestTopicView(BaseModel):

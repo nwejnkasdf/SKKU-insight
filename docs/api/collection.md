@@ -1,6 +1,6 @@
 # API: Collection
 
-본 파일은 **사용자용 수집 잡 API**의 명세이다. 관리자 콘솔 영역(`/admin/collection/*` 6개)은 [`admin.md §수집`](admin.md)이 단일 SOR이며 본 파일은 본문에서 다루지 않는다 (사용자 결정 2026-05-11 — endpoint·schema 중복 제거). 관련 FR: FR-21~29.
+본 파일은 **사용자용 수집 잡 API**의 명세이다. 관리자 콘솔 영역(`/admin/collection/*` 6개 + `/admin/users/{user_id}/collection/run-now`)은 [`admin.md`](admin.md)이 단일 SOR이며 본 파일은 본문에서 다루지 않는다 (사용자 결정 2026-05-11 — endpoint·schema 중복 제거). 관련 FR: FR-21~29.
 
 > **v13 라운드 박스 (2026-05-11)**: A4 Topic-driven Pivot ([`../decisions.md §10`](../decisions.md))으로 다음 비즈니스 룰 갱신. **endpoint 시그니처는 보존** — `GET /collection/jobs/me`, `POST /collection/jobs/me/run-now` 그대로.
 > - **CollectionJob.source_id**: NOT NULL. 1차 시연은 sentinel `llm_search` 1행만 — 실제 publisher 는 `Document.raw->>'publisher_domain'`.
@@ -13,7 +13,7 @@
 
 > **API 통신 규약**: [`../sdd/api-conventions.md`](../sdd/api-conventions.md) 따름. list endpoint는 PagedResponse envelope.
 
-> **관리자 영역은 별도 SOR**: `/admin/collection/jobs`, `/admin/collection/jobs/{id}`, `/admin/collection/jobs/{id}/reprocess`, `/admin/collection/sources`, `/admin/collection/sources/{id}` (PATCH), `/admin/collection/stats` 6 endpoint와 그 전용 schema(`ReprocessRequestPayload`, `ReprocessRequestView`, `SourceView`, `SourceTogglePatch`, `CollectionStatsResponse`)는 모두 [`admin.md §스키마`](admin.md) 참조. 본 파일은 사용자용 2 endpoint와 양 영역이 공유하는 schema(`JobStatus`, `JobType`, `CollectionJobView`, `CollectionJobPublicView`, `CollectionJobMeResponse`, `RunNowResponse`)만 정의한다.
+> **관리자 영역은 별도 SOR**: `/admin/collection/jobs`, `/admin/collection/jobs/{id}`, `/admin/collection/jobs/{id}/reprocess`, `/admin/collection/sources`, `/admin/collection/sources/{id}` (PATCH), `/admin/collection/stats` 6 endpoint와 `/admin/users/{user_id}/collection/run-now`는 모두 [`admin.md`](admin.md) 참조. 본 파일은 사용자용 2 endpoint와 양 영역이 공유하는 schema(`JobStatus`, `JobType`, `CollectionJobView`, `CollectionJobPublicView`, `CollectionJobMeResponse`, `RunNowResponse`)만 정의한다.
 
 ## 베이스
 
@@ -73,7 +73,8 @@ class RunNowResponse(BaseModel):
 
 ## 비즈니스 룰
 
-- 일일 수집은 `COLLECTION_CRON` 환경변수에 따라 사용자별로 스케줄. 동일 사용자에 대해 동시 실행 1건만 허용 (Redis lock, `lock:collection:{user_id}`).
+- 일일 수집은 `COLLECTION_CRON` 환경변수에 따라 사용자별로 스케줄. 동일 사용자에 대해 동시 실행 1건만 허용한다. worker 실행 중 Redis `lock:collection:{user_id}`를 확인하고, manual run-now는 최근 2시간 안의 `queued/running` `daily_collect` row도 409로 차단한다.
+- cron fan-out 은 사용자별 deterministic jitter 를 적용하지만, manual run-now 는 관리자/사용자 화면에서 즉시 상태가 `running` 으로 전환되도록 worker jitter 를 적용하지 않는다. 이때 `eta_seconds` 는 큐 등록 직후 상태 반영 예상치로 5초를 반환한다.
 - `CollectionJobView` (admin 응답) 는 `failure_reason` 포함, `CollectionJobPublicView` (사용자 응답) 는 NFR-08 따라 마스킹.
 - 관리자 영역(`/admin/collection/*`) 비즈니스 룰은 [`admin.md §비즈니스 룰`](admin.md) 참조.
 

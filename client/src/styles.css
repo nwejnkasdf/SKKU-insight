@@ -249,6 +249,21 @@ nav button.active::before {
   border-radius: 8px;
 }
 
+.signalMapLines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.signalMapLines line {
+  stroke: #9db2a8;
+  stroke-linecap: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .mapLine {
   position: absolute;
   height: 2px;
@@ -325,6 +340,29 @@ nav button.active::before {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 900;
+  transform: translate(-50%, -50%);
+}
+
+.mapNode[data-full-label]:hover::after,
+.mapNode[data-full-label]:focus-visible::after {
+  content: attr(data-full-label);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  width: max-content;
+  max-width: 260px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgb(18 27 22 / 14%);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
 }
 
 .node1 {
@@ -363,7 +401,7 @@ nav button.active::before {
   display: flex;
   align-items: end;
   justify-content: center;
-  gap: 14px;
+  gap: 12px;
   height: 76px;
   padding-top: 8px;
 }
@@ -384,12 +422,33 @@ nav button.active::before {
   background: var(--accent-3);
 }
 
+.slotColumns span.fallback_adjacent,
+.slotColumns span.fallback_trend {
+  background: #5d6c65;
+}
+
+.slotColumns span.empty {
+  background: #dfe5de;
+}
+
 .slotColumns b {
   position: absolute;
   left: 50%;
-  bottom: -22px;
+  bottom: -20px;
   color: var(--soft);
   font-size: 11px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.slotColumns em {
+  position: absolute;
+  left: 50%;
+  bottom: -38px;
+  color: var(--soft);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
   transform: translateX(-50%);
   white-space: nowrap;
 }
@@ -611,6 +670,7 @@ nav button.active::before {
 .signalStats span {
   display: grid;
   gap: 2px;
+  align-content: center;
   min-height: 58px;
   padding: 10px;
   color: var(--soft);
@@ -623,6 +683,13 @@ nav button.active::before {
 .signalStats b {
   color: var(--text);
   font-size: 18px;
+}
+
+.signalStats em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-style: normal;
+  line-height: 1.25;
 }
 
 .sectionTitle span {
@@ -741,6 +808,11 @@ nav button.active::before {
 
 .barFill.discovery {
   background: var(--accent-3);
+}
+
+.barFill.fallback_adjacent,
+.barFill.fallback_trend {
+  background: #5d6c65;
 }
 
 .traceMap {
@@ -1825,6 +1897,57 @@ select:focus {
   background: var(--accent);
 }
 
+.documentHeaderNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding: 4px;
+  background: #eef1ec;
+  border: 1px solid #dfe6df;
+  border-radius: 999px;
+}
+
+.documentHeaderNav button {
+  display: grid;
+  place-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  text-align: center;
+}
+
+.documentHeaderNav button:hover:not(:disabled) {
+  color: var(--accent);
+  background: #ffffff;
+}
+
+.documentHeaderNav b {
+  font-size: 12px;
+}
+
+.documentHeaderNav em {
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid #dfe6df;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.documentHeaderNav button:disabled {
+  opacity: 0.52;
+}
+
 .documentActions button.isActive {
   color: #ffffff;
   background: var(--accent);
@@ -1839,38 +1962,73 @@ select:focus {
 .docTraceMini {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  align-items: center;
+  gap: 10px;
 }
 
 .docTraceMini::before {
   content: "";
   position: absolute;
-  left: 22px;
-  right: 22px;
-  height: 2px;
+  top: 18px;
+  bottom: 18px;
+  left: 20px;
+  width: 2px;
   background: #d4ddd5;
+}
+
+.docTraceMini.single::before {
+  display: none;
 }
 
 .docTraceMini span {
   position: relative;
   z-index: 1;
   display: grid;
-  place-items: center;
-  height: 42px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
   color: var(--muted);
-  background: var(--surface-subtle);
-  border: 1px solid #dce4dd;
-  border-radius: 999px;
   font-size: 12px;
   font-weight: 900;
 }
 
-.docTraceMini span.active {
+.docTraceMini b {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
   color: #ffffff;
+  background: #66746d;
+  border: 1px solid #dce4dd;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.docTraceMini small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docTraceMini span.active b {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.docTraceMini span.active small {
+  color: var(--text);
+}
+
+.docTraceEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .documentBody {
@@ -2438,7 +2596,7 @@ select:focus {
 
 .libraryHero {
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 56px 1fr auto;
   gap: 16px;
   align-items: center;
   background: var(--surface-subtle);
@@ -2458,9 +2616,27 @@ select:focus {
   color: var(--muted);
 }
 
+.libraryHiddenTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.libraryHiddenTrigger:hover {
+  border-color: var(--accent);
+}
+
 .libraryColumns {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(260px, 0.8fr);
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
 }
@@ -2478,9 +2654,37 @@ select:focus {
 }
 
 .libraryHiddenPanel {
-  position: sticky;
-  top: 24px;
-  background: var(--surface-subtle);
+  display: none;
+}
+
+.libraryModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(29 34 31 / 34%);
+}
+
+.libraryModal {
+  width: min(720px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  background: var(--surface);
+  box-shadow: 0 20px 60px rgb(18 27 22 / 18%);
+}
+
+.libraryModalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.libraryModalHead h2 {
+  margin: 0 0 6px;
 }
 
 .libraryHiddenPanel .docList {
@@ -2602,9 +2806,14 @@ select:focus {
   .onboardingLayout,
   .topicScreen,
   .rankScreen,
+  .libraryHero,
   .libraryColumns,
   .clusterGrid {
     grid-template-columns: 1fr;
+  }
+
+  .libraryHiddenTrigger {
+    width: 100%;
   }
 
   .insightRail,

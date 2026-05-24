@@ -77,16 +77,19 @@ def _passes_threshold(
 ) -> bool:
     """slot 별 confidence_thresholds 통과 여부.
 
-    discovery 는 추가로 trust_level='high' 요구 (recommendation.toml).
+    core 는 현재 관심사라 `topic_match(bucket_score x confidence)` 를 쓴다.
+    adjacent/discovery 는 bucket 이 낮게 나오는 게 자연스러운 확장 슬롯이라,
+    최소 품질 판단은 DocumentTopic.confidence 로 한다. ranking 정렬에는 여전히
+    topic_match 가 반영된다. discovery 는 추가로 trust_level='high' 요구.
     """
     if slot == SlotType.CORE:
         return candidate.topic_match >= thresholds.core_min_topic_match
     if slot == SlotType.ADJACENT:
-        return candidate.topic_match >= thresholds.adjacent_min_topic_match
+        return candidate.topic_confidence >= thresholds.adjacent_min_topic_match
     if slot == SlotType.DISCOVERY:
         if candidate.trust_level != thresholds.discovery_required_trust_level:
             return False
-        return candidate.topic_match >= thresholds.discovery_min_topic_match
+        return candidate.topic_confidence >= thresholds.discovery_min_topic_match
     # FALLBACK_* — threshold X (이미 fallback 단계라 통과)
     return True
 

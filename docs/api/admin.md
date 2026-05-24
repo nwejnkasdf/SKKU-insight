@@ -47,6 +47,7 @@
 | GET | `/admin/users` | 사용자 목록 (페이징) |
 | GET | `/admin/users/{user_id}/interest-state` | 사용자 관심 상태 (점수 포함, 관리자만) |
 | GET | `/admin/users/{user_id}/events` | 사용자 행동 로그 |
+| POST | `/admin/users/{user_id}/collection/run-now` | 동의 활성 사용자 문서 수집 즉시 실행 |
 
 ### 재실행 요청 이력
 | Method | Path | 설명 |
@@ -170,6 +171,10 @@ class AdminUserListItem(BaseModel):
     created_at: datetime
     consent_active: bool
     deletion_pending: bool
+    latest_collection_status: Literal["queued", "running", "succeeded", "failed", "skipped"] | None = None
+    latest_collection_created_at: datetime | None = None
+    latest_collection_started_at: datetime | None = None
+    latest_collection_finished_at: datetime | None = None
 
 class AdminUserInterestState(BaseModel):
     user_id: UUID
@@ -183,6 +188,11 @@ class AdminInterestTopicView(BaseModel):
     long_score: float       # 관리자 콘솔에만 노출
     short_score: float
     bucket: Literal["high", "medium", "low", "neutral"]
+
+# POST /admin/users/{user_id}/collection/run-now 는 collection.RunNowResponse 재사용
+# class RunNowResponse(BaseModel):
+#     job_id: UUID
+#     eta_seconds: int
 ```
 
 ## 권한 매트릭스
@@ -191,6 +201,7 @@ class AdminInterestTopicView(BaseModel):
 |---|---|---|---|
 | GET 통계/잡/사용자 | yes | yes | yes |
 | POST reprocess | yes | yes | no |
+| POST user collection run-now | yes | yes | no |
 | PATCH source toggle | yes | yes | no |
 | 사용자 점수 열람 | yes | yes | no (마스킹) |
 | 관리자 추가/제거 | yes | no | no |
@@ -205,6 +216,9 @@ class AdminInterestTopicView(BaseModel):
   - `operator` / `read_only` 권한: local part 길이에 따라
     - **길이 ≥ 2**: 첫글자 + `***` + 마지막글자 + `@` + 도메인 (예: `gywnd123@gmail.com` → `g***3@gmail.com`)
     - **길이 = 1**: 전체 local part 마스킹 fallback (예: `a@gmail.com` → `***@gmail.com`)
+- `POST /admin/users/{user_id}/collection/run-now` 는 동의 활성 사용자에게만 허용한다. 내부적으로 사용자용 `trigger_run_now`와 같은 큐잉 로직을 재사용하므로 같은 사용자에 대해 이미 수집 대기/실행 중이면 409 `collection.already_running` 을 반환한다.
+- `/admin/users` 는 관리자 콘솔의 행 단위 운영 판단을 위해 사용자별 최신 `daily_collect` job 상태와 생성/시작/종료 시각을 함께 반환한다.
+- 관리자 수동 수집은 worker jitter 없이 바로 실행 대기열에 태우며, 콘솔은 `/admin/users` 의 최신 job 상태를 주기적으로 갱신해 `queued/running/succeeded/failed/skipped` 를 행 단위로 표시한다.
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
 
 ## 오류 응답
@@ -215,3 +229,4 @@ class AdminInterestTopicView(BaseModel):
 | `admin.role_insufficient` | 403 | role이 부족 |
 | `admin.must_change_password` | 409 | 부트스트랩 직후 |
 | `admin.reprocess_already_queued` | 409 | 동일 잡 재실행 진행 중 |
+| `collection.already_running` | 409 | 사용자 수집 잡이 이미 진행 중 |

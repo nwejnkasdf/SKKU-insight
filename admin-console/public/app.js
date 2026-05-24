@@ -7,6 +7,13 @@ const state = {
   mustChangePassword: localStorage.getItem("admin_must_change") === "true",
   loading: false,
   error: "",
+  notice: "",
+  noticeTone: "success",
+  collectionBusyUserId: "",
+  collectionRowMessages: {},
+  collectionPollTimer: null,
+  collectionTickTimer: null,
+  collectionAutoRefreshTimer: null,
   users: [],
   health: null,
   view: window.location.hash === "#account" ? "account" : "operations"
@@ -99,7 +106,9 @@ async function request(path, options = {}, retry = true) {
     } catch {
       payload = null;
     }
-    const error = new Error(payload?.message || payload?.detail || `HTTP ${response.status}`);
+    const detail = payload?.detail;
+    const message = payload?.message || (typeof detail === "string" ? detail : detail?.message) || `HTTP ${response.status}`;
+    const error = new Error(message);
     error.status = response.status;
     error.payload = payload;
     throw error;
@@ -130,6 +139,7 @@ async function login(event) {
   } finally {
     state.loading = false;
     render();
+    updateCollectionPolling();
   }
 }
 
@@ -168,11 +178,15 @@ async function logout() {
   }
   clearTokens();
   render();
+  stopCollectionPolling();
+  stopCollectionAutoRefresh();
 }
 
 async function loadDashboard() {
   state.loading = true;
   state.error = "";
+  state.notice = "";
+  state.noticeTone = "success";
   render();
   try {
     const [users, health] = await Promise.all([
@@ -190,6 +204,40 @@ async function loadDashboard() {
   } finally {
     state.loading = false;
     render();
+    updateCollectionPolling();
+    updateCollectionAutoRefresh();
+  }
+}
+
+async function runCollectionForUser(userId, email) {
+  if (!userId) return;
+  state.collectionBusyUserId = userId;
+  state.error = "";
+  state.notice = "";
+  setMessage("", "success");
+  setUserCollectionSnapshot(userId, {
+    latest_collection_status: "queued",
+    latest_collection_created_at: new Date().toISOString(),
+    latest_collection_started_at: null,
+    latest_collection_finished_at: null
+  });
+  try {
+    const result = await request(`/admin/users/${userId}/collection/run-now`, {
+      method: "POST"
+    });
+    await refreshUsersTable();
+    startCollectionPolling();
+  } catch (error) {
+    setCollectionRowMessage(userId, messageForError(error), error.status === 409 ? "loading" : "warn");
+    try {
+      await refreshUsersTable();
+    } catch {
+      // keep the inline message; the next manual refresh will reconcile the row.
+    }
+  } finally {
+    state.collectionBusyUserId = "";
+    renderUsersTableOnly();
+    updateCollectionPolling();
   }
 }
 
@@ -207,6 +255,20 @@ function messageForError(error) {
   return error?.message || "요청을 처리하지 못했습니다.";
 }
 
+function messageView() {
+  if (state.error) return `<p class="notice">${escapeHtml(state.error)}</p>`;
+  if (state.notice) return `<p class="notice ${state.noticeTone === "success" ? "success" : ""}">${escapeHtml(state.notice)}</p>`;
+  return "";
+}
+
+function setMessage(message, tone = "success") {
+  state.error = tone === "warn" ? message : "";
+  state.notice = tone === "warn" ? "" : message;
+  state.noticeTone = tone;
+  const area = document.querySelector("#messageArea");
+  if (area) area.innerHTML = messageView();
+}
+
 function formatDate(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
@@ -215,6 +277,242 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function latestCollectionTime(user) {
+  return user.latest_collection_finished_at
+    || user.latest_collection_started_at
+    || user.latest_collection_created_at
+    || "";
+}
+
+function collectionStartTime(user) {
+  return user.latest_collection_started_at || user.latest_collection_created_at || "";
+}
+
+function collectionElapsedMs(user) {
+  const start = collectionStartTime(user);
+  if (!start) return null;
+  const end = isCollectionInFlight(user)
+    ? Date.now()
+    : (user.latest_collection_finished_at ? new Date(user.latest_collection_finished_at).getTime() : Date.now());
+  const startMs = new Date(start).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - startMs);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}초`;
+  return `${minutes}분 ${String(seconds).padStart(2, "0")}초`;
+}
+
+function collectionTimeText(user) {
+  const elapsed = collectionElapsedMs(user);
+  if (isCollectionInFlight(user)) {
+    return elapsed === null ? "경과 계산 중" : `경과 ${formatDuration(elapsed)}`;
+  }
+  if (user.latest_collection_status === "succeeded" && elapsed !== null) {
+    return `소요 ${formatDuration(elapsed)}`;
+  }
+  const time = latestCollectionTime(user);
+  return time ? formatDate(time) : "-";
+}
+
+function collectionStampText(user) {
+  if (isCollectionInFlight(user)) {
+    const start = collectionStartTime(user);
+    return start ? formatDate(start) : "";
+  }
+  if (user.latest_collection_finished_at) {
+    return formatDate(user.latest_collection_finished_at);
+  }
+  return "";
+}
+
+function collectionStatusLabel(status) {
+  return {
+    queued: "대기",
+    running: "실행 중",
+    succeeded: "완료",
+    failed: "실패",
+    skipped: "건너뜀"
+  }[status] || "없음";
+}
+
+function collectionStatusTone(status) {
+  if (status === "failed") return "danger";
+  if (status === "queued" || status === "skipped") return "warn";
+  return "";
+}
+
+function isCollectionInFlight(user) {
+  return user.latest_collection_status === "queued" || user.latest_collection_status === "running";
+}
+
+function collectionMeta(user) {
+  const status = user.latest_collection_status || "";
+  const inline = state.collectionRowMessages[user.user_id];
+  const loading = state.collectionBusyUserId === user.user_id || inline?.tone === "loading" || isCollectionInFlight(user);
+  return `
+    <span class="collectionMeta" data-collection-meta="${escapeHtml(user.user_id)}">
+      <span class="collectionLine">
+        ${loading ? `<i class="spinner" aria-hidden="true"></i>` : ""}
+        <b class="status ${collectionStatusTone(status)}">${collectionStatusLabel(status)}</b>
+        <em data-collection-time="${escapeHtml(user.user_id)}">${collectionTimeText(user)}</em>
+      </span>
+      ${collectionStampText(user) ? `<small class="collectionStamp">${collectionStampText(user)}</small>` : ""}
+      ${inline ? `<small class="collectionInline ${inline.tone}">${escapeHtml(inline.text)}</small>` : ""}
+    </span>
+  `;
+}
+
+function setUserCollectionSnapshot(userId, snapshot) {
+  const user = state.users.find((item) => item.user_id === userId);
+  if (!user) return;
+  Object.assign(user, snapshot);
+  renderUsersTableOnly();
+}
+
+async function refreshUsersTable() {
+  const users = await request("/admin/users?limit=20");
+  state.users = users.items || [];
+  reconcileCollectionRowMessages();
+  renderUsersTableOnly();
+  updateCollectionPolling();
+  updateCollectionAutoRefresh();
+}
+
+function renderUsersTableOnly() {
+  const mount = document.querySelector("#usersTableMount");
+  if (!mount) return;
+  mount.innerHTML = usersTable(state.users.slice(0, 8));
+  bindCollectionButtons();
+}
+
+function setCollectionRowMessage(userId, text, tone = "loading") {
+  if (text) {
+    state.collectionRowMessages[userId] = { text, tone };
+  } else {
+    delete state.collectionRowMessages[userId];
+  }
+  renderUsersTableOnly();
+}
+
+function reconcileCollectionRowMessages() {
+  state.users.forEach((user) => {
+    const inline = state.collectionRowMessages[user.user_id];
+    if (!inline) return;
+    if (user.latest_collection_status === "succeeded") {
+      delete state.collectionRowMessages[user.user_id];
+    } else if (user.latest_collection_status === "failed") {
+      state.collectionRowMessages[user.user_id] = { text: "수집 실패", tone: "warn" };
+    } else if (isCollectionInFlight(user)) {
+      delete state.collectionRowMessages[user.user_id];
+    }
+  });
+}
+
+function hasCollectionPollingWork() {
+  if (state.view !== "operations") return false;
+  return state.users.slice(0, 8).some((user) => {
+    const inline = state.collectionRowMessages[user.user_id];
+    return state.collectionBusyUserId === user.user_id
+      || isCollectionInFlight(user)
+      || inline?.tone === "loading";
+  });
+}
+
+function startCollectionPolling() {
+  if (state.collectionPollTimer) return;
+  stopCollectionAutoRefresh();
+  state.collectionPollTimer = window.setInterval(async () => {
+    try {
+      await refreshUsersTable();
+    } catch {
+      stopCollectionPolling();
+    }
+  }, 5000);
+  startCollectionTicking();
+}
+
+function stopCollectionPolling() {
+  if (!state.collectionPollTimer) return;
+  window.clearInterval(state.collectionPollTimer);
+  state.collectionPollTimer = null;
+  stopCollectionTicking();
+  updateCollectionAutoRefresh();
+}
+
+function startCollectionTicking() {
+  if (state.collectionTickTimer) return;
+  state.collectionTickTimer = window.setInterval(() => {
+    if (!hasCollectionPollingWork()) {
+      stopCollectionTicking();
+      return;
+    }
+    updateCollectionElapsedText();
+  }, 1000);
+}
+
+function updateCollectionElapsedText() {
+  document.querySelectorAll("[data-collection-time]").forEach((node) => {
+    const userId = node.getAttribute("data-collection-time");
+    const user = state.users.find((item) => item.user_id === userId);
+    if (user) node.textContent = collectionTimeText(user);
+  });
+}
+
+function stopCollectionTicking() {
+  if (!state.collectionTickTimer) return;
+  window.clearInterval(state.collectionTickTimer);
+  state.collectionTickTimer = null;
+}
+
+function updateCollectionPolling() {
+  if (hasCollectionPollingWork()) {
+    startCollectionPolling();
+  } else {
+    stopCollectionPolling();
+  }
+}
+
+function shouldAutoRefreshCollections() {
+  return Boolean(state.accessToken)
+    && state.view === "operations"
+    && !state.loading
+    && !state.collectionPollTimer;
+}
+
+function startCollectionAutoRefresh() {
+  if (state.collectionAutoRefreshTimer) return;
+  state.collectionAutoRefreshTimer = window.setInterval(async () => {
+    if (!shouldAutoRefreshCollections()) {
+      stopCollectionAutoRefresh();
+      return;
+    }
+    try {
+      await refreshUsersTable();
+    } catch {
+      stopCollectionAutoRefresh();
+    }
+  }, 30000);
+}
+
+function stopCollectionAutoRefresh() {
+  if (!state.collectionAutoRefreshTimer) return;
+  window.clearInterval(state.collectionAutoRefreshTimer);
+  state.collectionAutoRefreshTimer = null;
+}
+
+function updateCollectionAutoRefresh() {
+  if (shouldAutoRefreshCollections()) {
+    startCollectionAutoRefresh();
+  } else {
+    stopCollectionAutoRefresh();
+  }
 }
 
 function render() {
@@ -297,7 +595,7 @@ function shellView() {
             <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
           </div>
         </header>
-        ${state.error ? `<p class="notice">${state.error}</p>` : ""}
+        <div id="messageArea">${messageView()}</div>
         ${isAccount ? accountView() : operationsView()}
       </section>
     </div>
@@ -362,7 +660,7 @@ function operationsView() {
           <h2>최근 사용자</h2>
           <button class="iconRefresh" type="button" title="최근 사용자 새로고침" data-refresh>↻</button>
         </div>
-        ${usersTable(state.users.slice(0, 8))}
+        <div id="usersTableMount">${usersTable(state.users.slice(0, 8))}</div>
       </div>
     </section>
   `;
@@ -382,11 +680,6 @@ function accountView() {
           ${statusRow("권한", "관리자", true)}
           ${statusRow("토큰 만료", session.expiresAt, session.valid)}
         </div>
-      </div>
-      <div class="card">
-        <h2>계정 작업</h2>
-        <p class="muted">현재 세션을 종료하면 관리자 로그인 화면으로 돌아갑니다.</p>
-        <button type="button" id="accountLogoutButton">로그아웃</button>
       </div>
     </section>
   `;
@@ -436,18 +729,41 @@ function usersTable(users) {
   return `
     <div class="table">
       <div class="row header">
-        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>가입일</span>
+        <span>이메일</span><span>동의</span><span>삭제 대기</span><span>최근 수집</span><span>가입일</span><span>작업</span>
       </div>
-      ${users.map((user) => `
-        <div class="row">
-          <strong>${escapeHtml(user.email)}</strong>
-          <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
-          <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
-          <span class="muted">${formatDate(user.created_at)}</span>
-        </div>
-      `).join("")}
+      ${users.map(userRow).join("")}
     </div>
   `;
+}
+
+function userRow(user) {
+  const busy = state.collectionBusyUserId === user.user_id;
+  const inFlight = isCollectionInFlight(user);
+  const disabled = !user.consent_active || busy || inFlight;
+  const buttonLabel = busy
+    ? `${buttonSpinner()}등록 중`
+    : (inFlight ? `${buttonSpinner()}진행 중` : "수집 실행");
+  return `
+    <div class="row">
+      <strong>${escapeHtml(user.email)}</strong>
+      <span class="status ${user.consent_active ? "" : "warn"}">${user.consent_active ? "활성" : "비활성"}</span>
+      <span class="status ${user.deletion_pending ? "danger" : ""}">${user.deletion_pending ? "대기" : "없음"}</span>
+      ${collectionMeta(user)}
+      <span class="muted">${formatDate(user.created_at)}</span>
+      <button
+        class="tableAction"
+        type="button"
+        data-run-collection="${escapeHtml(user.user_id)}"
+        data-user-email="${escapeHtml(user.email)}"
+        data-in-flight="${inFlight ? "true" : "false"}"
+        ${disabled ? "disabled" : ""}
+      >${buttonLabel}</button>
+    </div>
+  `;
+}
+
+function buttonSpinner() {
+  return `<i class="buttonSpinner" aria-hidden="true"></i>`;
 }
 
 function bindLogin() {
@@ -465,13 +781,28 @@ function bindApp() {
       state.view = button.getAttribute("data-view") || "operations";
       window.location.hash = state.view === "account" ? "account" : "operations";
       render();
+      updateCollectionPolling();
+      updateCollectionAutoRefresh();
     });
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", loadDashboard);
   });
+  bindCollectionButtons();
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
-  document.querySelector("#accountLogoutButton")?.addEventListener("click", logout);
+}
+
+function bindCollectionButtons() {
+  document.querySelectorAll("[data-run-collection]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      runCollectionForUser(
+        button.getAttribute("data-run-collection"),
+        button.getAttribute("data-user-email") || ""
+      );
+    });
+  });
 }
 
 function readSession() {

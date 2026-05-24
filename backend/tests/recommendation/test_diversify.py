@@ -13,6 +13,7 @@ def _make_card(
     *,
     document_id: uuid.UUID | None = None,
     source_id: uuid.UUID,
+    source_name: str = "src",
     leaf_topic_id: uuid.UUID | None = None,
     score: float = 0.8,
 ) -> ScoredCandidate:
@@ -20,7 +21,7 @@ def _make_card(
         document_id=document_id or uuid.uuid4(),
         title="t",
         source_id=source_id,
-        source_name="src",
+        source_name=source_name,
         source_type="vendor_blog",
         trust_level="high",
         published_at=datetime.now(UTC),
@@ -86,6 +87,22 @@ def test_leaf_none_bypasses_leaf_cap() -> None:
     )
     result = diversify(cards, cfg)
     # leaf=None 4개 모두 통과 — leaf cap 면제.
+    assert len(result) == 4
+
+
+def test_llm_search_sentinel_bypasses_source_cap() -> None:
+    """llm_search 는 실제 publisher 가 아니라 sentinel source 라 source cap 면제."""
+    src = uuid.uuid4()
+    cards = [
+        _make_card(source_id=src, source_name="llm_search", score=0.9),
+        _make_card(source_id=src, source_name="llm_search", score=0.8),
+        _make_card(source_id=src, source_name="llm_search", score=0.7),
+        _make_card(source_id=src, source_name="llm_search", score=0.6),
+    ]
+    cfg = DiversificationConfig(
+        max_per_source_in_slot=2, max_per_leaf_in_slot=10
+    )
+    result = diversify(cards, cfg)
     assert len(result) == 4
 
 

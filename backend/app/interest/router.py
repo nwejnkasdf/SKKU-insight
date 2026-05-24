@@ -511,7 +511,7 @@ async def post_feedback_hide(
     "/feedback/not-interested",
     response_model=EventResponse,
     tags=["feedback"],
-    summary="관심 없음 (토픽 또는 문서)",
+    summary="관심 없음",
 )
 async def post_feedback_not_interested(
     request: Request,
@@ -520,7 +520,7 @@ async def post_feedback_not_interested(
     db: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EventResponse:
-    """하이브리드 (정렬 2): Bayesian P1-4 분배 + NotInterestedTopic 최고 confidence 1건."""
+    """문서 단위 제외 또는 명시 토픽 단위 선호도 감소."""
     now = datetime.now(UTC)
     await _ensure_active_day(db, user, now)
     redis = _redis()

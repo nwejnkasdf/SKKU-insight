@@ -5,6 +5,7 @@ run_collection_for_user(user_id):
   2. INSERT CollectionJob(source_id=<llm_search sentinel>, status=RUNNING, started_at)
   3. leaves = resolve_active_leaves(user_id)
        ├─ DynamicLeafTopic WHERE user_id AND status='active'
+       ├─ active trace tail topics + 1-hop adjacent topics
        └─ Q2-A fallback: BroadInterest 12 중 hash(user_id) 로 1 seed + 1-hop adjacent 2
   4. trace_json = build_trace_json(user_id) (UserCSOTraversal 있으면, 없으면 fallback dict)
   5. existing_keys = load_existing_dedup_keys(user_id, since=30d)
@@ -71,6 +72,7 @@ logger = logging.getLogger(__name__)
 LLM_SEARCH_SENTINEL_NAME = "llm_search"
 _LOCK_TTL_SECONDS = 7200
 _DEDUP_WINDOW_DAYS = 30
+_TRACE_COLLECTION_LIMIT = 5
 _FALLBACK_LEAF_LIMIT = 3
 _DEFAULT_TOP_N = 10
 _JITTER_CAP_SECONDS = 300
@@ -124,14 +126,16 @@ async def _get_llm_search_source_id(db: AsyncSession) -> UUID:
 async def resolve_active_leaves(
     db: AsyncSession, user_id: UUID
 ) -> list[LeafTarget]:
-    """A7 미완료 fallback (Q2-A). 결정 매트릭스 정합.
+    """수집 대상 leaf/topic 결정.
 
     1. DynamicLeafTopic WHERE user_id AND status='active'
        → 매핑된 cso_topic_id (DynamicLeafTopicCSOTopic) 중 첫 번째를 parent 로 사용.
-    2. 비면 fallback: BroadInterest 12 행 중 hash(user_id) % 12 → 1 seed
+    2. 비면 active trace path 끝 노드 + 1-hop adjacent 를 pseudo leaf 로 사용.
+       A7 leaf 생성 전에도 실제 관심 trace 기준으로 수집되게 하는 A4/A8 demo bridge.
+    3. 그래도 비면 fallback: BroadInterest 12 행 중 hash(user_id) % 12 → 1 seed
        + cso_topic_parent 1-hop adjacent 2 개 (deterministic hash 로 선택)
        → 최대 3 LeafTarget.
-    3. 그래도 비면 빈 list 반환 → orchestrator SKIPPED.
+    4. 그래도 비면 빈 list 반환 → orchestrator SKIPPED.
     """
     leaf_stmt = select(DynamicLeafTopic).where(
         DynamicLeafTopic.user_id == user_id,
@@ -164,7 +168,129 @@ async def resolve_active_leaves(
         if targets:
             return targets
 
+    trace_targets = await _resolve_trace_leaves(db, user_id)
+    if trace_targets:
+        return trace_targets
+
     return await _resolve_fallback_leaves(db, user_id)
+
+
+async def _resolve_trace_leaves(
+    db: AsyncSession, user_id: UUID
+) -> list[LeafTarget]:
+    """A7 dynamic leaf 부재 시 active trace 기반 수집 대상 구성.
+
+    docs/sdd/data-flow.md 의 "current + adjacent" 수집 규약을 코드에 맞춘다.
+    current 는 각 active trace 의 tail 노드이고, adjacent 는 tail 의 1-hop 이웃 중
+    deterministic hash 순서로 일부만 고른다. leaf_topic_id 는 아직 없으므로 NULL.
+    """
+    trace_stmt = (
+        select(UserCSOTraversal)
+        .where(
+            UserCSOTraversal.user_id == user_id,
+            UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+        )
+        .order_by(UserCSOTraversal.updated_at.desc())
+        .limit(_TRACE_COLLECTION_LIMIT)
+    )
+    traces = list((await db.execute(trace_stmt)).scalars().all())
+    current_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for trace in traces:
+        if not trace.path:
+            continue
+        tail_id = trace.path[-1]
+        if tail_id in seen:
+            continue
+        seen.add(tail_id)
+        current_ids.append(tail_id)
+        if len(current_ids) >= _TRACE_COLLECTION_LIMIT:
+            break
+    if not current_ids:
+        return []
+
+    target_ids = list(current_ids)
+    needed = _TRACE_COLLECTION_LIMIT - len(target_ids)
+    if needed > 0:
+        adjacent_ids = await _select_adjacent_topic_ids(
+            db, user_id=user_id, seed_ids=current_ids, limit=needed
+        )
+        target_ids.extend(adjacent_ids)
+
+    label_map = await _load_cso_labels(db, target_ids)
+    targets = [
+        LeafTarget(
+            leaf_label=label_map.get(topic_id, str(topic_id)),
+            parent_cso_topic_id=topic_id,
+            leaf_topic_id=None,
+        )
+        for topic_id in target_ids
+    ]
+    logger.info(
+        "USING_TRACE_FALLBACK user=%s targets=%s",
+        user_id,
+        [t.leaf_label for t in targets],
+    )
+    return targets
+
+
+async def _select_adjacent_topic_ids(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    seed_ids: list[UUID],
+    limit: int,
+) -> list[UUID]:
+    """seed_ids 의 1-hop adjacent 중 deterministic hash 로 limit 개 선택."""
+    if limit <= 0 or not seed_ids:
+        return []
+    edge_stmt = select(
+        CSOTopicParent.cso_topic_id, CSOTopicParent.parent_cso_topic_id
+    ).where(
+        or_(
+            CSOTopicParent.cso_topic_id.in_(seed_ids),
+            CSOTopicParent.parent_cso_topic_id.in_(seed_ids),
+        )
+    )
+    seed_set = set(seed_ids)
+    adjacent_ids: list[UUID] = []
+    for row in await db.execute(edge_stmt):
+        candidate_id = (
+            row.parent_cso_topic_id
+            if row.cso_topic_id in seed_set
+            else row.cso_topic_id
+        )
+        if candidate_id not in seed_set:
+            adjacent_ids.append(candidate_id)
+    if not adjacent_ids:
+        return []
+
+    unique_sorted = sorted(set(adjacent_ids))
+    user_hash = int.from_bytes(
+        hashlib.sha256(str(user_id).encode()).digest()[:8], "big"
+    )
+    chosen_ids: list[UUID] = []
+    for offset in range(limit):
+        if not unique_sorted:
+            break
+        idx = (user_hash + offset) % len(unique_sorted)
+        chosen_ids.append(unique_sorted.pop(idx))
+    return chosen_ids
+
+
+async def _load_cso_labels(
+    db: AsyncSession, cso_topic_ids: list[UUID]
+) -> dict[UUID, str]:
+    """CSO topic label map."""
+    if not cso_topic_ids:
+        return {}
+    label_stmt = select(CSOTopic.cso_topic_id, CSOTopic.label).where(
+        CSOTopic.cso_topic_id.in_(cso_topic_ids)
+    )
+    return {
+        row.cso_topic_id: row.label
+        for row in await db.execute(label_stmt)
+    }
 
 
 async def _resolve_fallback_leaves(
@@ -222,13 +348,7 @@ async def _resolve_fallback_leaves(
         chosen_ids.append(unique_sorted.pop(idx))
 
     if chosen_ids:
-        label_stmt = select(CSOTopic.cso_topic_id, CSOTopic.label).where(
-            CSOTopic.cso_topic_id.in_(chosen_ids)
-        )
-        label_map: dict[UUID, str] = {}
-        label_rows = (await db.execute(label_stmt)).all()
-        for label_row in label_rows:
-            label_map[label_row.cso_topic_id] = label_row.label
+        label_map = await _load_cso_labels(db, chosen_ids)
         for cid in chosen_ids:
             targets.append(
                 LeafTarget(

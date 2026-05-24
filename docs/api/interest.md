@@ -20,7 +20,7 @@
 | POST | `/events/batch` | 여러 이벤트 한 번에 (dwell tick 등) | **HTTP 207 Multi-Status**. max 50 entries. 부분 성공 허용 — entry 단위 `error_code` |
 | POST | `/feedback/save` | 저장 (UI 명시 액션) | SavedDocument 생성 + UserEvent + Bayesian 갱신 (즉시 atomic UPSERT) |
 | POST | `/feedback/hide` | 숨김 | HiddenDocument 생성 + Bayesian 갱신 |
-| POST | `/feedback/not-interested` | 관심 없음 | 하이브리드: Bayesian P1-4 분배 (`UserInterestState`) + `NotInterestedTopic` 최고 confidence 1건 INSERT |
+| POST | `/feedback/not-interested` | 관심 없음 | `document_id`만 보낸 문서 단위 요청은 `HiddenDocument` + `UserEvent`만 남기고 해당 문서만 추천 큐에서 제외한다. 관심사 점수와 `NotInterestedTopic`은 변경하지 않는다. `cso_topic_id`/`leaf_topic_id` 직접 요청은 별도 "분야 줄이기" 액션으로 보고 Bayesian P1-4 분배 + `NotInterestedTopic` INSERT. |
 | GET | `/feedback/saved` | 저장 목록 (UI-05) | cursor pagination |
 | GET | `/feedback/hidden` | 숨김 목록 (UI-05) | cursor pagination |
 | DELETE | `/feedback/saved/{document_id}` | 저장 해제 | 동의 비활성에도 허용 |
@@ -41,7 +41,7 @@ EventType = Literal[
 class EventRequest(BaseModel):
     event_type: EventType
     document_id: UUID | None
-    cso_topic_id: UUID | None     # not_interested 시 토픽 단위 가능
+    cso_topic_id: UUID | None     # 분야 줄이기 같은 topic-level feedback 에서 사용
     leaf_topic_id: UUID | None
     dwell_ms: int | None
     occurred_at: datetime         # 클라이언트 시계
@@ -88,9 +88,9 @@ class HideFeedbackRequest(BaseModel):
     document_id: UUID
 
 class NotInterestedRequest(BaseModel):
-    cso_topic_id: UUID | None
+    cso_topic_id: UUID | None     # topic-level "이 분야 줄이기"
     leaf_topic_id: UUID | None
-    document_id: UUID | None  # 토픽 추론용 hint
+    document_id: UUID | None      # document-level "관심 없음"
 ```
 
 ## 비즈니스 룰

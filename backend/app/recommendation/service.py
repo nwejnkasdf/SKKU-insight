@@ -2,7 +2,7 @@
 
 - get_dashboard: single-flight Redis lock (concurrency.md §2) + consent cache (§7).
 - refresh_dashboard: rate_limit (decorator) + cache delete + get_dashboard(force_refresh).
-- get_document_detail: Document + saved/hidden flag.
+- get_document_detail: Document + saved/hidden/not_interested flag.
 - get_document_summary: summary_service 위임.
 
 §11.#1 (cache-before-commit): db.commit() 성공 후에만 redis.setex(cache).
@@ -257,9 +257,15 @@ async def get_document_detail(
     hidden = (await db.execute(hidden_stmt)).scalar_one_or_none() is not None
 
     # TopicChip 은 engine._fetch_topic_chips 와 동일 패턴이지만 단일 doc 라 직접 lookup.
-    from .engine import _fetch_topic_chips  # local import — circular 회피
+    from .engine import (  # local import — circular 회피
+        _fetch_not_interested_documents,
+        _fetch_topic_chips,
+    )
 
     chips_map = await _fetch_topic_chips(db, [document_id])
+    not_interested = document_id in await _fetch_not_interested_documents(
+        db, user.user_id, [document_id]
+    )
     return DocumentDetailResponse(
         document_id=row.document_id,
         title=row.title,
@@ -272,6 +278,7 @@ async def get_document_detail(
         related_topics=chips_map.get(document_id, []),
         saved=saved,
         hidden=hidden,
+        not_interested=not_interested,
     )
 
 

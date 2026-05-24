@@ -31,6 +31,7 @@ from app.collection.dedup import normalize_title
 from app.config import Settings
 from app.contracts import (
     ContentType,
+    EventType,
     SentinelSource,
     SlotType,
     TopicChip,
@@ -48,6 +49,7 @@ from app.db.models import (
     SavedDocument,
     Source,
     User,
+    UserEvent,
     UserInterestState,
 )
 from app.interest.config_loader import InterestParams
@@ -77,6 +79,14 @@ from .schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SLOT_TARGET_COUNTS: dict[SlotType, int] = {
+    SlotType.CORE: 5,
+    SlotType.ADJACENT: 3,
+    SlotType.DISCOVERY: 2,
+}
+_BASE_SLOT_ORDER = (SlotType.CORE, SlotType.ADJACENT, SlotType.DISCOVERY)
+_FALLBACK_SLOT_ORDER = (SlotType.FALLBACK_ADJACENT, SlotType.FALLBACK_TREND)
 
 
 class ColdStartInProgress(Exception):
@@ -116,7 +126,10 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
     """active trace 0개 AND UserInterestState 행동 신호 0 (alpha_prior 만)."""
     active_count = await trav_queries.count_active_traces(db, user.user_id)
     if active_count > 0:
-        return await _has_only_cold_start_recommendations(db, user.user_id)
+        # Once an active trace exists, normal ranking should take over. Keeping
+        # the user on pseudo_cold_start rows here blocks newly collected
+        # current/adjacent documents from surfacing after refresh.
+        return False
     # boost_applied_at_active_day 가 있는 row 는 onboarding boost — 행동 신호 X.
     # 행동 신호 = boost 없이 long_alpha 가 prior 보다 큰 row.
     stmt = select(func.count(UserInterestState.state_id)).where(
@@ -176,6 +189,7 @@ async def _load_cold_start_dashboard(
         params=params,
         config=config,
     )
+    cards = await _with_feedback_flags(db, user.user_id, cards)
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -391,7 +405,7 @@ async def _create_demo_backfill_candidates(
     if source is None:
         return []
 
-    topic_rows = (
+    topic_rows = list((
         await db.execute(
             select(CSOTopic.cso_topic_id, CSOTopic.label)
             .join(UserInterestState, UserInterestState.cso_topic_id == CSOTopic.cso_topic_id)
@@ -402,7 +416,7 @@ async def _create_demo_backfill_candidates(
             .order_by(UserInterestState.long_score.desc(), CSOTopic.label.asc())
             .limit(max(limit, 1))
         )
-    ).all()
+    ).all())
     if len(topic_rows) < max(limit, 1):
         seen_topic_ids = {row.cso_topic_id for row in topic_rows}
         fallback_topics = (
@@ -608,6 +622,7 @@ async def _materialize_cards(
     chip_map = await _fetch_topic_chips(db, doc_ids)
     saved_set = await _fetch_saved_documents(db, user_id, doc_ids)
     hidden_set = await _fetch_hidden_documents(db, user_id, doc_ids)
+    not_interested_set = await _fetch_not_interested_documents(db, user_id, doc_ids)
 
     cards: list[RecommendationCard] = []
     for rec in rows:
@@ -628,10 +643,11 @@ async def _materialize_cards(
                 reason_short=rec.reason or "",
                 published_at=published_dt,
                 thumbnail_url=None,
+                saved=rec.document_id in saved_set,
+                hidden=rec.document_id in hidden_set,
+                not_interested=rec.document_id in not_interested_set,
             )
         )
-    # saved/hidden flag 는 DocumentDetail 응답용 — dashboard card schema 에 부재.
-    _ = saved_set, hidden_set
     return cards
 
 
@@ -719,6 +735,47 @@ async def _fetch_hidden_documents(
     return set(rows)
 
 
+async def _fetch_not_interested_documents(
+    db: AsyncSession, user_id: UUID, document_ids: list[UUID]
+) -> set[UUID]:
+    """document_ids 중 문서 단위 관심 없음으로 숨겨진 문서."""
+    if not document_ids:
+        return set()
+    stmt = select(HiddenDocument.document_id).where(
+        HiddenDocument.user_id == user_id,
+        HiddenDocument.document_id.in_(document_ids),
+        exists().where(
+            UserEvent.user_id == user_id,
+            UserEvent.document_id == HiddenDocument.document_id,
+            UserEvent.event_type == EventType.NOT_INTERESTED.value,
+        ),
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def _with_feedback_flags(
+    db: AsyncSession,
+    user_id: UUID,
+    cards: list[RecommendationCard],
+) -> list[RecommendationCard]:
+    """Dashboard cards 에 저장/숨김/관심 없음 상태를 최신 DB 기준으로 주입."""
+    doc_ids = [card.document_id for card in cards]
+    saved_set = await _fetch_saved_documents(db, user_id, doc_ids)
+    hidden_set = await _fetch_hidden_documents(db, user_id, doc_ids)
+    not_interested_set = await _fetch_not_interested_documents(db, user_id, doc_ids)
+    return [
+        card.model_copy(
+            update={
+                "saved": card.document_id in saved_set,
+                "hidden": card.document_id in hidden_set,
+                "not_interested": card.document_id in not_interested_set,
+            }
+        )
+        for card in cards
+    ]
+
+
 def _dedupe_dashboard_cards(
     cards: list[RecommendationCard],
 ) -> list[RecommendationCard]:
@@ -776,6 +833,52 @@ def _with_fallback_slot_count(
     return out
 
 
+def _reconcile_slot_summaries_with_cards(
+    cards: list[RecommendationCard], slots: list[SlotSummary]
+) -> list[SlotSummary]:
+    """최종 노출 카드 기준으로 슬롯 카운트를 다시 계산한다.
+
+    Recommendation rows 는 refresh/backfill 과정에서 같은 UTC day 안에 누적될 수 있다.
+    반면 DashboardResponse.cards 는 dedupe + hidden 제외 + 10개 cap 을 거친 최종 화면
+    목록이므로, SlotSummary 는 최종 cards 에서 재계산해야 UI 숫자 합이 10과 맞는다.
+    """
+    existing_by_slot = {summary.slot_type: summary for summary in slots}
+    counts: dict[SlotType, int] = {}
+    for card in cards:
+        counts[card.slot_type] = counts.get(card.slot_type, 0) + 1
+
+    reconciled: list[SlotSummary] = []
+    for slot in _BASE_SLOT_ORDER:
+        existing = existing_by_slot.get(slot)
+        reconciled.append(
+            SlotSummary(
+                slot_type=slot,
+                target_count=existing.target_count if existing else _SLOT_TARGET_COUNTS[slot],
+                actual_count=counts.get(slot, 0),
+                fallback_reason=existing.fallback_reason if existing else None,
+            )
+        )
+
+    for slot in _FALLBACK_SLOT_ORDER:
+        count = counts.get(slot, 0)
+        if count <= 0:
+            continue
+        existing = existing_by_slot.get(slot)
+        reconciled.append(
+            SlotSummary(
+                slot_type=slot,
+                target_count=existing.target_count if existing else 0,
+                actual_count=count,
+                fallback_reason=(
+                    existing.fallback_reason
+                    if existing and existing.fallback_reason
+                    else "overall_short"
+                ),
+            )
+        )
+    return reconciled
+
+
 async def _ensure_dashboard_card_count(
     db: AsyncSession,
     user: User,
@@ -788,7 +891,8 @@ async def _ensure_dashboard_card_count(
     target = config.slot_targets.total
     cards = _dedupe_dashboard_cards(cards)
     if len(cards) >= target:
-        return cards[:target], slots
+        final_cards = cards[:target]
+        return final_cards, _reconcile_slot_summaries_with_cards(final_cards, slots)
 
     hidden_docs = await _fetch_all_hidden_documents(db, user.user_id)
     excluded = {card.document_id for card in cards} | hidden_docs
@@ -799,7 +903,7 @@ async def _ensure_dashboard_card_count(
         limit=target - len(cards),
     )
     if not rows:
-        return cards, slots
+        return cards, _reconcile_slot_summaries_with_cards(cards, slots)
 
     state_index = await _fetch_state_index(db, user.user_id)
     scored = score_candidates(
@@ -827,10 +931,10 @@ async def _ensure_dashboard_card_count(
         chips=chips,
     )
     if not extra_cards:
-        return cards, slots
-    return (
-        (cards + extra_cards)[:target],
-        _with_fallback_slot_count(slots, len(extra_cards)),
+        return cards, _reconcile_slot_summaries_with_cards(cards, slots)
+    final_cards = (cards + extra_cards)[:target]
+    return final_cards, _reconcile_slot_summaries_with_cards(
+        final_cards, _with_fallback_slot_count(slots, len(extra_cards))
     )
 
 
@@ -1454,6 +1558,7 @@ async def build_dashboard(
         params=params,
         config=config,
     )
+    cards = await _with_feedback_flags(db, user.user_id, cards)
     response = DashboardResponse(
         user_id=user.user_id,
         cards=cards,

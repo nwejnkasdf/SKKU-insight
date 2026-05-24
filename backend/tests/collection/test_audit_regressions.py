@@ -27,7 +27,6 @@ import pytest
 from app.collection import dedup, llm_search, orchestrator
 from app.collection.llm_search import SYSTEM_PROMPT_TEMPLATE
 
-
 BACKEND_ROOT = Path(__file__).parent.parent.parent
 APP_DIR = BACKEND_ROOT / "app"
 
@@ -174,6 +173,17 @@ class TestRound2CodexFixGuards:
 
         sig = _i.signature(collection_job)
         assert "job_id_str" in sig.parameters
+
+    def test_collection_uses_active_trace_before_broad_fallback(self) -> None:
+        """A8 demo bridge: dynamic leaf 부재 시 BroadInterest 해시 전에 active trace 를 쓴다."""
+        import inspect as _i
+
+        from app.collection import orchestrator as orchestrator_mod
+
+        src = _i.getsource(orchestrator_mod.resolve_active_leaves)
+        trace_idx = src.index("_resolve_trace_leaves")
+        broad_idx = src.index("_resolve_fallback_leaves")
+        assert trace_idx < broad_idx
 
     def test_documents_service_uses_coalesce(self) -> None:
         """S-04: documents_service 가 coalesce(published_at, created_at) 사용."""

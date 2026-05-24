@@ -6,12 +6,12 @@
    - dwell_tick Redis cap (atomic INCR + TTL)
    - topic distribution P1-4 default
    - propagation feature flag (A7 도입 후 활성)
-   - not-interested 하이브리드 (Bayesian 분배 + NotInterestedTopic 최고 confidence 1건)
+   - 토픽 단위 not-interested 하이브리드 (Bayesian 분배 + NotInterestedTopic)
    - cache invalidate (save/hide/not_interested)
 2) bootstrap_interest_state: onboarding 직후 12 cluster + 1-hop child row prefilled
    (alpha_prior+boost), boost_applied_at_active_day=user.active_day_counter.
 3) feedback service (save/hide/not_interested) — 명시 액션. SavedDocument/HiddenDocument/
-   NotInterestedTopic INSERT + UserEvent + ingest_event_atomic.
+   NotInterestedTopic(토픽 직접 지정 시) INSERT + UserEvent.
 """
 from __future__ import annotations
 
@@ -56,8 +56,6 @@ from app.interest.idempotency import (
 from app.interest.propagation import compute_ancestor_propagation
 from app.interest.topic_distribution import (
     TopicAssignment,
-    lookup_document_topics,
-    pick_max_confidence,
     resolve_topic_distribution,
 )
 
@@ -386,6 +384,98 @@ async def _insert_not_interested_topic(
     )
     insert_stmt = insert_stmt.on_conflict_do_nothing()
     await db.execute(insert_stmt)
+
+
+async def _record_feedback_without_posterior(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    *,
+    user: User,
+    event_type: EventType,
+    document_id: UUID | None,
+    cso_topic_id: UUID | None,
+    leaf_topic_id: UUID | None,
+    client_request_id: str,
+    occurred_at: datetime,
+    active_day: int,
+    cache_invalidate: bool,
+) -> IngestResult:
+    """명시 피드백 로그만 기록하고 관심 토픽 posterior 는 건드리지 않는다."""
+    server_received_at = datetime.now(UTC)
+    payload_hash = compute_payload_hash(
+        event_type=event_type.value,
+        document_id=document_id,
+        cso_topic_id=cso_topic_id,
+        leaf_topic_id=leaf_topic_id,
+        dwell_ms=None,
+        occurred_at=occurred_at,
+    )
+    lookup = await check_idempotent(
+        db,
+        redis,
+        user_id=user.user_id,
+        client_request_id=client_request_id,
+        payload_hash=payload_hash,
+    )
+    if lookup.outcome == IdempotencyOutcome.DUPLICATE_MATCH:
+        assert lookup.existing_event_id is not None
+        return IngestResult(
+            event_id=lookup.existing_event_id,
+            accepted=True,
+            server_received_at=lookup.existing_created_at or server_received_at,
+            posterior_applied=False,
+            duplicate=True,
+        )
+    if lookup.outcome == IdempotencyOutcome.DUPLICATE_MISMATCH:
+        raise EventDuplicateError(
+            existing_event_id=lookup.existing_event_id, user_id=user.user_id
+        )
+
+    event_id = await _record_user_event(
+        db,
+        user_id=user.user_id,
+        event_type=event_type,
+        document_id=document_id,
+        cso_topic_id=cso_topic_id,
+        leaf_topic_id=leaf_topic_id,
+        dwell_ms=None,
+        client_request_id=client_request_id,
+        payload_hash=payload_hash,
+        occurred_at=occurred_at,
+        active_day_at_event=active_day,
+    )
+    if event_id is None:
+        race_lookup = await check_idempotent(
+            db,
+            redis,
+            user_id=user.user_id,
+            client_request_id=client_request_id,
+            payload_hash=payload_hash,
+        )
+        if race_lookup.outcome == IdempotencyOutcome.DUPLICATE_MATCH:
+            assert race_lookup.existing_event_id is not None
+            return IngestResult(
+                event_id=race_lookup.existing_event_id,
+                accepted=True,
+                server_received_at=race_lookup.existing_created_at
+                or server_received_at,
+                posterior_applied=False,
+                duplicate=True,
+            )
+        raise EventDuplicateError(
+            existing_event_id=race_lookup.existing_event_id, user_id=user.user_id
+        )
+    if cache_invalidate:
+        await _invalidate_recommendation_cache(redis, user.user_id)
+    return IngestResult(
+        event_id=event_id,
+        accepted=True,
+        server_received_at=server_received_at,
+        posterior_applied=False,
+        duplicate=False,
+        payload_hash=payload_hash,
+        client_request_id=client_request_id,
+    )
 
 
 async def _invalidate_recommendation_cache(
@@ -878,31 +968,44 @@ async def not_interested_feedback(
     occurred_at: datetime,
     active_day: int,
 ) -> IngestResult:
-    """not-interested 하이브리드 (정렬 2).
+    """not-interested 명시 액션.
 
-    Bayesian: ingest_event_atomic 가 P1-4 분배 (document 매핑 토픽 모두 -5*confidence).
-    NotInterestedTopic: 최고 confidence 1 row (의도 마킹용).
-    - cso/leaf 직접 지정 시: 그 토픽 1 row INSERT.
-    - document_id 단독: DocumentTopic 최고 confidence 1 row INSERT.
+    - document_id 단독: 해당 문서만 추천 큐에서 제거. 관심사 점수/토픽 거부는 건드리지 않는다.
+    - cso/leaf 직접 지정: 해당 분야 싫음으로 보고 NotInterestedTopic + Bayesian 음수 신호 반영.
     """
-    # 1) NotInterestedTopic INSERT (의도 마킹)
-    target_cso = cso_topic_id
-    target_leaf = leaf_topic_id
-    if target_cso is None and target_leaf is None and document_id is not None:
-        mappings = await lookup_document_topics(db, document_id)
-        picked = pick_max_confidence(mappings)
-        if picked is not None:
-            target_cso = picked.cso_topic_id
-            target_leaf = picked.leaf_topic_id
-    if target_cso is not None or target_leaf is not None:
-        await _insert_not_interested_topic(
+    # 1) 문서 단위 not-interested 는 사용자가 그 카드를 다시 보고 싶지 않다는 뜻.
+    if document_id is not None:
+        hidden_stmt = pg_insert(HiddenDocument).values(
+            user_id=user.user_id, document_id=document_id
+        )
+        hidden_stmt = hidden_stmt.on_conflict_do_nothing(
+            index_elements=["user_id", "document_id"]
+        )
+        await db.execute(hidden_stmt)
+
+    if cso_topic_id is None and leaf_topic_id is None:
+        return await _record_feedback_without_posterior(
             db,
-            user_id=user.user_id,
-            cso_topic_id=target_cso,
-            leaf_topic_id=target_leaf,
+            redis,
+            user=user,
+            event_type=EventType.NOT_INTERESTED,
+            document_id=document_id,
+            cso_topic_id=None,
+            leaf_topic_id=None,
+            client_request_id=client_request_id,
+            occurred_at=occurred_at,
+            active_day=active_day,
+            cache_invalidate=True,
         )
 
-    # 2) Bayesian — P1-4 분배 (직접 지정 우선)
+    # 2) 토픽 직접 지정은 분야 선호도에 반영한다.
+    await _insert_not_interested_topic(
+        db,
+        user_id=user.user_id,
+        cso_topic_id=cso_topic_id,
+        leaf_topic_id=leaf_topic_id,
+    )
+
     return await ingest_event_atomic(
         db,
         redis,
@@ -969,16 +1072,14 @@ async def delete_hidden_document(
 async def delete_not_interested_for_document(
     db: AsyncSession, *, user_id: UUID, document_id: UUID
 ) -> bool:
-    mappings = await lookup_document_topics(db, document_id)
-    picked = pick_max_confidence(mappings)
-    if picked is None:
-        return False
-    where_clauses = [NotInterestedTopic.user_id == user_id]
-    if picked.cso_topic_id is not None:
-        where_clauses.append(NotInterestedTopic.cso_topic_id == picked.cso_topic_id)
-    if picked.leaf_topic_id is not None:
-        where_clauses.append(NotInterestedTopic.leaf_topic_id == picked.leaf_topic_id)
-    stmt = sa_delete(NotInterestedTopic).where(*where_clauses)
+    """문서 단위 관심 없음 해제.
+
+    토픽 단위 "분야 줄이기" 신호는 별도 액션으로 보고 여기서 건드리지 않는다.
+    """
+    stmt = sa_delete(HiddenDocument).where(
+        HiddenDocument.user_id == user_id,
+        HiddenDocument.document_id == document_id,
+    )
     result = await db.execute(stmt)
     return (result.rowcount or 0) > 0
 

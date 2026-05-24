@@ -1,4 +1,8 @@
-"""not-interested 하이브리드 (정렬 2): Bayesian 분배 + NotInterestedTopic 최고 confidence 1건."""
+"""not_interested feedback separation.
+
+Document-only feedback hides that document without changing topic posterior.
+Explicit topic feedback keeps the original topic-level penalty path.
+"""
 from __future__ import annotations
 
 import uuid
@@ -6,14 +10,17 @@ from datetime import UTC, datetime
 
 import networkx as nx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
+from app.contracts import EventType
 from app.db.models import (
     CSOTopic,
     Document,
+    HiddenDocument,
     NotInterestedTopic,
     User,
+    UserEvent,
     UserInterestState,
 )
 from app.interest.config_loader import load_system_config
@@ -26,7 +33,7 @@ def empty_graph() -> nx.DiGraph:
 
 
 @pytest.mark.asyncio
-async def test_document_id_only_creates_single_not_interested_topic(
+async def test_document_id_only_hides_document_without_topic_penalty(
     db_session,
     redis_client,
     seeded_user: User,
@@ -35,10 +42,10 @@ async def test_document_id_only_creates_single_not_interested_topic(
     seeded_system_config,
     empty_graph: nx.DiGraph,
 ) -> None:
-    """document_id 만 호출 → 최고 confidence (0.6) 토픽 1건 NotInterestedTopic INSERT."""
     settings = get_settings()
     params, weights = await load_system_config(db_session, redis_client)
-    await not_interested_feedback(
+
+    result = await not_interested_feedback(
         db_session,
         redis_client,
         empty_graph,
@@ -53,30 +60,46 @@ async def test_document_id_only_creates_single_not_interested_topic(
         occurred_at=datetime.now(UTC),
         active_day=seeded_user.active_day_counter,
     )
-    # NotInterestedTopic 1 row (최고 confidence)
-    nit_rows = (
+
+    assert result.posterior_applied is False
+    hidden_doc = (
         await db_session.execute(
-            select(NotInterestedTopic).where(
+            select(HiddenDocument).where(
+                HiddenDocument.user_id == seeded_user.user_id,
+                HiddenDocument.document_id == seeded_document.document_id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert hidden_doc is not None
+
+    nit_count = (
+        await db_session.execute(
+            select(func.count()).select_from(NotInterestedTopic).where(
                 NotInterestedTopic.user_id == seeded_user.user_id
             )
         )
-    ).scalars().all()
-    assert len(nit_rows) == 1
-    # 최고 confidence 는 seeded_cso_topics[0] (0.6)
-    assert nit_rows[0].cso_topic_id == seeded_cso_topics[0].cso_topic_id
+    ).scalar_one()
+    assert nit_count == 0
 
-    # Bayesian 은 P1-4 분배 → 3 row 모두 beta 가산 (negative weight)
-    uis_rows = (
+    state_count = (
         await db_session.execute(
-            select(UserInterestState).where(
+            select(func.count()).select_from(UserInterestState).where(
                 UserInterestState.user_id == seeded_user.user_id
             )
         )
-    ).scalars().all()
-    assert len(uis_rows) == 3
-    # 모든 row 의 beta 가 beta_prior(4.0) 초과
-    for row in uis_rows:
-        assert row.long_beta > params.beta_prior
+    ).scalar_one()
+    assert state_count == 0
+
+    event = (
+        await db_session.execute(
+            select(UserEvent).where(
+                UserEvent.user_id == seeded_user.user_id,
+                UserEvent.document_id == seeded_document.document_id,
+                UserEvent.event_type == EventType.NOT_INTERESTED.value,
+            )
+        )
+    ).scalar_one()
+    assert event.active_day_at_event == seeded_user.active_day_counter
 
 
 @pytest.mark.asyncio
@@ -88,11 +111,11 @@ async def test_explicit_topic_creates_single_not_interested(
     seeded_system_config,
     empty_graph: nx.DiGraph,
 ) -> None:
-    """cso_topic_id 명시 → NotInterestedTopic 1 row + Bayesian 100% 단일."""
     settings = get_settings()
     params, weights = await load_system_config(db_session, redis_client)
     target_cso = seeded_cso_topics[1].cso_topic_id
-    await not_interested_feedback(
+
+    result = await not_interested_feedback(
         db_session,
         redis_client,
         empty_graph,
@@ -107,6 +130,8 @@ async def test_explicit_topic_creates_single_not_interested(
         occurred_at=datetime.now(UTC),
         active_day=seeded_user.active_day_counter,
     )
+
+    assert result.posterior_applied is True
     nit = (
         await db_session.execute(
             select(NotInterestedTopic).where(
@@ -116,7 +141,7 @@ async def test_explicit_topic_creates_single_not_interested(
     ).scalars().all()
     assert len(nit) == 1
     assert nit[0].cso_topic_id == target_cso
-    # Bayesian 은 1 row 만 (단일 토픽 100%)
+
     uis = (
         await db_session.execute(
             select(UserInterestState).where(

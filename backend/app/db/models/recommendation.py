@@ -70,6 +70,15 @@ class Recommendation(Base):
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # NFR-04: admin 노출 가능, 일반 사용자 응답 schema 미포함.
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # (C-53, 2026-05-24, alembic 0010) promotion 추적 metadata.
+    # origin_type: 'reincarnation' | 'fusion' | NULL (core/adjacent/trend = NULL)
+    # origin_ref: Reincarnation = archived trace_id / Fusion = bridge_cso_topic_id
+    # weekly_promotion_job 가 본 컬럼 기준으로 promotion (status archived→active /
+    # 새 active trace INSERT).
+    origin_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    origin_ref: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

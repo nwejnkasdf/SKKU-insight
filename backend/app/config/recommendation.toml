@@ -20,10 +20,30 @@ discovery_required_trust_level = "high"   # discovery 는 trust=high 만
 
 [freshness]
 # Document.published_at 기준 wallclock(달력) 일수 — 사용자 active day 무관.
-# 24시간 이내 1.0, 7일 이상 0.5 로 선형 감쇠.
+# (C-51 baseline default, 2026-05-24) slot 별 override 미지정 시 사용. core 와 동일.
+# 24h 이내 1.0, 30d 이상 0.3 floor 로 선형 감쇠.
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 30
+fresh_floor_value = 0.3
+
+[freshness.core]
+# 핵심 관심 — 안정성 우선. 30일 후 floor 0.3 (옛 자료도 일정 가중치 유지).
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 30
+fresh_floor_value = 0.3
+
+[freshness.adjacent]
+# 인접 분야 — 좀 더 fresh 우선. 14일 후 floor 0.2.
+fresh_full_hours = 24
+fresh_floor_after_wallclock_days = 14
+fresh_floor_value = 0.2
+
+[freshness.discovery]
+# 매일 새 발견 본질 — 옛 자료 강한 down-rank. 7일 후 floor 0.1.
+# (Reincarnation 보호: floor 가 0 아닌 0.1 라 archive 자료도 일정 가중치 유지)
 fresh_full_hours = 24
 fresh_floor_after_wallclock_days = 7
-fresh_floor_value = 0.5
+fresh_floor_value = 0.1
 
 [trust_level_weights]
 high = 1.0
@@ -33,8 +53,9 @@ low = 0.6
 [ranking_weights]
 # 최종 점수 = topic_match * w_match + freshness * w_fresh + trust * w_trust
 # NFR-06 — topic_match 1순위 정렬 기준.
-w_match = 0.7
-w_fresh = 0.2
+# (C-51, 2026-05-24) w_fresh 0.2 → 0.35 강화 — 사용자 의도 "최신성 추천 핵심" 부합.
+w_match = 0.55
+w_fresh = 0.35
 w_trust = 0.1
 
 [diversification]

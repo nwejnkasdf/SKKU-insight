@@ -103,12 +103,19 @@ class RecommendationConfig:
     slot_targets: SlotTargets
     confidence_thresholds: ConfidenceThresholds
     freshness: FreshnessConfig
+    # (C-51, 2026-05-24) slot 별 freshness override — engine.build_dashboard 가 slot 별
+    # 다른 cfg 로 score_candidates 호출. discovery half_life 짧게 = 매일 새 발견 본질.
+    freshness_by_slot: dict[str, FreshnessConfig]
     trust_level_weights: TrustLevelWeights
     ranking_weights: RankingWeights
     diversification: DiversificationConfig
     core_slot_quota: CoreSlotQuota
     bucket_score: BucketScoreWeights
     fallback: FallbackConfig
+
+    def freshness_for_slot(self, slot_type: str) -> FreshnessConfig:
+        """slot 별 freshness — 미지정 시 default `freshness` fallback."""
+        return self.freshness_by_slot.get(slot_type, self.freshness)
 
 
 _RECOMMENDATION_TOML_PATH = (
@@ -177,6 +184,20 @@ def _parse(raw: dict[str, object]) -> RecommendationConfig:
             ),
             fresh_floor_value=float(f["fresh_floor_value"]),
         ),
+        # (C-51, 2026-05-24) [freshness.core] / [freshness.adjacent] / [freshness.discovery]
+        # 옵션 sub-table. tomllib 이 nested table 을 dict 안의 dict 로 반환. 없는 slot 은
+        # default `freshness` fallback (freshness_for_slot 메서드).
+        freshness_by_slot={
+            slot_name: FreshnessConfig(
+                fresh_full_hours=int(slot_cfg["fresh_full_hours"]),
+                fresh_floor_after_wallclock_days=int(
+                    slot_cfg["fresh_floor_after_wallclock_days"]
+                ),
+                fresh_floor_value=float(slot_cfg["fresh_floor_value"]),
+            )
+            for slot_name, slot_cfg in f.items()
+            if isinstance(slot_cfg, dict)
+        },
         trust_level_weights=TrustLevelWeights(
             high=float(t["high"]),
             medium=float(t["medium"]),

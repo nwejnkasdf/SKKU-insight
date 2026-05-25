@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, delete, select, update
+from sqlalchemy import and_, delete, select, text, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +76,10 @@ async def execute_extend(
             "extend skipped: trace=%s reason=cap_or_not_active", trace_id
         )
         return False
+    # (C-66, 2026-05-26) path 변경 후 score_tail sync — 새 tail (new_cso_topic_id) 의
+    # UserInterestState.long_score 로 갱신. 옛 tail 값 잔존 방지. 다음 ingest 까지
+    # 대기 (자연 sync) 보다 즉시 sync — 같은 트랜잭션 안 1 추가 SQL, 가독성 우선.
+    await sync_score_tail_for_trace(db, trace_id)
     return True
 
 
@@ -131,6 +135,10 @@ async def execute_retract(
             plan.trace_id,
         )
         return 0
+
+    # (C-66, 2026-05-26) path 변경 후 score_tail sync — 새 tail (parent 노드) 의
+    # long_score 로 갱신. retracted cso 값 잔존 방지.
+    await sync_score_tail_for_trace(db, plan.trace_id)
 
     # 2. leaf decisions 적용.
     remapped = 0
@@ -216,6 +224,8 @@ async def execute_split(
             updated_at=datetime.now(UTC),
         )
     )
+    # (C-66, 2026-05-26) source path 변경 후 score_tail sync — 새 tail (child_A) 의 long_score.
+    await sync_score_tail_for_trace(db, plan.source_trace_id)
 
     # 2. 새 trace T' 생성. A6 C-03 패턴: pg_insert + returning + on_conflict_do_nothing.
     new_trace_id = uuid.uuid4()
@@ -244,6 +254,9 @@ async def execute_split(
         logger.warning(
             "split new trace insert race: source=%s", plan.source_trace_id
         )
+    else:
+        # (C-66) 새 T' INSERT 후 score_tail sync — path tail (child_B) 의 long_score.
+        await sync_score_tail_for_trace(db, inserted)
 
     # 3. leaf dispatch 적용 (LLM 결정에 따라 양 trace 에 분배).
     for decision in leaf_dispatch_decisions:
@@ -290,7 +303,16 @@ async def execute_archive(
     (C-44 P2-27 fix, 2026-05-19) active_day_counter 인자 추가 — archive 시점의
     user.active_day_counter 값을 archived_at_active_day 컬럼에 저장. A8-v2
     reincarnation 의 gap_days_min 가드가 last_activity 가 아닌 본 컬럼 기준 비교.
+
+    (C-65 D1 fix, 2026-05-26) status='archived' UPDATE 직전 score_tail freeze —
+    path 끝 long_score 값을 score_tail 컬럼에 영구 저장. A8-v2 Reincarnation 후보 풀
+    (`get_archived_traces_with_score(score_tail_min=0.6)`) 의 source. freeze 시점 이후는
+    archived row 라 sync 호출 없음 (status='archived' 는 sync_score_tail_for_trace 의
+    JOIN WHERE 조건이 아님 — 즉 본 freeze 가 마지막 갱신 기회).
     """
+    # (C-65) archive 직전 score_tail freeze — single trace, surgical.
+    await sync_score_tail_for_trace(db, trace_id)
+
     # 1. atomic UPDATE — status=archived AND status != archived (idempotent), RETURNING path.
     update_stmt = (
         update(UserCSOTraversal)
@@ -359,6 +381,11 @@ async def execute_merge(
     """
     # 1. loser archive + merged_into 마킹.
     # (C-44 P2-27 fix, 2026-05-19) archived_at_active_day = active_day_counter.
+    # (C-65 D1 fix, 2026-05-26) loser archive 직전 score_tail freeze — execute_archive
+    # 와 동일 패턴. Reincarnation 후보 풀 (`score_tail >= 0.6`) 의 source 인데 merged
+    # loser 는 `merged_into_trace_id IS NULL` 가드로 풀에서 자동 제외이지만, audit/recovery
+    # 의미상 freeze 값 보존.
+    await sync_score_tail_for_trace(db, plan.loser_trace_id)
     await db.execute(
         update(UserCSOTraversal)
         .where(
@@ -444,6 +471,10 @@ async def mark_stale_if_idle(
     active trace 를 stale 로 즉시 전이 (A7 결정 #7 하이브리드 — 1단계 즉시).
 
     no LLM. atomic SQL UPDATE 1회. return: 마킹된 trace 수.
+
+    (C-65, 2026-05-26) caller (interest/service.py:ingest_event_atomic) 가 본 호출 직전에
+    `sync_score_tail_for_user` 를 실행해 path 끝 노드 long_score → score_tail 컬럼을
+    최신화한 상태에서 본 SQL 의 score_tail 조건 평가가 의미를 가짐. D1 fix.
     """
     settings = get_settings()
     stale_threshold = settings.TRACE_STALE_THRESHOLD_SCORE
@@ -468,6 +499,94 @@ async def mark_stale_if_idle(
     return len(marked)
 
 
+# ============================================================
+# score_tail sync (C-65, 2026-05-26) — D1 fix
+# ============================================================
+#
+# cso-topic-traversal.md §1 schema 명세: "score_tail: float — path 끝 노드의 베이지안
+# 사후 평균 (캐시)". 직전까지 모든 INSERT 가 0.0 default 였고 갱신 caller 부재 →
+# Reincarnation discovery slot 완전 무력화 (`score_tail >= 0.6` 후보 항상 0건) +
+# core_softmax 균등 분포 (의도된 강한 trace 가중치 무효).
+#
+# 갱신 책임 위치 (옵션 C+D 결합):
+# - 옵션 D: `interest/service.py:ingest_event_atomic` step 7.5 (베이지안 사후 갱신 직후,
+#   traversal_lock 보유 시만 — race-safe). 사용자 전체 trace 의 path tail sync.
+# - 옵션 C: `archive_if_eligible` / `execute_archive` 진입 직전 (archive 시점 freeze) —
+#   reincarnation 후보 풀의 source. 단일 trace sync.
+
+
+async def sync_score_tail_for_user(
+    db: AsyncSession,
+    user_id: UUID,
+) -> int:
+    """사용자의 모든 active/stale trace 의 path 끝 cso 의 `UserInterestState.long_score`
+    를 `score_tail` 컬럼에 sync. 단일 atomic SQL.
+
+    JOIN 조건: `UserInterestState.cso_topic_id == path[cardinality(path)]` AND
+    `leaf_topic_id IS NULL` (cso-only partial UNIQUE `ux_user_interest_state_cso_only`
+    인덱스 사용). row 없는 cso 는 score_tail=0.0 (LEFT JOIN + COALESCE).
+
+    IS DISTINCT FROM 가드 — 값 변동 없으면 UPDATE skip (no-op 트랜잭션 부담 회피).
+
+    Returns: 실제 값이 변동된 trace 수.
+    """
+    stmt = text(
+        """
+        UPDATE user_cso_traversal AS t
+        SET score_tail = sub.tail_score,
+            updated_at = NOW()
+        FROM (
+            SELECT t2.trace_id,
+                   COALESCE(uis.long_score, 0.0) AS tail_score
+            FROM user_cso_traversal AS t2
+            LEFT JOIN user_interest_state AS uis
+              ON uis.user_id = t2.user_id
+              AND uis.cso_topic_id = t2.path[cardinality(t2.path)]
+              AND uis.leaf_topic_id IS NULL
+            WHERE t2.user_id = :user_id
+              AND t2.status IN ('active', 'stale')
+        ) AS sub
+        WHERE t.trace_id = sub.trace_id
+          AND t.score_tail IS DISTINCT FROM sub.tail_score
+        """
+    )
+    result = await db.execute(stmt, {"user_id": user_id})
+    return int(result.rowcount or 0)
+
+
+async def sync_score_tail_for_trace(
+    db: AsyncSession,
+    trace_id: UUID,
+) -> bool:
+    """단일 trace 의 path 끝 cso long_score → score_tail sync.
+
+    execute_archive / execute_retract / execute_extend 처럼 path 변경 직후 그 trace 만
+    sync 할 때 사용. user 전체 sync 보다 surgical.
+
+    Returns: 값 변동 발생 시 True.
+    """
+    stmt = text(
+        """
+        UPDATE user_cso_traversal AS t
+        SET score_tail = COALESCE(sub.long_score, 0.0),
+            updated_at = NOW()
+        FROM (
+            SELECT t2.trace_id, uis.long_score
+            FROM user_cso_traversal AS t2
+            LEFT JOIN user_interest_state AS uis
+              ON uis.user_id = t2.user_id
+              AND uis.cso_topic_id = t2.path[cardinality(t2.path)]
+              AND uis.leaf_topic_id IS NULL
+            WHERE t2.trace_id = :trace_id
+        ) AS sub
+        WHERE t.trace_id = sub.trace_id
+          AND t.score_tail IS DISTINCT FROM COALESCE(sub.long_score, 0.0)
+        """
+    )
+    result = await db.execute(stmt, {"trace_id": trace_id})
+    return (result.rowcount or 0) > 0
+
+
 __all__ = [
     "execute_archive",
     "execute_extend",
@@ -475,4 +594,6 @@ __all__ = [
     "execute_retract",
     "execute_split",
     "mark_stale_if_idle",
+    "sync_score_tail_for_trace",
+    "sync_score_tail_for_user",
 ]

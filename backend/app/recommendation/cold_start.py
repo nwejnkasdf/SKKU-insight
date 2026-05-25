@@ -863,24 +863,147 @@ async def run_cold_start(
                 )
             await _check_global_daily_cap(redis, settings)
 
-            # 2. LLM 호출.
+            # 2. LLM 호출 — (C-70, 2026-05-26) 셋 다 병렬:
+            #    a) 메인 cold_start LLM (cluster 기반 10 카드 generation)
+            #    b) adjacent prefetch (boost trace 1-hop 이웃 3 cso 산하 search)
+            #    c) discovery prefetch (사용자 선택 외 cluster 3 cso 산하 search)
+            # 모두 asyncio.gather 동시 호출 → max LLM 시간 = main (~90~120s). 직전 (C-69)
+            # 순차 호출 (main 후 adjacent) 보다 ~30s 단축. discovery 추가는 사용자가
+            # discovery 카드 hide 시 같은 slot type 의 다른 후보가 자연 fill 되도록 사전
+            # 후보 풀 풍부. sentinel `llm_search` source 공유 — DocumentTopic 매핑 OK.
             cluster_labels = await _resolve_cluster_labels(session, cluster_uuids)
             messages = _build_cold_start_prompt(
                 cluster_labels, user_class_enum, locale
             )
+
+            # prefetch 데이터 사전 준비 (DB round-trip 최소화)
+            from app.collection.orchestrator import (
+                LLM_SEARCH_SENTINEL_NAME,
+            )
+            from app.recommendation.core_softmax import (
+                select_daily_adjacent_csos,
+                select_daily_discovery_csos,
+            )
+            from app.traversal import queries as trav_queries
+
+            adjacent_csos_pool = (
+                await trav_queries.get_1hop_neighbors_excluding_traces(
+                    session, user_uuid
+                )
+            )
+            sampled_adjacent = select_daily_adjacent_csos(
+                user_uuid, adjacent_csos_pool, count=3
+            )
+            unselected_cluster_stmt = (
+                select(BroadInterest.cso_seed_topic_id)
+                .where(
+                    BroadInterest.broad_interest_id.notin_(cluster_uuids),
+                    BroadInterest.cso_seed_topic_id.is_not(None),
+                )
+                .order_by(BroadInterest.cso_seed_topic_id)
+            )
+            unselected_csos = [
+                r[0]
+                for r in (await session.execute(unselected_cluster_stmt)).all()
+                if r[0] is not None
+            ]
+            sampled_discovery = select_daily_discovery_csos(
+                user_uuid, unselected_csos, count=3
+            )
+
+            prefetch_sentinel_stmt = select(Source.source_id).where(
+                Source.name == LLM_SEARCH_SENTINEL_NAME
+            )
+            prefetch_sentinel_id = (
+                await session.execute(prefetch_sentinel_stmt)
+            ).scalar_one_or_none()
+            prefetch_all_csos = list(set(sampled_adjacent + sampled_discovery))
+            prefetch_label_map: dict[UUID, str] = {}
+            if prefetch_all_csos:
+                label_rows = await session.execute(
+                    select(CSOTopic.cso_topic_id, CSOTopic.label).where(
+                        CSOTopic.cso_topic_id.in_(prefetch_all_csos)
+                    )
+                )
+                prefetch_label_map = {
+                    r.cso_topic_id: r.label for r in label_rows if r.label
+                }
+
             await _set_status(
                 redis, request_uuid, status="running", progress_percent=30
             )
-            async with acquire_slot(user_uuid):
-                async with asyncio.timeout(
-                    settings.COLD_START_LLM_TIMEOUT_SECONDS
-                ):
-                    llm_resp = await provider.complete(
-                        messages,
-                        model_slot="high",
-                        response_format="json",
-                        user_id=str(user_uuid),
-                    )
+
+            prefetch_sem = asyncio.Semaphore(
+                settings.COLLECTION_PER_USER_PARALLEL
+            )
+
+            async def _main_call() -> Any:
+                """메인 cold_start LLM — acquire_slot (per-user cap) + timeout."""
+                async with acquire_slot(user_uuid):
+                    async with asyncio.timeout(
+                        settings.COLD_START_LLM_TIMEOUT_SECONDS
+                    ):
+                        return await provider.complete(
+                            messages,
+                            model_slot="high",
+                            response_format="json",
+                            user_id=str(user_uuid),
+                        )
+
+            async def _prefetch_call(
+                cso_id: UUID, intent: str
+            ) -> tuple[UUID, str, list]:
+                """단일 cso prefetch — sem cap + 실패 흡수 (빈 list 반환)."""
+                label = prefetch_label_map.get(cso_id)
+                if not label or prefetch_sentinel_id is None:
+                    return (cso_id, "", [])
+                async with prefetch_sem:
+                    try:
+                        results = await provider.search_with_tools(
+                            trace_json={
+                                "focus_cso_id": str(cso_id),
+                                "focus_label": label,
+                                "intent": intent,
+                            },
+                            leaf_label=label,
+                            top_n=3,
+                            user_id=str(user_uuid),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "cold_start prefetch failed cso=%s label=%s intent=%s err=%s",
+                            cso_id,
+                            label,
+                            intent,
+                            exc,
+                        )
+                        return (cso_id, label, [])
+                return (cso_id, label, list(results))
+
+            # 셋 다 병렬 gather
+            parallel_tasks: list[Any] = [_main_call()]
+            for c in sampled_adjacent:
+                parallel_tasks.append(
+                    _prefetch_call(c, "adjacent_slot_prefetch")
+                )
+            for c in sampled_discovery:
+                parallel_tasks.append(
+                    _prefetch_call(c, "discovery_slot_prefetch")
+                )
+            gathered = await asyncio.gather(
+                *parallel_tasks, return_exceptions=True
+            )
+            main_result = gathered[0]
+            if isinstance(main_result, BaseException):
+                raise main_result  # 메인 LLM 실패 → cold_start 전체 fail
+            llm_resp = main_result
+            adjacent_fetched_results = list(
+                gathered[1 : 1 + len(sampled_adjacent)]
+            )
+            discovery_fetched_results = list(
+                gathered[1 + len(sampled_adjacent) :]
+            )
+
             await _set_status(
                 redis, request_uuid, status="running", progress_percent=60
             )
@@ -922,6 +1045,92 @@ async def run_cold_start(
             await _persist_cold_start_recommendations(
                 session, user_id=user_uuid, items=items, doc_ids=doc_ids
             )
+
+            # 5b. (C-70, 2026-05-26) adjacent + discovery prefetch persist — 위
+            # asyncio.gather 에서 LLM 호출 결과 받은 것을 순차 INSERT. 같은 AsyncSession
+            # 단일 write 안전 (race 회피). 실패는 try/except 흡수 — cold_start 메인 흐름
+            # 안 막음.
+            #
+            # 직전 (C-69) 의 `_collect_adjacent_documents` 호출 폐기 — 본 병렬 흐름으로
+            # 통합. helper 자체는 backward-compat 유지 (다른 caller 가능, 다만 현재 0건).
+            #
+            # narrative — 사용자가 hide 한 카드 slot 의 자리에 같은 slot type 의 다른
+            # 후보가 자연 표시되도록 사전 후보 풀 풍부. discovery 는 사용자 선택 외
+            # cluster (broadening 영역) 의 cso 산하 LLM search 결과.
+            if prefetch_sentinel_id is not None:
+                from app.collection.orchestrator import (
+                    LeafTarget,
+                    _insert_document_idempotent,
+                    _upsert_document_topic,
+                )
+
+                async def _persist_prefetch_batch(
+                    fetched_list: list,
+                    label_tag: str,
+                ) -> int:
+                    persisted = 0
+                    for entry in fetched_list:
+                        if isinstance(entry, BaseException) or not entry:
+                            continue
+                        cso_id, cso_label, fetched_results = entry
+                        if not fetched_results or not cso_label:
+                            continue
+                        leaf_target = LeafTarget(
+                            leaf_label=cso_label,
+                            parent_cso_topic_id=cso_id,
+                            leaf_topic_id=None,
+                        )
+                        for r in fetched_results:
+                            try:
+                                doc_id, is_new = (
+                                    await _insert_document_idempotent(
+                                        session, prefetch_sentinel_id, r
+                                    )
+                                )
+                                if doc_id is None:
+                                    continue
+                                await _upsert_document_topic(
+                                    session,
+                                    doc_id,
+                                    leaf_target,
+                                    r.confidence,
+                                    recommendation_score=r.recommendation_score,
+                                )
+                                if is_new:
+                                    persisted += 1
+                            except Exception as exc:
+                                logger.warning(
+                                    "cold_start %s persist failed cso=%s err=%s",
+                                    label_tag,
+                                    cso_id,
+                                    exc,
+                                )
+                                continue
+                    return persisted
+
+                try:
+                    adjacent_persisted = await _persist_prefetch_batch(
+                        adjacent_fetched_results, "adjacent"
+                    )
+                    discovery_persisted = await _persist_prefetch_batch(
+                        discovery_fetched_results, "discovery"
+                    )
+                    logger.info(
+                        "cold_start prefetch persist user=%s "
+                        "adjacent_sampled=%d adjacent_inserted=%d "
+                        "discovery_sampled=%d discovery_inserted=%d (parallel LLM)",
+                        user_uuid,
+                        len(sampled_adjacent),
+                        adjacent_persisted,
+                        len(sampled_discovery),
+                        discovery_persisted,
+                    )
+                except Exception:
+                    logger.warning(
+                        "cold_start prefetch persist failed (non-fatal) request=%s",
+                        request_id,
+                        exc_info=True,
+                    )
 
             # 6. db.commit 성공 후 → cache SET + status=completed (§11.#1 회피).
             await session.commit()
@@ -995,6 +1204,162 @@ async def run_cold_start(
         )
     except Exception:
         logger.warning("cold_start: failed to release user lock request=%s", request_id)
+
+
+async def _collect_adjacent_documents(
+    session: AsyncSession,
+    provider: LLMProvider,
+    user_id: UUID,
+) -> int:
+    """(C-69, 2026-05-26) cold_start 끝에 adjacent 3 cso 영역 LLM doc 미리 fetch.
+
+    배경: C-49 (sentinel source 제거) 후 cold_start 가 진짜 source 로 doc INSERT —
+    pseudo content_type 0건. 그 결과 `_is_cold_start` 의 `_has_only_cold_start_recommendations`
+    가 항상 False → 사용자 click 1번 (alpha > 2.0) 만으로 즉시 normal path 전환.
+    normal path 의 query_adjacent 가 boost trace 의 1-hop 이웃 (보통 200+ cso) 중
+    day_seed 로 random sample 3 cso → 그 영역 doc 부재 시 fallback_trend 도배.
+
+    fix: cold_start orchestrator 안에서 dashboard 와 같은 day_seed 로 adjacent 3 cso
+    select + 각 cso 산하 `search_with_tools` 1회씩 호출 → Document/DocumentTopic INSERT.
+    dashboard 가 같은 day_seed sample 3 cso → 그 산하 doc fill OK (producer/consumer 일관성).
+
+    사용자 결정 (2026-05-26): "그냥 cold_start 할 때 adjacent node 정하고 거기서 문서
+    뽑는 작업만 추가" — 별도 collection_job 자동 enqueue 또는 _is_cold_start 가드 강화
+    같은 복잡한 fix 대신 cold_start 안 minimal 통합.
+
+    LLM 호출 병렬화 (사용자 결정 2026-05-26 후속): `collection.orchestrator.run_collection_for_user`
+    패턴 답습 — `asyncio.gather + Semaphore(COLLECTION_PER_USER_PARALLEL)` 로 3 cso
+    LLM search 동시 수행 (cold_start 시간 3분 → 2분 단축). LLM 분산 semaphore
+    (LLM_MAX_CONCURRENT_PER_USER=16, _concurrency.py) 가 추가 cap. **persist 는 순차** —
+    같은 AsyncSession 단일 write 안전 + race 회피.
+
+    실패 흡수: 각 cso 별 LLM 호출 실패는 다른 cso 결과 계속. 전체 prefetch 실패도 caller
+    가 흡수 — cold_start 메인 흐름 (10 카드 Recommendation) 안 막음.
+    """
+    from app.collection.orchestrator import (
+        LLM_SEARCH_SENTINEL_NAME,
+        LeafTarget,
+        _insert_document_idempotent,
+        _upsert_document_topic,
+    )
+    from app.recommendation.core_softmax import select_daily_adjacent_csos
+    from app.traversal import queries as trav_queries
+
+    settings = get_settings()
+
+    # 1. boost trace 산하 1-hop neighbor cso list
+    adjacent_csos = await trav_queries.get_1hop_neighbors_excluding_traces(
+        session, user_id
+    )
+    if not adjacent_csos:
+        logger.info(
+            "cold_start adjacent prefetch skip user=%s reason=no_adjacent_csos",
+            user_id,
+        )
+        return 0
+
+    # 2. day_seed sample 3 (dashboard fill_adjacent 와 같은 seed → 일관성 보장)
+    sampled = select_daily_adjacent_csos(user_id, adjacent_csos, count=3)
+    if not sampled:
+        return 0
+
+    # 3. sentinel `llm_search` Source id + cso 라벨 일괄 fetch (DB round-trip 최소화)
+    sentinel_stmt = select(Source.source_id).where(
+        Source.name == LLM_SEARCH_SENTINEL_NAME
+    )
+    sentinel_source_id = (await session.execute(sentinel_stmt)).scalar_one_or_none()
+    if sentinel_source_id is None:
+        logger.warning(
+            "cold_start adjacent prefetch skip user=%s reason=no_sentinel_source",
+            user_id,
+        )
+        return 0
+    label_rows = await session.execute(
+        select(CSOTopic.cso_topic_id, CSOTopic.label).where(
+            CSOTopic.cso_topic_id.in_(sampled)
+        )
+    )
+    cso_labels: dict[UUID, str] = {
+        r.cso_topic_id: r.label for r in label_rows if r.label
+    }
+
+    # 4. LLM 호출 병렬 — collection.orchestrator.run_collection_for_user 패턴 답습.
+    # Semaphore(COLLECTION_PER_USER_PARALLEL=16) cap + LLM 분산 semaphore (per-user 16)
+    # 가 추가 가드. 3 cso 동시 호출은 cap 안 안전.
+    sem = asyncio.Semaphore(settings.COLLECTION_PER_USER_PARALLEL)
+
+    async def _fetch_one(cso_id: UUID) -> tuple[UUID, str, list]:
+        """단일 cso 의 LLM search — sem 안에서 호출. 실패 시 빈 list 반환."""
+        cso_label = cso_labels.get(cso_id)
+        if not cso_label:
+            return (cso_id, "", [])
+        async with sem:
+            try:
+                results = await provider.search_with_tools(
+                    trace_json={
+                        "focus_cso_id": str(cso_id),
+                        "focus_label": cso_label,
+                        "intent": "adjacent_slot_prefetch",
+                    },
+                    leaf_label=cso_label,
+                    top_n=3,
+                    user_id=str(user_id),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "cold_start adjacent fetch failed cso=%s label=%s user=%s err=%s",
+                    cso_id,
+                    cso_label,
+                    user_id,
+                    exc,
+                )
+                return (cso_id, cso_label, [])
+        return (cso_id, cso_label, results)
+
+    fetched = await asyncio.gather(*[_fetch_one(c) for c in sampled])
+
+    # 5. persist 는 순차 — 같은 AsyncSession 단일 write 안전. Document/DocumentTopic
+    # ON CONFLICT 처리 helper 재사용 (collection.orchestrator).
+    inserted_total = 0
+    for cso_id, cso_label, results in fetched:
+        if not results or not cso_label:
+            continue
+        leaf_target = LeafTarget(
+            leaf_label=cso_label,
+            parent_cso_topic_id=cso_id,
+            leaf_topic_id=None,
+        )
+        for r in results:
+            try:
+                doc_id, is_new = await _insert_document_idempotent(
+                    session, sentinel_source_id, r
+                )
+                if doc_id is None:
+                    continue
+                await _upsert_document_topic(
+                    session,
+                    doc_id,
+                    leaf_target,
+                    r.confidence,
+                    recommendation_score=r.recommendation_score,
+                )
+                if is_new:
+                    inserted_total += 1
+            except Exception as exc:
+                logger.warning(
+                    "cold_start adjacent doc INSERT failed cso=%s err=%s",
+                    cso_id,
+                    exc,
+                )
+                continue
+
+    logger.info(
+        "cold_start adjacent prefetch user=%s sampled_csos=%d inserted=%d (parallel LLM)",
+        user_id,
+        len(sampled),
+        inserted_total,
+    )
+    return inserted_total
 
 
 __all__ = [

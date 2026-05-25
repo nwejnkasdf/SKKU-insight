@@ -189,6 +189,8 @@ CHECK (`status IN ('active','stale','archived')`). CHECK (`cardinality(path) >= 
 
 > **Trace operation 시 무결성**: trace_id의 path 변경(extend/retract/split/**merge**)은 항상 `last_activity_active_day = user.active_day_counter` 동시 갱신. merge 의 경우 loser.status='archived' + loser.merged_into_trace_id=winner_id 동시. 자세한 룰은 [`../algorithms/cso-topic-traversal.md`](../algorithms/cso-topic-traversal.md) §3 (operation 5 종 — A7 가 merge 신규 도입).
 
+> **(C-65, 2026-05-26) `score_tail` 갱신 caller — D1 fix**: 직전까지 모든 INSERT 가 0.0 default 였고 갱신 caller 부재 → Reincarnation discovery slot 무력화 + core_softmax 균등 분포 + mark_stale_if_idle 의 score_tail 조건 redundant. 본 라운드 fix 로 [`backend/app/traversal/operations.py:sync_score_tail_for_user`](../../backend/app/traversal/operations.py) 가 사용자의 모든 active/stale trace 의 path 끝 cso 의 `UserInterestState.long_score` 를 `score_tail` 에 sync. 호출 위치: (D) `interest/service.py:ingest_event_atomic` step 7.5 (lock 보유, race-safe) + (C) `execute_archive` / `execute_merge` loser archive 진입 직전 `sync_score_tail_for_trace` 단일 trace freeze. archive 시점 이후는 status='archived' 로 sync 대상 외 — freeze 가 마지막 갱신 기회 (Reincarnation 후보 풀의 source).
+
 ### DynamicLeafTopicCSOTopic
 
 ```python

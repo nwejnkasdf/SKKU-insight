@@ -840,7 +840,10 @@ async def ingest_event_atomic(
         import uuid as _uuid_lock
 
         from app.contracts import RedisKey
-        from app.traversal.operations import mark_stale_if_idle
+        from app.traversal.operations import (
+            mark_stale_if_idle,
+            sync_score_tail_for_user,
+        )
 
         lock_key = RedisKey.traversal_lock(user.user_id)
         lock_token = str(_uuid_lock.uuid4())
@@ -852,6 +855,12 @@ async def ingest_event_atomic(
         )
         if acquired:
             try:
+                # (C-65 D1 fix) score_tail sync — path 끝 cso 의 long_score 를
+                # UserCSOTraversal.score_tail 컬럼에 반영. 직전 베이지안 사후 갱신
+                # 결과가 (a) mark_stale_if_idle 의 `score_tail <= TRACE_STALE_THRESHOLD`
+                # 조건 평가에 반영되도록. cso-topic-traversal.md §1 schema 명세 "score_tail:
+                # path 끝 노드의 베이지안 사후 평균 (캐시)" 회복. lock 보유 안 race-safe.
+                await sync_score_tail_for_user(db, user.user_id)
                 # (a) A7 stale 마킹. (C-63: trace creation hook 폐기 — daily collection
                 # 직전 `daily_trace_update.update_traces_from_recent_events` 가 누적
                 # event 분석해서 trace 변동 처리. 실시간 trace mutation cascade 차단.)
@@ -1048,6 +1057,14 @@ async def _bootstrap_boost_traces(
             )
         )
         inserted += 1
+    # (C-66, 2026-05-26) batch INSERT 후 user 전체 score_tail sync — bootstrap_interest_state
+    # 가 이미 onboarding cluster 마다 alpha_prior 를 +1 boost 한 후 호출되므로 (사용자
+    # 선택 cluster long_score ≈ 0.67 prior). 새 boost trace 의 score_tail 도 그 값 반영.
+    # flush 필요 — db.add() 만으로는 SELECT 시 row 안 보이므로 sync 가 0건 처리.
+    if inserted > 0:
+        from app.traversal.operations import sync_score_tail_for_user
+        await db.flush()
+        await sync_score_tail_for_user(db, user_id)
     return inserted
 
 

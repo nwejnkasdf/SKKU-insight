@@ -175,28 +175,65 @@ async def get_emerging_leaves(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def find_active_traces_matching(
+    db: AsyncSession,
+    user_id: UUID,
+    cso_topic_id: UUID,
+) -> list[UserCSOTraversal]:
+    """`cso_topic_id` 가 path 위 어딘가에 있는 active 또는 stale trace 전체 반환.
+
+    (C-65, 2026-05-26) status 확장 — STALE trace 도 매칭. cso-topic-traversal.md §3.2
+    명세 "사용자가 다시 path 위 노드에 신호를 주면 trace.status = active 복원" 회복 (D2).
+    (C-68, 2026-05-26) **multi 반환** — 직전 LIMIT 1 가 split 후 분기점 매핑 / fusion bridge_cso
+    가 다른 trace path 위 노드 등 multi-trace 매핑 케이스에서 한쪽만 갱신 결함 (후속 #4).
+    fix = list 반환 + caller iterate 모두 갱신.
+    archived 는 매칭 X — 의도된 종료. weekly_promotion_job 만 부활 권한.
+
+    정렬:
+    - status='active' 우선 (같은 cso 매핑 시 active 가 stale 보다 우선)
+    - last_activity_active_day DESC (가장 최근 활동)
+
+    GIN index ix_user_cso_traversal_path_gin 활용.
+    """
+    from sqlalchemy import case
+
+    stmt = (
+        select(UserCSOTraversal)
+        .where(
+            UserCSOTraversal.user_id == user_id,
+            UserCSOTraversal.status.in_(
+                [TraversalStatus.ACTIVE.value, TraversalStatus.STALE.value]
+            ),
+            # ARRAY contains: path @> ARRAY[cso_topic_id]
+            UserCSOTraversal.path.contains([cso_topic_id]),
+        )
+        .order_by(
+            # status='active' 우선 (active 가 stale 보다 sort key 작음).
+            case(
+                (UserCSOTraversal.status == TraversalStatus.ACTIVE.value, 0),
+                else_=1,
+            ),
+            UserCSOTraversal.last_activity_active_day.desc(),
+        )
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
+# (C-68, 2026-05-26) backward-compat alias — 옛 caller 가 단일 반환 가정한 곳.
+# 신규 caller 는 `find_active_traces_matching` (multi) 직접 사용 권장. 본 alias 는
+# list[0] 또는 None 반환 — 옛 의미 보존 (가장 우선순위 trace 1개).
 async def find_active_trace_matching(
     db: AsyncSession,
     user_id: UUID,
     cso_topic_id: UUID,
 ) -> UserCSOTraversal | None:
-    """`cso_topic_id` 가 path 위 어딘가에 있는 active trace 반환 (없으면 None).
+    """**Deprecated (C-68, 2026-05-26)** — `find_active_traces_matching` 의 single-result alias.
 
-    GIN index ix_user_cso_traversal_path_gin 활용. 다중 matching 시 가장 최근 활동
-    trace 반환 (`last_activity_active_day DESC LIMIT 1`).
+    backward-compat 만 유지. 신규 caller 는 `find_active_traces_matching` 사용 권장 —
+    split 후 분기점 매핑 등 multi-trace 시 모두 갱신 가능.
     """
-    stmt = (
-        select(UserCSOTraversal)
-        .where(
-            UserCSOTraversal.user_id == user_id,
-            UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
-            # ARRAY contains: path @> ARRAY[cso_topic_id]
-            UserCSOTraversal.path.contains([cso_topic_id]),
-        )
-        .order_by(UserCSOTraversal.last_activity_active_day.desc())
-        .limit(1)
-    )
-    return (await db.execute(stmt)).scalar_one_or_none()
+    matches = await find_active_traces_matching(db, user_id, cso_topic_id)
+    return matches[0] if matches else None
 
 
 async def count_active_traces(db: AsyncSession, user_id: UUID) -> int:
@@ -397,7 +434,10 @@ async def get_descendant_archived_leaves(
 
 __all__ = [
     "count_active_traces",
+    "count_behavioral_active_traces",
     "find_active_trace_matching",
+    "find_active_traces_matching",
+    "get_1hop_neighbors_excluding_traces",
     "get_active_traces",
     "get_adjacent_topics",
     "get_archived_traces_with_score",

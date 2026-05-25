@@ -53,7 +53,7 @@
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | LLM_PROVIDER=anthropic 일 때 필수 |
 | `OPENROUTER_API_KEY` | `sk-or-...` | LLM_PROVIDER=openrouter 일 때 필수 |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `180` | |
-| `LLM_DAILY_TOKEN_BUDGET` | `1000000` | 운영 가드, 초과 시 fallback |
+| `LLM_DAILY_TOKEN_BUDGET` | `1000000000000` | 운영 가드, 초과 시 fallback |
 | `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
 | `LLM_MAX_CONCURRENT_PER_USER` | `4` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
 | `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS` | `30` | 분산 semaphore acquire 재시도 한도. 초과 시 `LLMBudgetExceeded` (fallback 진입) |
@@ -325,7 +325,7 @@ OPENROUTER_API_KEY=
 # CodexOAuth는 local experimental — 본인 토이 빌드 전용
 CODEX_OAUTH_TOKEN=
 LLM_REQUEST_TIMEOUT_SECONDS=180
-LLM_DAILY_TOKEN_BUDGET=1000000
+LLM_DAILY_TOKEN_BUDGET=1000000000000
 LLM_MAX_CONCURRENT=8
 LLM_MAX_CONCURRENT_PER_USER=4
 LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30

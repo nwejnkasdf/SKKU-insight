@@ -212,6 +212,11 @@ class Settings(BaseSettings):
     # Strict 검증: 기존 active leaf 라벨 의미유사도 ≥ 임계 시 dedup (신규 거부).
     # 1차 시연은 Levenshtein 정규화 사용 (임베딩 미사용, decisions.md §3).
     LEAF_EMERGING_LABEL_SIMILARITY_DEDUP: float = 0.75
+    # (C-59, 2026-05-25) Strict 검증 룰 5: leaf 라벨이 anchor_set 의 cso label 과
+    # 유사도 ≥ 임계 시 reject "cso_exists". 사용자 의도 정합: leaf = CSO 14k 에 없는
+    # 신생 토픽만. 이미 CSO 에 있는 토픽 (예: rag, agentic ai) 은 leaf 만들 필요 X.
+    # cluster root + 1-hop 자식 라벨만 비교 (전체 14k 비교는 비용 큼).
+    LEAF_EMERGING_CSO_DEDUP_THRESHOLD: float = 0.75
     # LLM input 시간 window. A4 collection 결과 (DocumentTopic.leaf_topic_id IN
     # user_leaves OR ...) union UserEvent click/save Document. 결정 매트릭스 #18 옵션 D.
     LEAF_EMERGING_INPUT_WINDOW_HOURS: int = 24

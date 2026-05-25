@@ -44,6 +44,7 @@ from app.contracts import (
 )
 from app.db.models import (
     BroadInterest,
+    CSOTopic,
     Document,
     DocumentTopic,
     Recommendation,
@@ -485,12 +486,19 @@ async def _insert_pseudo_document(
     existing = await _lookup_existing_document(
         db, canonical_url=item.url_hint, doi=item.doi_hint
     )
+    # (C-59, 2026-05-25) LLM related_csos_en 활용 — CSO 14k 의 더 구체적 cso 매핑.
+    # cluster root (default_cso_topic_id) 1건 + related_csos 매칭 N건 = multi cso 매핑.
+    # 사용자 click 시 구체 cso 에 신호 누적 → daily_lifecycle_evaluation extend 발동 가능.
+    related_cso_ids = await resolve_related_cso_ids(db, item.related_csos_en)
     if existing is not None:
         # 기존 Document — DocumentTopic 이미 있을 가능성. on_conflict_do_nothing 으로 안전.
         if default_cso_topic_id is not None:
             await _upsert_pseudo_document_topic(
                 db, existing, default_cso_topic_id
             )
+        for cso_id in related_cso_ids:
+            if cso_id != default_cso_topic_id:
+                await _upsert_pseudo_document_topic(db, existing, cso_id)
         return existing
     new_id = uuid4()
     url = item.url_hint or f"internal://cold-start/{request_id}/{item_idx}"
@@ -538,6 +546,10 @@ async def _insert_pseudo_document(
             await _upsert_pseudo_document_topic(
                 db, inserted, default_cso_topic_id
             )
+        # (C-59) related_csos_en 매칭 cso 도 매핑.
+        for cso_id in related_cso_ids:
+            if cso_id != default_cso_topic_id:
+                await _upsert_pseudo_document_topic(db, inserted, cso_id)
         return inserted
     # race — 재 lookup.
     fallback = await _lookup_existing_document(
@@ -548,6 +560,9 @@ async def _insert_pseudo_document(
             await _upsert_pseudo_document_topic(
                 db, fallback, default_cso_topic_id
             )
+        for cso_id in related_cso_ids:
+            if cso_id != default_cso_topic_id:
+                await _upsert_pseudo_document_topic(db, fallback, cso_id)
         return fallback
     raise InvalidColdStartResponse(
         ErrorCode.COLD_START_LLM_FAILED,
@@ -583,6 +598,33 @@ async def _upsert_pseudo_document_topic(
         )
     )
     await db.execute(stmt)
+
+
+async def resolve_related_cso_ids(
+    db: AsyncSession, related_csos_en: list[str]
+) -> list[UUID]:
+    """(C-59, 2026-05-25) LLM 의 related_csos_en 라벨 list → CSO 14k 매칭 cso_id list.
+
+    사용자 의도: cold_start Document 가 cluster root 자체만 매핑되면 trace extend
+    candidate 부족 (cluster root 자식 cso 인터랙션 0). LLM 응답의 더 구체적 cso 라벨
+    (예: "Retrieval-Augmented Generation", "Vision Language Model") 을 CSO 14k 와
+    label 매칭 → 구체적 cso 매핑 → 사용자 click 신호가 구체 cso 에 누적 → 다음 daily
+    cron 의 extend trigger 발동.
+
+    매칭 룰:
+    - 정확 일치 (lowercase normalize) 우선
+    - 일치 없으면 빈 list (cluster root fallback 은 caller 가 default_cso_topic_id 로 처리)
+    """
+    if not related_csos_en:
+        return []
+    normalized = [label.lower().strip() for label in related_csos_en if label]
+    if not normalized:
+        return []
+    stmt = select(CSOTopic.cso_topic_id, CSOTopic.label).where(
+        func.lower(CSOTopic.label).in_(normalized)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [row.cso_topic_id for row in rows]
 
 
 # Lua atomic INCR + EXPIRE — A6 dwell cap 패턴 (R2 Suggested #1 fix).

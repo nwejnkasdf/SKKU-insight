@@ -91,6 +91,15 @@ def validate_candidates(
     settings = get_settings()
     anchor_set = _build_anchor_cso_set(active_traces, graph)
     existing_labels = [lf.label for lf in existing_active_leaves]
+    # (C-59, 2026-05-25) anchor_set 의 cso label list — 룰 5 (CSO 중복 dedup) 용.
+    # cluster root + 1-hop 자식만 비교 (전체 14k 라벨 비교는 비용 큼).
+    cso_labels_in_anchor: list[str] = []
+    for cso_id in anchor_set:
+        if cso_id in graph:
+            attrs = graph.nodes[cso_id]
+            label = attrs.get("label")
+            if label:
+                cso_labels_in_anchor.append(str(label))
 
     results: list[ValidationResult] = []
     violating: list[UUID] = []
@@ -128,6 +137,22 @@ def validate_candidates(
                 ValidationResult(cand, accepted=False, rejection_reason="label_dedup")
             )
             continue
+        # 5. (C-59, 2026-05-25) CSO 14k dedup — leaf 라벨이 anchor_set 의 cso label 과
+        # 유사도 ≥ 임계면 reject. leaf = "CSO 에 없는 신생 토픽" 의도 정합 (이미 CSO 에
+        # 있는 토픽은 leaf 만들 필요 X). label_ko + label_en 모두 비교.
+        if cso_labels_in_anchor:
+            cso_sim_max = max(
+                max(
+                    label_similarity(cand.label_ko, cso_label),
+                    label_similarity(cand.label_en, cso_label),
+                )
+                for cso_label in cso_labels_in_anchor
+            )
+            if cso_sim_max >= settings.LEAF_EMERGING_CSO_DEDUP_THRESHOLD:
+                results.append(
+                    ValidationResult(cand, accepted=False, rejection_reason="cso_exists")
+                )
+                continue
         results.append(ValidationResult(cand, accepted=True))
     return results, violating
 

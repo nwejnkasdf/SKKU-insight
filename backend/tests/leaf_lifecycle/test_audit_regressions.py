@@ -58,3 +58,32 @@ class TestC56LeafPromotionIngestHook:
         # 강등 reason 은 본 hook 에서 apply 안 함.
         assert "idle_demotion" not in src
         assert "stale_archived" not in src
+
+
+class TestC59LeafCSODedup:
+    """C-59 leaf = 'CSO 14k 에 없는 신생 토픽' 의도 정합 가드."""
+
+    def test_strict_validation_rule_5_cso_exists(self) -> None:
+        from app.leaf_lifecycle import strict_validation
+
+        src = _source(strict_validation.validate_candidates)
+        assert "LEAF_EMERGING_CSO_DEDUP_THRESHOLD" in src
+        assert "cso_exists" in src
+        # anchor_set 의 cso label 만 비교 (cluster root + 1-hop 자식).
+        assert "cso_labels_in_anchor" in src
+
+    def test_resolve_related_cso_ids_helper_exists(self) -> None:
+        """cold_start orchestrator 가 LLM related_csos_en → CSO 14k 매핑."""
+        from app.recommendation import cold_start
+
+        assert hasattr(cold_start, "resolve_related_cso_ids")
+        src = _source(cold_start.resolve_related_cso_ids)
+        assert "CSOTopic" in src
+        assert "func.lower" in src
+
+    def test_insert_pseudo_document_uses_related_csos(self) -> None:
+        from app.recommendation import cold_start
+
+        src = _source(cold_start._insert_pseudo_document)
+        assert "resolve_related_cso_ids" in src
+        assert "related_cso_ids" in src

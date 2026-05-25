@@ -977,5 +977,51 @@ PR [#48](https://github.com/nwejnkasdf/SKKU-insight/pull/48) merge commit `f7462
 - 옛 pseudo Document 14건 보존 (legacy)
 - normal ranking 진입 후 dashboard 가 vendor_blog 17 + academic_paper 2 = 19 cards 만 표시
 
+PR [#49](https://github.com/nwejnkasdf/SKKU-insight/pull/49) merge commit `b9d2b9a` + followup [#50](https://github.com/nwejnkasdf/SKKU-insight/pull/50) cache invalidate + [#51](https://github.com/nwejnkasdf/SKKU-insight/pull/51) RedisKey import hotfix + [#52](https://github.com/nwejnkasdf/SKKU-insight/pull/52) `_query_any_backfill_documents` pseudo filter.
+
+## 22. C-59 라운드 — Document cso 매핑 구체화 + leaf CSO dedup (2026-05-25)
+
+### 배경
+
+실측 시연 (gywndrnjs123) 에서 두 결함 동시 발견:
+
+1. **trace 변동 X** — daily_lifecycle_evaluation 의 extend trigger 가 cluster root 자식 cso 인터랙션 ≥ 5 검사. 사용자 click 11건이 모두 cluster root cso (AI/IR/Hardware/HCI) 매핑 → 자식 cso 인터랙션 0 → extend 0. 원인: cold_start orchestrator 가 Document → DocumentTopic 매핑 시 `default_cso_topic_id` (cluster root) 만 매핑, LLM 응답의 `related_csos_en` 활용 안 함.
+2. **leaf 가 CSO 14k 라벨과 중복** — LLM identify_emerging 이 "에이전트 검색·RAG", "RAG 검색 평가" 등 식별. CSO 14k 안 이미 존재 (`agentic rag`, `rag`, `retrieval-augmented generation`, `agentic ai`). Strict 검증 4 룰에 CSO 라벨 유사도 검증 부재.
+
+사용자 의도: "leaf = CSO 에 없는 신생 토픽" + "trace 가 사용자 인터랙션 따라 path 확장돼야".
+
+### 사용자 결정 1건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 두 fix 같이 (옵션 A) | 두 결함이 chain — Document 매핑 구체화 → trace extend 발동 → leaf 가 자연히 CSO 외 영역 식별 |
+
+### 자체 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | fix #1 매핑 룰 — LLM `related_csos_en` 라벨 → CSO 14k 정확 일치 (lowercase normalize) → cso_id list. 매칭 없으면 cluster root fallback (현재 동작 보존) | 가장 단순 + backward-compat |
+| 2 | fix #1 매핑 multi cso — default_cso_topic_id + related_cso_ids 모두 INSERT (cluster root 1건 + N건 = multi DocumentTopic) | trace creation hook + extend trigger 모두 정합 |
+| 3 | fix #2 비교 범위 — anchor_set (cluster root + 1-hop 자식) cso label 만 비교 | 14k 전체 비교는 비용 큼. anchor_set 가 이미 사용자 관심 영역 |
+| 4 | fix #2 임계값 — `LEAF_EMERGING_CSO_DEDUP_THRESHOLD=0.75` (label_dedup 일관) | 직관적 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `resolve_related_cso_ids(db, label_en_list) → list[UUID]` helper | `backend/app/recommendation/cold_start.py` (신규) |
+| `_insert_pseudo_document` 가 related_csos 매핑 INSERT (cluster root + N) | `backend/app/recommendation/cold_start.py` |
+| `validate_candidates` 룰 5 (cso_exists rejection) | `backend/app/leaf_lifecycle/strict_validation.py` |
+| `LEAF_EMERGING_CSO_DEDUP_THRESHOLD: float = 0.75` Settings env | `backend/app/config/__init__.py` |
+| `.env.example` x2 | |
+| 회귀 가드 3건 (정적 source inspection) | `backend/tests/leaf_lifecycle/test_audit_regressions.py` (확장) |
+
+### 검증
+
+- syntax exit 0
+- 다음 cold_start (신규 사용자 signup) → Document 가 cluster root + related_csos multi cso 매핑
+- 그 자료 click 5건 → daily_lifecycle_evaluation extend trigger 발동
+- 다음 weekly leaf_lifecycle → leaf 가 CSO 14k 외 신생 토픽만 식별 (rejected reason="cso_exists" 로 기존 CSO 중복 거부)
+
 PR #(TBD) merge commit `(TBD)`.
 

@@ -241,10 +241,9 @@ async def _ensure_active_state_for_decay(
 _LEAF_PROMOTION_EVENT_TYPES = frozenset(
     {EventType.CLICK.value, EventType.SAVE.value, EventType.DWELL_TICK.value}
 )
-# A8 trace creation hook trigger 집합 — cso-topic-traversal.md §3 ("실제로 활동한 노드
-# 클릭/저장 등") 명세. C-56 leaf hook 과 동일한 긍정 engagement 집합 공유: 한 쪽 갱신
-# 시 다른 쪽도 함께 검토. HIDE/NOT_INTERESTED 부정 신호, VIEW 수동 스크롤이라 제외.
-_TRACE_CREATION_EVENT_TYPES = _LEAF_PROMOTION_EVENT_TYPES
+# (C-63, 2026-05-26) 옛 `_TRACE_CREATION_EVENT_TYPES` 폐기 — 실시간 trace creation hook
+# 자체 제거. trace mutation 은 daily collection 직전 `daily_trace_update` 가 누적 event
+# 분석해서 처리 (cascade 차단). leaf hook 의 _LEAF_PROMOTION_EVENT_TYPES 는 유지 (별개).
 
 
 async def _update_leaf_last_signal(
@@ -853,40 +852,10 @@ async def ingest_event_atomic(
         )
         if acquired:
             try:
-                # (a) A7 stale 마킹.
+                # (a) A7 stale 마킹. (C-63: trace creation hook 폐기 — daily collection
+                # 직전 `daily_trace_update.update_traces_from_recent_events` 가 누적
+                # event 분석해서 trace 변동 처리. 실시간 trace mutation cascade 차단.)
                 await mark_stale_if_idle(db, user.user_id, active_day)
-                # (b) A8 trace creation hook — _TRACE_CREATION_EVENT_TYPES 정의 주석 참조.
-                if (
-                    event_type.value in _TRACE_CREATION_EVENT_TYPES
-                    and document_id is not None
-                ):
-                    try:
-                        from app.llm_provider import get_provider
-                        from app.traversal.default import DefaultTraversalEngine
-
-                        cso_ids = await _document_topic_cso_ids(db, document_id)
-                        if cso_ids:
-                            engine = DefaultTraversalEngine(
-                                db,
-                                get_provider(settings.LLM_PROVIDER),
-                                cso_graph,
-                            )
-                            # ingest_event: 매칭 trace 있으면 last_activity 갱신
-                            # (origin=boost 면 behavioral 로 promote, return='promoted'),
-                            # 없으면 새 trace (default.create_new_trace 호출, return='new_trace').
-                            # active_cap 초과 시 RuntimeError — 흡수.
-                            delta = await engine.ingest_event(
-                                user.user_id, active_day, cso_ids
-                            )
-                            # (C-62, 2026-05-25) 첫 behavioral 신호 → 모든 boost trace 삭제.
-                            if delta in ("new_trace", "promoted"):
-                                await _cleanup_boost_traces(db, user.user_id)
-                    except (RuntimeError, ValueError) as hook_exc:
-                        logger.warning(
-                            "trace creation hook failed user=%s err=%s",
-                            user.user_id,
-                            hook_exc,
-                        )
             finally:
                 # Lua atomic CAS — 자기 token 일치 시만 DEL.
                 release_lua = (

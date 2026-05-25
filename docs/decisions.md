@@ -1185,5 +1185,62 @@ Round2 본질 fix (collection ↔ dashboard 일관성):
 - Weekly cron 자동화 (현재 admin button 수동)
 - Codex audit 라운드 (R2-RG 패턴 후속 검토)
 
+PR #55 merge commit `61f0190`.
+
+## 26. C-63 라운드 — 실시간 trace mutation 폐기 + daily 묶음 처리 (2026-05-26)
+
+### 배경
+
+C-62 적용 후 실측 시연에서 새 결함:
+- 사용자가 카드 SAVE 1번 → 즉시 trace 형성 → adjacent neighbors 변경 → day_seed sample 결과 변경 → collection 이 옛 sample 기준 수집했으므로 새 sample cso 산하 doc 부재 → adjacent 슬롯 일부 비어있음 → fallback_trend 도배
+- Discovery 도 cascade — 새 trace path 가 UserProfile.fusion_candidates 의 bridge_cso 흡수 → fusion 결과 빈
+- 즉 **SAVE/CLICK 1번이 dashboard 전체 재구성** — 사용자 입장 "개지랄"
+
+사용자 짚어주신 본질 (다시 또 정확): **실시간 trace mutation 자체가 root** — collection 직전 한 번만 묶어서 처리하면 cascade 자체 사라짐.
+
+### 사용자 결정 5건
+
+| # | 항목 | 결정 |
+|---|---|---|
+| 1 | trace 생성 임계 | 2 events 누적 |
+| 2 | trace update step 위치 | daily cron 의 collection 호출 직전. admin "Day simulation" 버튼도 같은 절차 |
+| 3 | Cold-start 시연 흐름 | bootstrap_boost_traces 유지 + 첫 collection 이 boost path 기반 검색 + 사용자 click 누적 → 다음 daily 에 behavioral 형성 |
+| 4 | C-61 후속 (UI lock) | 변경 X |
+| 5 | 옛 C-61 click hook | **제거** |
+
+### 자체 결정
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | event 종류 = {click, save, dwell_tick} | C-61 의 _TRACE_CREATION_EVENT_TYPES 그대로 (긍정 engagement) |
+| 2 | 누적 기간 = 최근 14 active days (default) | onboarding boost 만료 (`onboarding_boost_active_days=14`) 정합 |
+| 3 | event 카운트 — raw count (같은 doc 의 click + save = 2) | 단순 + broad 활동 신호일수록 trace 가속 |
+| 4 | trace mutation 실패 (cap 초과 등) → collection 진행 | 부분 실패 흡수 — collection 안 막힘 |
+| 5 | Admin button label "수집 실행" → "Day simulation" | 시연 cron 정확히 일치 의미 명시 |
+| 6 | Backend endpoint URL `/admin/users/.../collection/run-now` 유지 | 호환 — UI label 만 변경 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `daily_trace_update.update_traces_from_recent_events` (~120 LOC) — cso 별 event 누적 → 임계 통과 cso 마다 `DefaultTraversalEngine.ingest_event` 위임 + 첫 behavioral 시 `_cleanup_boost_traces` | `backend/app/traversal/daily_trace_update.py` (신규) |
+| Worker `_run_one` 가 `run_collection_for_user` 직전 trace_update 호출 + commit. 실패 시 collection 계속 (부분 흡수) | `backend/app/worker/jobs/collection.py` |
+| ingest_event_atomic 의 옛 C-61 click hook 블록 제거 (mark_stale_if_idle 만 유지) | `backend/app/interest/service.py` |
+| `_TRACE_CREATION_EVENT_TYPES` 상수 제거 (사용처 0) | 동 |
+| 회귀 가드 — `TestC61TraceCreationHookEventTypes` 제거 + `TestC63TraceCreationHookRemoved` 5건 신규 (상수 제거 / hook 호출 부재 / 새 모듈 존재 / threshold=2 / worker 호출 순서) | `backend/tests/recommendation/test_trace_creation_hook.py` |
+| Admin button label "수집 실행" → "Day simulation" | `admin-console/public/app.js` |
+
+### 효과
+
+- Save/Click 직후 dashboard refresh — 옛 trace state 그대로 → adjacent/discovery 안정. fallback_trend 안 도배됨.
+- 다음 daily collection (또는 admin button) → trace_update step 이 누적 event 분석 → 임계 통과 cso 만 trace 변동 → 그 후 collection 이 새 trace 영역 수집 → dashboard 가 새 산출물 사용. 일관성.
+- Producer (daily cron) / consumer (dashboard) 분리 명확화. 옛 C-62 round2 의 day_seed 일관성 가정도 sound 해짐 (input 변동 차단).
+
+### 검증
+
+- AST syntax pass (Python 4 modified + 1 new)
+- 회귀 가드 5건 (정적 source inspection — DB 불요)
+- 시연 시나리오: 사용자 가입 → onboarding → boost traces → click 1번 → dashboard refresh 시 변동 없음 → admin "Day simulation" → trace_update + collection → dashboard 갱신
+
 PR #(TBD) merge commit `(TBD)`.
 

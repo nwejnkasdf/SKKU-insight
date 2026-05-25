@@ -92,6 +92,29 @@ async def _async_collection_job(
                 if sleep_for > 0:
                     await asyncio.sleep(sleep_for)
                 async with session_factory() as session:
+                    # (C-63, 2026-05-26) Daily trace mutation step — collection 직전.
+                    # 옛 C-61 click hook (실시간 trace creation) 폐기 → 누적 event 분석.
+                    # admin "Day simulation" 도 본 경로 통과 (시연 cron 정확히 일치).
+                    try:
+                        from app.traversal.daily_trace_update import (
+                            update_traces_from_recent_events,
+                        )
+
+                        updated = await update_traces_from_recent_events(
+                            session, uid
+                        )
+                        await session.commit()
+                        if updated > 0:
+                            logger.info(
+                                "trace_update user=%s updated_traces=%d", uid, updated
+                            )
+                    except Exception as exc:
+                        await session.rollback()
+                        logger.warning(
+                            "daily trace_update failed user=%s err=%s — proceed with collection",
+                            uid,
+                            exc,
+                        )
                     try:
                         # 단일 user 호출 (run-now) 만 existing_job_id 전달.
                         # cron 다중 user 호출은 신규 row 생성 (job_id_str=None).

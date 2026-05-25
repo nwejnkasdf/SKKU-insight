@@ -340,50 +340,100 @@ class TestC66PathChangeSyncScoreTail:
         assert "sync_score_tail" not in src
 
 
-class TestC67MultiCsoTraceOverproduction:
-    """C-67 (2026-05-26) multi-cso 매핑 trace 과잉 생성 fix 회귀 가드.
+class TestC71MultiClusterTraceFormation:
+    """C-71 (2026-05-26) qualifying_csos 모두 cso 별 ingest_event 호출 (C-67 결정 #2 reverse).
 
-    후속 #3 — 직전 update_traces_from_recent_events 가 cso 별 ingest_event 호출 →
-    1 doc click 의 multi-cso 매핑 (C-59 cluster_root + related_csos) 이 trace 4개 생성.
-    fix = qualifying_csos list 통째 ingest_event 1번 호출 → 첫 매칭/첫 cso 새 trace 1개.
+    배경: C-67 가 multi-cso 매핑 1 doc click 의 trace 과잉 (1 click 4 trace) 차단했으나
+    동시에 다양한 cluster click 시 1 cluster 만 trace 형성 결함 도입. 실측: SE 8 + AI 6 +
+    HCI 2 click → trace 1개 (AI 만) → collection 결과 35 doc 모두 AI 영역.
+
+    fix: 14d 활성 사용자 가정 시 다양 doc click 압도적 → qualifying_csos 모두 cso 별
+    ingest_event 호출 → cluster 별 trace 형성. multi-cso 매핑 1 doc 4 trace 위험은
+    상대 비중 낮음 (사용자가 다양 doc click 자연).
+
+    C-67 의 회귀 가드 (TestC67MultiCsoTraceOverproduction) 폐기 — 결정 자체 reverse.
     """
 
-    def test_update_traces_uses_single_ingest_call(self) -> None:
-        """update_traces_from_recent_events 가 qualifying_csos list 통째 ingest_event
-        1번 호출. cso 별 loop 호출 부재 (`for cso_id in qualifying_csos: ingest_event(...)`
-        패턴 제거).
+    def test_update_traces_uses_per_cso_ingest_call(self) -> None:
+        """update_traces_from_recent_events 가 cso 별 loop iteration + 각 cso 마다 ingest_event 호출."""
+        from app.traversal import daily_trace_update
+
+        src = _source(daily_trace_update.update_traces_from_recent_events)
+        # cso 별 loop (C-71 reverse) — `for cso_id in qualifying_csos:` 패턴 회복
+        assert "for cso_id in qualifying_csos:" in src
+        # 각 cso 별 ingest_event 호출 ([cso_id] 단일 list)
+        assert "engine.ingest_event(" in src
+        assert "[cso_id]" in src
+        # C-67 list 통째 호출 패턴 부재
+        assert ", qualifying_csos\n" not in src
+        assert ", qualifying_csos)" not in src
+
+    def test_updated_count_aggregates_deltas_via_increment(self) -> None:
+        """delta 별 누적 — `updated += 1` 패턴 회복 (C-67 의 단일 set 패턴 폐기)."""
+        from app.traversal import daily_trace_update
+
+        src = _source(daily_trace_update.update_traces_from_recent_events)
+        # 누적 increment
+        assert "updated += 1" in src
+        # 단일 set 패턴 부재
+        assert "updated = 1\n" not in src
+
+    def test_qualifying_csos_sorted_deterministic(self) -> None:
+        """qualifying_csos 정렬 — deterministic (count DESC + cso_id ASC).
+
+        cso 별 loop 순서가 결정적 — 같은 날 동일 사용자 결과 재현. tie break 도 필요.
         """
         from app.traversal import daily_trace_update
 
         src = _source(daily_trace_update.update_traces_from_recent_events)
-        # ingest_event 호출은 1번 — list 통째 전달.
-        assert src.count("await engine.ingest_event") == 1
-        # qualifying_csos list 전달 (loop iter 변수 X).
-        assert "engine.ingest_event(\n                user_id, current_active_day, qualifying_csos\n            )" in src or \
-            "engine.ingest_event(user_id, current_active_day, qualifying_csos)" in src or \
-            "qualifying_csos" in src and "for cso_id in qualifying_csos:" not in src
-
-    def test_qualifying_csos_sorted_by_count_desc(self) -> None:
-        """qualifying_csos 정렬 — count DESC + cso_id ASC (deterministic).
-
-        ingest_event 가 list 첫 매칭/첫 cso 우선 처리하므로 가장 빈도 높은 영역이
-        먼저. tie 시 cso_id ASC (deterministic — 같은 날 동일 사용자 결과 재현).
-        """
-        from app.traversal import daily_trace_update
-
-        src = _source(daily_trace_update.update_traces_from_recent_events)
-        # sorted 호출 + count DESC key.
         assert "sorted(" in src
-        assert "-cso_counter[c]" in src or "cso_counter[c]" in src and "-" in src
+        assert "-cso_counter[c]" in src
 
-    def test_update_counts_at_most_one_trace_change(self) -> None:
-        """단일 ingest_event 호출 결과는 trace 변동 최대 1건 (delta 1개) — updated=1 또는 0."""
+    def test_cleanup_boost_traces_no_longer_called(self) -> None:
+        """(C-72 정합) `_cleanup_boost_traces` 호출 제거 — boost 14d 자연 만료에 위임."""
         from app.traversal import daily_trace_update
 
         src = _source(daily_trace_update.update_traces_from_recent_events)
-        # `updated += 1` 패턴 부재 — `updated = 1` 단일 set.
-        assert "updated += 1" not in src
-        assert "updated = 1" in src
+        assert "_cleanup_boost_traces" not in src
+        assert "any_behavioral_signal" not in src
+
+
+class TestC72BoostTraceNaturalExpire:
+    """C-72 (2026-05-26) boost trace 14 active days 자연 만료 — interest_decay_job 통합.
+
+    배경: C-62 결정 #11 의 `_cleanup_boost_traces` 가 첫 behavioral 신호 시 **모든** boost
+    DELETE — 사용자가 1 cluster click 만으로도 다른 cluster boost 다 사라짐 →
+    cso-topic-traversal.md §1.2 "14 active day prior boost" narrative 위반.
+
+    fix: cleanup_boost_traces 호출 (daily_trace_update.py) 제거 + interest_decay_job 에
+    boost 14d 자연 만료 SQL 추가. cluster 별 boost 가 14 active days 동안 자연 유지.
+    """
+
+    def test_interest_decay_calls_expire_boost_traces(self) -> None:
+        """_run 이 _expire_onboarding_boost_traces 호출 + 결과 logger 에 포함."""
+        from app.worker.jobs import interest_decay
+
+        src = _source(interest_decay._run)
+        assert "_expire_onboarding_boost_traces" in src
+        assert "boost_traces_expired" in src or "boost_expired" in src
+
+    def test_expire_boost_traces_sql_uses_correct_columns(self) -> None:
+        """expire SQL = origin='onboarding_boost' + status='active' + active_day_counter 비교."""
+        from app.worker.jobs import interest_decay
+
+        src = _source(interest_decay._expire_onboarding_boost_traces)
+        assert "DELETE FROM user_cso_traversal" in src
+        assert "onboarding_boost" in src
+        assert "active_day_counter" in src
+        assert "started_active_day" in src
+        assert ":boost_days" in src
+
+    def test_expire_boost_uses_interest_boost_expiry_setting(self) -> None:
+        """`INTEREST_BOOST_EXPIRY_ACTIVE_DAYS` Settings 사용 (default 14)."""
+        from app.worker.jobs import interest_decay
+
+        src = _source(interest_decay._expire_onboarding_boost_traces)
+        assert "INTEREST_BOOST_EXPIRY_ACTIVE_DAYS" in src
 
 
 class TestC68MultiTraceMatching:

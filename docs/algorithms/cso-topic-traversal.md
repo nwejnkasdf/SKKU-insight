@@ -381,15 +381,19 @@ async def collection_job_for_user(user: User):
             threshold=2,                        # cso 별 누적 events ≥ 2 통과
             lookback_active_days=14,
         )
-        # (C-67, 2026-05-26) qualifying_csos = count DESC + uuid ASC 정렬한 list 통째
-        # DefaultTraversalEngine.ingest_event 1번 호출 — 첫 매칭/첫 cso 새 trace 1개.
-        # 직전 (C-63) 까지 cso 별 ingest_event 호출 → multi-cso 매핑 doc (C-59 cluster_root
-        # + related_csos) 이 trace 4개 생성 결함. fix 후 1 doc click = 1 trace 변동.
+        # (C-71, 2026-05-26 — C-67 결정 #2 reverse) qualifying_csos = count DESC + uuid
+        # ASC 정렬 후 **각 cso 별** DefaultTraversalEngine.ingest_event 호출 (N 번).
+        # C-67 의 "list 통째 1번 호출 + 첫 매칭만" 정책이 다양한 cluster click 시 1
+        # cluster trace 만 형성 결함 도입 — 사용자 SE 8 + AI 6 + HCI 2 click → AI 만
+        # promote → collection 결과 35 doc 모두 AI 영역. C-71 fix: 14d 활성 사용자
+        # 가정 시 다양 doc click 압도적 → cluster 별 trace 형성 우선. 각 cso 별:
         # - 매칭 active trace → last_activity 갱신 ("noop")
         # - 매칭 stale trace → status='active' 자동 복귀 ("reactivated", C-65)
-        # - 매칭 boost trace → origin='behavioral' promote ("promoted", C-62)
-        # - 매칭 없음 → 첫 cso 로 새 behavioral trace ("new_trace")
-        # promoted 또는 new_trace 시 _cleanup_boost_traces 호출 (cold-start 종료).
+        # - 매칭 boost trace → origin='behavioral' promote (path 보존)
+        # - 매칭 없음 → 그 cso 로 새 behavioral trace ("new_trace")
+        # (C-72) `_cleanup_boost_traces` 호출 제거 — boost 14d 자연 만료 (interest_decay
+        # _job 안 _expire_onboarding_boost_traces) 에 위임. 직전 정책이 첫 behavioral
+        # 신호 시 모든 cluster boost DELETE → §1.2 "14 active day prior boost" 위반.
 
     # B. (정상 LLM 수집) run_collection_for_user — 갱신된 trace 영역 기반.
     await run_collection_for_user(user)

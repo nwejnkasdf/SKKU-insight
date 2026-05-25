@@ -1,0 +1,13 @@
+skkuinsight.germy.kr {
+    encode gzip
+
+    redir /admin-console /admin-console/ 308
+    handle_path /admin-console/* {
+        reverse_proxy admin-console:3000
+    }
+
+    @api path /health /admin /admin/* /auth /auth/* /consent /consent/* /onboarding /onboarding/* /topics /topics/* /recommendations /recommendations/* /documents /documents/* /interest /interest/* /events /events/* /feedback /feedback/*
+    reverse_proxy @api api:8000
+
+    reverse_proxy client:4173
+}

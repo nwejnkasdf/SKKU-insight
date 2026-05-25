@@ -925,6 +925,13 @@ function DocumentView({
     traces[0];
   const traceNodes = matchedTrace?.path_labels ?? [];
   const traceTitle = traceNodes.length > 1 ? "추천 경로" : "매칭 관심사";
+  const visibleSummarySections = summary?.sections.length
+    ? summary.sections
+    : [{
+        section: "core" as const,
+        title_ko: "핵심 내용",
+        body_ko: detail.summary_short
+      }];
 
   function openQueuedDocument(card: RecommendationCard | null) {
     if (!card) return;
@@ -1061,7 +1068,7 @@ function DocumentView({
               <p>{detail.summary_short}</p>
             </section>
             <div className="docSectionGrid">
-              {summary?.sections.map((section, index) => (
+              {visibleSummarySections.map((section, index) => (
                 <section key={section.section} className={`docSectionCard ${section.section}`}>
                   <b>{String(index + 1).padStart(2, "0")}</b>
                   <h3>{section.title_ko}</h3>

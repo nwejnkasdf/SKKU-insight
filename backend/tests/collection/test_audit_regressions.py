@@ -270,6 +270,23 @@ class TestRound3CodexFixGuards:
         assert "finished_at = None" in src or "finished_at=None" in src
         assert "failure_reason = None" in src or "failure_reason=None" in src
 
+    def test_cron_path_coalesces_recent_user_collection_job(self) -> None:
+        """C-63: cron fan-out skips a user recently queued/running/succeeded."""
+        import inspect as _i
+
+        from app.collection.orchestrator import (
+            _get_recent_user_collection_job,
+            run_collection_for_user,
+        )
+
+        src = _i.getsource(run_collection_for_user)
+        helper_src = _i.getsource(_get_recent_user_collection_job)
+        assert "existing_job_id is None" in src
+        assert "_get_recent_user_collection_job" in src
+        assert "CollectionJobStatus.SUCCEEDED" in helper_src
+        assert "CollectionJobStatus.QUEUED" in helper_src
+        assert "CollectionJobStatus.RUNNING" in helper_src
+
     def test_prompt_hash_includes_body(self) -> None:
         """R2-N01: hash_prompt_search 가 SYSTEM_PROMPT_TEMPLATE 본문 변경 시 자동 invalidate."""
         from app.collection import llm_search as llm_search_mod

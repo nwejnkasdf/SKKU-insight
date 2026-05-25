@@ -801,9 +801,11 @@ function userRow(user) {
   const busy = state.collectionBusyUserId === user.user_id;
   const inFlight = isCollectionInFlight(user);
   const disabled = !user.consent_active || busy || inFlight;
+  // (C-63, 2026-05-26) "수집 실행" → "Day simulation"
+  // — collection 직전 daily trace mutation step 포함 (시연용 daily cron 시뮬레이션).
   const buttonLabel = busy
     ? `${buttonSpinner()}등록 중`
-    : (inFlight ? `${buttonSpinner()}진행 중` : "수집 실행");
+    : (inFlight ? `${buttonSpinner()}진행 중` : "Day simulation");
   return `
     <div class="row">
       <strong>${escapeHtml(user.email)}</strong>

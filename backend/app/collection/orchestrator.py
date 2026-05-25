@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 LLM_SEARCH_SENTINEL_NAME = "llm_search"
 _LOCK_TTL_SECONDS = 7200
 _DEDUP_WINDOW_DAYS = 30
+_RECENT_JOB_DEDUP_WINDOW = timedelta(hours=2)
 _TRACE_COLLECTION_LIMIT = 5
 _FALLBACK_LEAF_LIMIT = 3
 _DEFAULT_TOP_N = 10
@@ -508,6 +509,18 @@ async def run_collection_for_user(
     (v13 round 2 S-03) 모든 leaf 가 provider 실패면 status=FAILED 마킹 후 re-raise →
     RQ retry trigger. 부분 실패는 SUCCEEDED + summary (정상 종료).
     """
+    if existing_job_id is None:
+        recent_job_id = await _get_recent_user_collection_job(db, user_id, job_type)
+        if recent_job_id is not None:
+            logger.info(
+                "collection_job skipped (recent job exists) user=%s job_id=%s",
+                user_id,
+                recent_job_id,
+            )
+            return CollectionJobResult(
+                job_id=recent_job_id, status=CollectionJobStatus.SKIPPED
+            )
+
     lock_key = RedisKey.collection_lock(user_id)
     acquired = await redis.set(lock_key, "1", nx=True, ex=_LOCK_TTL_SECONDS)
     if not acquired:
@@ -675,6 +688,34 @@ async def run_collection_for_user(
         return job_result
     finally:
         await redis.delete(lock_key)
+
+
+async def _get_recent_user_collection_job(
+    db: AsyncSession, user_id: UUID, job_type: str
+) -> UUID | None:
+    cutoff = datetime.now(UTC) - _RECENT_JOB_DEDUP_WINDOW
+    stmt = (
+        select(CollectionJob.job_id)
+        .where(
+            CollectionJob.user_id == user_id,
+            CollectionJob.job_type == job_type,
+            CollectionJob.status.in_(
+                [
+                    CollectionJobStatus.QUEUED.value,
+                    CollectionJobStatus.RUNNING.value,
+                    CollectionJobStatus.SUCCEEDED.value,
+                    CollectionJobStatus.SKIPPED.value,
+                ]
+            ),
+            or_(
+                CollectionJob.created_at >= cutoff,
+                CollectionJob.finished_at >= cutoff,
+            ),
+        )
+        .order_by(CollectionJob.created_at.desc(), CollectionJob.job_id.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def _persist_results(

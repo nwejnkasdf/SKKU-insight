@@ -1,11 +1,12 @@
-"""A8 cold-start 후 첫 engagement → trace 생성 hook 통합.
+"""Helper + engine 단위 검증 + C-63 trace creation hook 제거 회귀 가드.
 
-ingest_event_atomic 의 traversal_lock 보유 구간 안 mark_stale_if_idle 옆에서:
-- event_type ∈ _TRACE_CREATION_EVENT_TYPES ({CLICK, SAVE, DWELL_TICK}) AND
-  document_id 존재 AND DocumentTopic cso 매핑 존재
-- → DefaultTraversalEngine.ingest_event() 위임 (매칭 trace 있으면 last_activity, 없으면 새 trace).
+C-63 (2026-05-26) 변경 — 옛 실시간 trace creation hook (ingest_event_atomic 안)
+폐기. trace mutation 은 daily collection 직전 `daily_trace_update` 한 곳에 묶임.
 
-검증 항목: _document_topic_cso_ids helper 정확성 + ingest_event_atomic 가 hook 실행.
+검증 항목:
+- _document_topic_cso_ids helper 정확성 (옛 hook 가 쓰던 path — 다른 곳에서도 쓰일 수 있어 보존)
+- DefaultTraversalEngine.ingest_event 단위 동작 (daily_trace_update 가 활용)
+- C-63 hook 제거 + daily_trace_update 모듈 존재 + threshold=2 정적 source 가드
 """
 from __future__ import annotations
 
@@ -166,33 +167,54 @@ async def test_traversal_engine_noop_when_match(
     assert len(traces) == 1
 
 
-class TestC61TraceCreationHookEventTypes:
-    """C-61 회귀 가드 — trace creation hook trigger 가 click/save/dwell_tick 3종 모두 포함.
+class TestC63TraceCreationHookRemoved:
+    """C-63 회귀 가드 — 실시간 trace creation hook (옛 C-61) 폐기 확인.
 
-    cso-topic-traversal.md §3 "실제로 활동한 노드 (클릭/저장 등)" 명세 정합.
-    A8 trace creation hook 이 다시 CLICK-only 로 좁아지지 않게 정적 source 검증.
+    Trace mutation 은 daily collection 직전 `daily_trace_update.update_traces_from_recent_events`
+    단일 시점만 수행. ingest_event_atomic 안 옛 trace creation hook 코드가 다시
+    도입되지 않게 정적 source 검증.
     """
 
-    def test_trace_creation_event_types_constant_exists(self) -> None:
-        assert hasattr(service, "_TRACE_CREATION_EVENT_TYPES")
+    def test_trace_creation_event_types_constant_removed(self) -> None:
+        """옛 `_TRACE_CREATION_EVENT_TYPES` 상수 폐기."""
+        assert not hasattr(service, "_TRACE_CREATION_EVENT_TYPES")
 
-    def test_trace_creation_covers_click_save_dwell_tick(self) -> None:
-        types = service._TRACE_CREATION_EVENT_TYPES
-        assert EventType.CLICK.value in types
-        assert EventType.SAVE.value in types
-        assert EventType.DWELL_TICK.value in types
-
-    def test_trace_creation_excludes_negative_signals(self) -> None:
-        """HIDE / NOT_INTERESTED 는 부정 신호 — trace 관심 의미 반대라 제외."""
-        types = service._TRACE_CREATION_EVENT_TYPES
-        assert EventType.HIDE.value not in types
-        assert EventType.NOT_INTERESTED.value not in types
-        assert EventType.VIEW.value not in types
-
-    def test_ingest_event_atomic_uses_trace_creation_constant(self) -> None:
-        """hook 코드가 module 상수를 참조 — 다시 CLICK 단일 비교로 회귀 방지."""
+    def test_ingest_event_atomic_does_not_call_traversal_engine(self) -> None:
+        """옛 ingest_event 호출 + cleanup_boost_traces 호출 부재 — 본문에서 제거."""
         src = inspect.getsource(service.ingest_event_atomic)
-        assert "_TRACE_CREATION_EVENT_TYPES" in src
-        # 회귀 검출 — CLICK 단일 비교 패턴 (== EventType.CLICK) 잔재 없어야 함.
-        # (다른 코드 경로의 정상 CLICK 사용은 OK — hook 가드 표현만 막음.)
-        assert "event_type == EventType.CLICK" not in src
+        # mark_stale_if_idle 는 유지 (A7 stale 마킹). 그 외 DefaultTraversalEngine /
+        # ingest_event / _cleanup_boost_traces 호출은 본 함수에서 제거됨.
+        assert "DefaultTraversalEngine" not in src
+        assert "engine.ingest_event" not in src
+        assert "_cleanup_boost_traces(db, user.user_id)" not in src
+
+    def test_daily_trace_update_module_exists(self) -> None:
+        """본 라운드 본문 — 별도 모듈로 분리됨."""
+        from app.traversal import daily_trace_update
+
+        assert hasattr(daily_trace_update, "update_traces_from_recent_events")
+
+    def test_daily_trace_update_threshold_is_two(self) -> None:
+        """사용자 결정 (C-63): trace 형성 임계 = 2 events 누적."""
+        import inspect as _inspect
+
+        from app.traversal import daily_trace_update
+
+        sig = _inspect.signature(
+            daily_trace_update.update_traces_from_recent_events
+        )
+        threshold_default = sig.parameters["threshold"].default
+        assert threshold_default == 2
+
+    def test_collection_worker_calls_daily_trace_update(self) -> None:
+        """worker._run_one 가 run_collection_for_user 직전 trace_update 호출."""
+        from app.worker.jobs import collection as collection_worker
+
+        src = inspect.getsource(collection_worker._async_collection_job)
+        assert "update_traces_from_recent_events" in src
+        # 호출이 run_collection_for_user 보다 앞 위치인지 (순서 회귀 차단).
+        idx_update = src.find("update_traces_from_recent_events(")
+        idx_collect = src.find("run_collection_for_user(")
+        assert idx_update >= 0
+        assert idx_collect >= 0
+        assert idx_update < idx_collect

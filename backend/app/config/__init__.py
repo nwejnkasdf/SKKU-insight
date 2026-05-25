@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     CODEX_OAUTH_TOKEN: str = ""
     LLM_REQUEST_TIMEOUT_SECONDS: int = 180
-    LLM_DAILY_TOKEN_BUDGET: int = 1_000_000
+    LLM_DAILY_TOKEN_BUDGET: int = 1_000_000_000_000
     LLM_MAX_CONCURRENT: int = 8
     # (C-62 후속 round2, 2026-05-26) 2 → 4 상향 — COLLECTION_PER_USER_PARALLEL=4 정합.
     # 옛 cap 2 가 leaf 병렬 4 일 때 나머지 2 leaves 가 semaphore_timeout → 실패.

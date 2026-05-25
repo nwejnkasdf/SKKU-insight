@@ -937,5 +937,45 @@ A7 본문의 `default.evaluate_retract` / `evaluate_split` 가 1차 시연 stub 
 - 단위 테스트 7건 (단위) + 회귀 4건 (정적)
 - 1차 시연 stub 동작 (LLM 미연동 또는 실패 시) 모두 보존 — backward-compat 100%
 
+PR [#48](https://github.com/nwejnkasdf/SKKU-insight/pull/48) merge commit `f74621a`.
+
+## 21. C-58 라운드 — demo backfill 폐기 + pseudo Recommendation 자동 정리 (2026-05-25)
+
+### 배경
+
+실측 시연 (gywndrnjs123@naver.com) 에서 dashboard 에 "follow-up briefing" 형식 가짜 자료 9건 노출. 진단 결과 `_create_demo_backfill_candidates` ([`backend/app/recommendation/engine.py:385`](../backend/app/recommendation/engine.py:385)) 가 사용자의 cold_start LLM fetch 결과 (vendor_blog 17 + academic_paper 2) 외에 sentinel `cold_start_pseudo` source + `content_type='pseudo_cold_start'` 의 가짜 "follow-up briefing N" 자료 9건 INSERT. C-48 fix 는 cold_start LLM 의 Document INSERT 에 real source/content_type 적용했으나 본 demo backfill 은 별개 경로.
+
+사용자 의도: "실제 수거하면 목업 다 없애".
+
+### 사용자 결정 1건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | demo backfill **폐기** (vs real archive 자료 random fetch) | 정직 — dashboard 10개 미만이면 빈 슬롯이 narrative 맞음. 무리 채움은 사용자 혼란 |
+
+### 자체 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | `_create_demo_backfill_candidates` 함수 시그니처 보존, 본문만 `return []` | caller (engine.py 3곳) 변경 0 — surgical |
+| 2 | 옛 pseudo Document 보존 (DELETE 안 함) | legacy, backward-compat. normal ranking candidates query 가 `content_type != 'pseudo_cold_start'` filter 로 자동 제외 |
+| 3 | `_cleanup_pseudo_recommendations` 신규 — build_dashboard normal 진입 시 idempotent DELETE | "다 없애" 의도 충족 + 매 호출 idempotent (정리 후 0건 no-op) |
+| 4 | `ContentType.PSEUDO_COLD_START` enum + `SentinelSource.COLD_START_PSEUDO_NAME` 보존 | 옛 DB row ORM 로드 안전 backward-compat |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `_create_demo_backfill_candidates` 본문 → `return []` (~100 line → 12 line) | `backend/app/recommendation/engine.py:385` |
+| `_cleanup_pseudo_recommendations` 신규 + build_dashboard 호출 | `backend/app/recommendation/engine.py` |
+| 회귀 가드 6건 (정적 source inspection) — demo backfill 폐기 + cleanup 호출 검증 | `backend/tests/recommendation/test_audit_regressions.py` (신규) |
+
+### 검증
+
+- `python -c "import ast; ast.parse(...)"` exit 0
+- 시연 환경 즉시 cleanup (DB SQL) — gywndrnjs123 의 pseudo Recommendation 9건 → 0건 확인
+- 옛 pseudo Document 14건 보존 (legacy)
+- normal ranking 진입 후 dashboard 가 vendor_blog 17 + academic_paper 2 = 19 cards 만 표시
+
 PR #(TBD) merge commit `(TBD)`.
 

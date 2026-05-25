@@ -1524,3 +1524,63 @@ trace 시스템 검증 후 발견된 결정적 누락 2건 + drift 11건 + 후�
 
 PR #(TBD) merge commit `(TBD)`.
 
+## 31. C-71 + C-72 라운드 — daily_trace_update C-67 reverse + boost trace 14d 자연 만료 (2026-05-26)
+
+### 배경
+
+C-65~C-70 머지 후 시연 검증에서 새 결함 발견 — 사용자가 다양한 cluster click (SE 8, AI 6, HCI 2, human-ai 4 등) 했는데도 daily collection 결과가 **모든 doc 이 AI cluster 영역** 만 됨. 진단:
+
+1. **C-67 결정 #2 부작용** — `daily_trace_update.update_traces_from_recent_events` 가 qualifying_csos list 통째 `ingest_event` 1번 호출 → **첫 매칭 cso 만 처리** (가장 빈도 높은 AI cluster_root). 나머지 cso events 무시 → trace 1개 (AI 만) 형성 → collection 의 leaf resolution 이 AI 영역만 → 35 doc 모두 AI 매핑.
+
+2. **C-62 결정 #11 부작용** — 첫 behavioral 신호 시 `_cleanup_boost_traces` 가 **모든** boost trace DELETE. 사용자가 1 cluster click 만으로도 다른 cluster boost 다 사라짐 → cso-topic-traversal.md §1.2 "14 active day prior boost" narrative 위반.
+
+두 결함이 chain — C-67 가 1 cluster trace + C-62 cleanup 이 다른 cluster boost 정리 → 사용자 명시 선택 다양성 완전 손실.
+
+### 사용자 결정 (2건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | C-67 결정 #2 단순 reverse (옵션 A) | 14d 활성 사용자 가정 → 다양 doc click 압도적. multi-cso 매핑 1 doc 의 trace 과잉 위험은 상대 비중 낮음. 다양성 우선. |
+| 2 | `_cleanup_boost_traces` 폐기 + boost 14d 자연 만료 | cluster 별 boost 가 14 active days 유지 → 사용자가 click 한 cluster 만 promote (origin 변경, path 보존), click 안 한 cluster 는 자연 expire. §1.2 narrative 정합. |
+
+### 자체 결정 (5건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | C-71 — qualifying_csos 정렬 `count DESC + cso_id ASC` 유지 | deterministic — 같은 날 동일 사용자 결과 재현 |
+| 2 | C-71 — cso 별 `ingest_event` 호출 (각 cso 단일 list `[cso_id]`) | 각 cso 별 매칭 또는 새 trace. `updated += 1` 누적 패턴 회복 |
+| 3 | C-71 — RuntimeError (active_cap_exceeded 등) 시 본 cso skip + 다음 cso 시도 | 부분 실패 흡수 |
+| 4 | C-72 — 만료 SQL 위치 = `interest_decay_job._run` 안 | A6 daily 18 UTC cron 이 이미 14d boost 관련 처리 (UserInterestState boost 차감). 정합 — boost trace 만료도 같은 cron |
+| 5 | C-72 — 만료 조건 = `(u.active_day_counter - t.started_active_day) >= INTEREST_BOOST_EXPIRY_ACTIVE_DAYS` | `UserCSOTraversal.started_active_day` 가 boost trace INSERT 시점 = boost 시작. 별도 컬럼 추가 불요. 기존 Settings env (default 14) 재사용 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `update_traces_from_recent_events` cso 별 for loop + `ingest_event(user, ad, [cso_id])` | `backend/app/traversal/daily_trace_update.py` |
+| `_cleanup_boost_traces` 호출 제거 (daily_trace_update.py 안) | 동 |
+| `_expire_onboarding_boost_traces(db, settings)` 신규 — boost 14d 만료 SQL | `backend/app/worker/jobs/interest_decay.py` |
+| `interest_decay._run` 안 `await _expire_onboarding_boost_traces(...)` + 명시 commit | 동 |
+| `TestC67MultiCsoTraceOverproduction` 폐기 (결정 자체 reverse) + `TestC71MultiClusterTraceFormation` (4) + `TestC72BoostTraceNaturalExpire` (3) | `backend/tests/traversal/test_audit_regressions.py` |
+| `cso-topic-traversal.md §9` 의사 코드 — C-67 박스 → C-71+C-72 갱신 | `docs/algorithms/cso-topic-traversal.md` |
+| `decision-backlog.md` C-71+C-72 인덱스 + count 50 → 52 | `docs/decision-backlog.md` |
+
+### 검증
+
+- AST syntax pass (Python 3 modified)
+- 회귀 가드 7건 (TestC71 4 + TestC72 3)
+- 시연 narrative 회복:
+  - SE 8 + AI 6 + HCI 2 click → SE/AI/HCI 3 trace 형성 (각 cso 별 ingest)
+  - HCI 보다 활동 적은 cluster 의 boost 는 14d 후 자연 expire
+  - daily collection 의 leaf resolution = SE + AI + HCI 영역 모두 → 35 doc 가 다양 cluster 매핑
+
+### C-67 결정 #2 무효 마킹
+
+C-67 결정 #2 ("list 통째 1번 호출 + 첫 매칭만") 무효. 본 라운드 (C-71) 가 reverse. C-67 본질 동기 (1 doc multi-cso 매핑의 trace 과잉 차단) 는 14d 활성 사용자 가정 시 무시 가능 (상대 비중 낮음).
+
+### C-62 결정 #11 부분 무효
+
+C-62 결정 #11 ("cold-start 종료 시 boost trace 삭제") 의 "모든 boost DELETE" 부분 무효. 본 라운드 (C-72) 가 cluster 별 boost 14d 자연 만료로 변경. promote (origin: onboarding_boost → behavioral) 자체는 보존 — boost trace 가 behavioral trace 로 자연 전환되는 동작은 그대로.
+
+PR #(TBD) merge commit `(TBD)`.
+

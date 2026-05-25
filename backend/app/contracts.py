@@ -89,6 +89,20 @@ class TraversalStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class TraceOrigin(str, Enum):
+    """(C-62, 2026-05-25) UserCSOTraversal.origin 컬럼 값.
+
+    - ONBOARDING_BOOST: bootstrap_interest_state 가 사용자 선택 cluster 마다 INSERT.
+      behavioral trace 첫 생성 시 같은 사용자의 모든 boost trace DELETE.
+    - BEHAVIORAL: click/save/dwell_tick hook 이 INSERT (cold-start 종료 신호).
+    - WEEKLY_PROMOTION: weekly_promotion_job 이 Reincarnation/Fusion bridge INSERT.
+    """
+
+    ONBOARDING_BOOST = "onboarding_boost"
+    BEHAVIORAL = "behavioral"
+    WEEKLY_PROMOTION = "weekly_promotion"
+
+
 class ClickbaitDecision(str, Enum):
     """clickbait_module 응답. algorithms/clickbait-integration.md."""
 

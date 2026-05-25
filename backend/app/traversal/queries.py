@@ -200,12 +200,77 @@ async def find_active_trace_matching(
 
 
 async def count_active_traces(db: AsyncSession, user_id: UUID) -> int:
-    """사용자의 active trace 수 (TRACE_ACTIVE_CAP 검사용)."""
+    """사용자의 active trace 수 (TRACE_ACTIVE_CAP 검사용). boost/behavioral 무관."""
     from sqlalchemy import func as sa_func
 
     stmt = select(sa_func.count(UserCSOTraversal.trace_id)).where(
         UserCSOTraversal.user_id == user_id,
         UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+    )
+    result = await db.execute(stmt)
+    count = result.scalar_one()
+    return int(count or 0)
+
+
+async def get_1hop_neighbors_excluding_traces(
+    db: AsyncSession, user_id: UUID
+) -> list[UUID]:
+    """(C-62 후속 round2, 2026-05-26) trace cso 의 1-hop 이웃 중 trace path 제외.
+
+    `cso_topic_parent` 양방향 edge query — graph 의존 X (worker / engine 둘 다 호출).
+    정렬된 (deterministic) list 반환 → `select_daily_adjacent_csos` 의 rng.sample 결과
+    재현성 보장.
+
+    Returns: sorted list of UUID. 빈 trace 면 빈 list.
+    """
+    from sqlalchemy import or_
+
+    from app.db.models import CSOTopicParent
+
+    trace_csos_stmt = select(UserCSOTraversal.path).where(
+        UserCSOTraversal.user_id == user_id,
+        UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+    )
+    paths = list((await db.execute(trace_csos_stmt)).scalars().all())
+    trace_csos_set: set[UUID] = set()
+    for p in paths:
+        for cso in p:
+            trace_csos_set.add(cso)
+    if not trace_csos_set:
+        return []
+    trace_csos_list = list(trace_csos_set)
+    edge_stmt = select(
+        CSOTopicParent.cso_topic_id, CSOTopicParent.parent_cso_topic_id
+    ).where(
+        or_(
+            CSOTopicParent.cso_topic_id.in_(trace_csos_list),
+            CSOTopicParent.parent_cso_topic_id.in_(trace_csos_list),
+        )
+    )
+    neighbors: set[UUID] = set()
+    for row in await db.execute(edge_stmt):
+        for cand in (row.cso_topic_id, row.parent_cso_topic_id):
+            if cand is not None and cand not in trace_csos_set:
+                neighbors.add(cand)
+    return sorted(neighbors)
+
+
+async def count_behavioral_active_traces(db: AsyncSession, user_id: UUID) -> int:
+    """(C-62, 2026-05-25) origin != 'onboarding_boost' 인 active trace 수.
+
+    _is_cold_start() 의 cold-start 종료 판단에 사용 — boost trace 가 있어도 사용자
+    행동이 없으면 cold-start 유지. 0011 이전 origin=NULL row 는 behavioral 로 간주
+    (alembic 0011 backfill 또는 본 query 의 IS NULL OR != 'onboarding_boost' 조건).
+    """
+    from sqlalchemy import func as sa_func, or_
+
+    stmt = select(sa_func.count(UserCSOTraversal.trace_id)).where(
+        UserCSOTraversal.user_id == user_id,
+        UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+        or_(
+            UserCSOTraversal.origin.is_(None),
+            UserCSOTraversal.origin != "onboarding_boost",
+        ),
     )
     result = await db.execute(stmt)
     count = result.scalar_one()

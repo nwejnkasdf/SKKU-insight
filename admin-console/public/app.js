@@ -269,6 +269,19 @@ async function runCollectionForUser(userId, email) {
   }
 }
 
+async function triggerUserProfileCron() {
+  // C-62 후속 (2026-05-26) — Discovery slot 의존 UserProfile cron 수동 트리거.
+  state.notice = "";
+  state.error = "";
+  try {
+    await request("/admin/cron/user-profile/trigger", { method: "POST" });
+    setMessage("UserProfile cron 큐잉됨 — ~30s 후 사용자 dashboard refresh 시 discovery 적용.", "success");
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  }
+  render();
+}
+
 async function loadHealth() {
   try {
     const response = await fetch(`${apiBase}/health`);
@@ -696,6 +709,16 @@ function operationsView() {
     <section class="contentStack">
       <div class="card">
         <div class="cardHead">
+          <h2>주간 배치 (Discovery)</h2>
+        </div>
+        <p class="meta">
+          UserProfile cron (Discovery slot 의 Fusion/Reincarnation 후보) 을 즉시 실행.
+          모든 사용자 순회 · LLM 호출 비용 발생 (rate_limit 5/hour).
+        </p>
+        <button type="button" data-user-profile-cron>UserProfile cron 실행</button>
+      </div>
+      <div class="card">
+        <div class="cardHead">
           <h2>최근 사용자</h2>
           <button class="iconRefresh" type="button" title="최근 사용자 새로고침" data-refresh>↻</button>
         </div>
@@ -833,6 +856,10 @@ function bindApp() {
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {
     button.addEventListener("click", loadDashboard);
+  });
+  document.querySelector("[data-user-profile-cron]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    triggerUserProfileCron();
   });
   bindCollectionButtons();
   document.querySelector("#logoutButton")?.addEventListener("click", logout);

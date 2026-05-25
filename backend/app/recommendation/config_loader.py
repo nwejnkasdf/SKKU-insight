@@ -110,6 +110,18 @@ class FallbackConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreSlotSoftmaxConfig:
+    """(C-62, 2026-05-25) Core slot 의 per-slot trace softmax sampling 파라미터.
+
+    - temperature: softmax 분산도. 낮을수록 score_tail 큰 trace 집중, 높을수록 균등.
+    - max_per_trace: 같은 trace 가 core 슬롯에서 최대 몇 번 뽑힐 수 있는지 (soft cap).
+    """
+
+    temperature: float
+    max_per_trace: int
+
+
+@dataclass(frozen=True, slots=True)
 class RecommendationConfig:
     slot_targets: SlotTargets
     confidence_thresholds: ConfidenceThresholds
@@ -124,6 +136,9 @@ class RecommendationConfig:
     core_slot_quota: CoreSlotQuota
     bucket_score: BucketScoreWeights
     fallback: FallbackConfig
+    # (C-62, 2026-05-25) core slot per-slot trace softmax. recommendation.toml
+    # 에 sub-table 부재 시 default (temperature=1.0, max_per_trace=2).
+    core_slot_softmax: CoreSlotSoftmaxConfig
 
     def freshness_for_slot(self, slot_type: str) -> FreshnessConfig:
         """slot 별 freshness — discovery 는 _UNITY_FRESHNESS (1.0 강제), 그 외 dict /
@@ -244,6 +259,20 @@ def _parse(raw: dict[str, object]) -> RecommendationConfig:
             trend_window_days=int(fb["trend_window_days"]),
             archive_window_days=int(fb["archive_window_days"]),
         ),
+        # (C-62, 2026-05-25) [core_slot_softmax] sub-table. 없으면 default.
+        core_slot_softmax=_parse_core_slot_softmax(raw.get("core_slot_softmax")),
+    )
+
+
+def _parse_core_slot_softmax(
+    raw_softmax: object,
+) -> CoreSlotSoftmaxConfig:
+    """[core_slot_softmax] sub-table parse — 없으면 default (1.0, 2)."""
+    if not isinstance(raw_softmax, dict):
+        return CoreSlotSoftmaxConfig(temperature=1.0, max_per_trace=2)
+    return CoreSlotSoftmaxConfig(
+        temperature=float(raw_softmax.get("temperature", 1.0)),
+        max_per_trace=int(raw_softmax.get("max_per_trace", 2)),
     )
 
 
@@ -259,6 +288,7 @@ __all__ = [
     "BucketScoreWeights",
     "ConfidenceThresholds",
     "CoreSlotQuota",
+    "CoreSlotSoftmaxConfig",
     "DiversificationConfig",
     "FallbackConfig",
     "FreshnessConfig",

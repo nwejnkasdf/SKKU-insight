@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, text
+from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, Integer, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,11 @@ class DocumentTopic(Base):
         CheckConstraint(
             "cso_topic_id IS NOT NULL OR leaf_topic_id IS NOT NULL",
             name="ck_document_topic_at_least_one_topic",
+        ),
+        # (C-62, 2026-05-25) LLM-as-judge 1~10 정수. NULL = 미평가 (옛 row 또는 LLM 미응답).
+        CheckConstraint(
+            "recommendation_score IS NULL OR (recommendation_score BETWEEN 1 AND 10)",
+            name="ck_document_topic_recommendation_score_range",
         ),
         Index("ix_document_topic_document", "document_id"),
         Index("ix_document_topic_cso", "cso_topic_id"),
@@ -81,6 +86,10 @@ class DocumentTopic(Base):
         nullable=True,
     )
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    # (C-62, 2026-05-25) LLM 가 수집 leaf 단위 후보 풀 안에서 doc 별 산출하는 1~10
+    # 정수 점수. Core slot fill 이 trace softmax → 그 trace 영역 내 doc 중
+    # max(recommendation_score) 선택. NULL 은 ranking 시 0 으로 취급.
+    recommendation_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 __all__ = ["DocumentTopic"]

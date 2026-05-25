@@ -41,6 +41,9 @@ class SearchResult:
 
     - `abstract_summary` 는 NFR-25 정합 = LLM self-summary (외부 원문 복사 금지).
     - `confidence` default 0.8 — DocumentTopic.confidence 로 그대로 사용.
+    - `recommendation_score` (C-62, 2026-05-25): LLM-as-judge 1~10 정수, pool 내 상대값.
+      DocumentTopic.recommendation_score 로 저장 → core slot softmax 가 사용.
+      None = LLM 응답 없음 (옛 fixture 또는 schema 안 따른 응답).
     - `raw` 는 Document.raw JSONB 에 저장 (publisher 정보 포함).
     """
 
@@ -53,6 +56,7 @@ class SearchResult:
     doi: str | None = None
     canonical_url: str | None = None
     confidence: float = 0.8
+    recommendation_score: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 

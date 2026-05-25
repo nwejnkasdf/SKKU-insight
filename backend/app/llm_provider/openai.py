@@ -297,6 +297,16 @@ def _parse_search_item(item: dict[str, Any]) -> SearchResult:
             published_at = datetime.fromisoformat(normalized)
         except ValueError:
             published_at = None
+    # (C-62, 2026-05-25) recommendation_score parse — 1~10 clamp.
+    rec_raw = item.get("recommendation_score")
+    rec_score: int | None = None
+    if rec_raw is not None:
+        try:
+            rec_int = int(rec_raw)
+            if 1 <= rec_int <= 10:
+                rec_score = rec_int
+        except (TypeError, ValueError):
+            rec_score = None
     return SearchResult(
         title=str(item.get("title", "")),
         url=str(item.get("url", "")),
@@ -307,6 +317,7 @@ def _parse_search_item(item: dict[str, Any]) -> SearchResult:
         doi=item.get("doi"),
         canonical_url=item.get("canonical_url"),
         confidence=float(item.get("confidence", 0.8)),
+        recommendation_score=rec_score,
         raw=dict(item.get("raw", {})),
     )
 

@@ -73,6 +73,10 @@ class CandidateRow:
     leaf_label: str | None
     cso_label: str | None      # CSOTopic.label — reasons.py LLM input
     topic_confidence: float
+    # (C-62, 2026-05-25) LLM-as-judge 1~10 정수. core slot softmax 가 trace 영역
+    # top doc 선택 시 본 컬럼으로 정렬. adjacent/discovery 는 사용 안 함.
+    # NULL = 옛 row 또는 LLM 미응답 — ranking 시 NULLS LAST 처리.
+    recommendation_score: int | None = None
 
 
 def _antijoin_clauses(
@@ -142,6 +146,8 @@ def _build_base_select() -> Select[Any]:
             DynamicLeafTopic.label.label("leaf_label"),
             CSOTopic.label.label("cso_label"),
             DocumentTopic.confidence.label("topic_confidence"),
+            # (C-62, 2026-05-25) LLM-as-judge 1~10 정수. NULL = 미평가.
+            DocumentTopic.recommendation_score.label("recommendation_score"),
         )
         .join(DocumentTopic, DocumentTopic.document_id == Document.document_id)
         .join(Source, Source.source_id == Document.source_id)
@@ -177,6 +183,11 @@ def _row_to_candidate(row: Any) -> CandidateRow:
         leaf_label=row.leaf_label,
         cso_label=row.cso_label,
         topic_confidence=float(row.topic_confidence),
+        recommendation_score=(
+            int(row.recommendation_score)
+            if getattr(row, "recommendation_score", None) is not None
+            else None
+        ),
     )
 
 

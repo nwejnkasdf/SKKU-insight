@@ -250,14 +250,25 @@ class DefaultTraversalEngine:
             if matched is None:
                 continue
             # 매칭 trace 의 last_activity 만 갱신 (path 는 그대로 — extend 임계 평가는 daily cron).
+            # (C-62, 2026-05-25) boost trace 매칭 시 behavioral 로 promote — cold-start
+            # 종료 신호. caller (interest/service.py) 가 본 사용자의 다른 boost trace 도 정리.
+            update_values: dict[str, object] = {
+                "last_activity_active_day": active_day_counter,
+            }
+            promoted = False
+            if matched.origin == "onboarding_boost":
+                update_values["origin"] = "behavioral"
+                promoted = True
             await self.db.execute(
                 update(UserCSOTraversal)
                 .where(UserCSOTraversal.trace_id == matched.trace_id)
-                .values(last_activity_active_day=active_day_counter)
+                .values(**update_values)
             )
-            return "noop"
-        # 매칭 없음 — 새 trace 생성 (cold-start). 첫 cso 만.
-        await self.create_new_trace(user_id, active_day_counter, cso_topic_ids[0])
+            return "promoted" if promoted else "noop"
+        # 매칭 없음 — 새 trace 생성 (cold-start). 첫 cso 만. origin='behavioral'.
+        await self.create_new_trace(
+            user_id, active_day_counter, cso_topic_ids[0], origin="behavioral"
+        )
         return "new_trace"
 
     async def evaluate_extend(
@@ -453,11 +464,18 @@ class DefaultTraversalEngine:
         user_id: UUID,
         active_day_counter: int,
         root_cso_topic_id: UUID,
+        *,
+        origin: str = "behavioral",
     ) -> UUID:
         """cold-start trace 생성 (A6 ingest_event_atomic hook).
 
-        active_cap=10 초과 시: 가장 idle stale trace 자동 archive 후 진행.
-        path=[root_cso_topic_id], status='active'.
+        active_cap (TRACE_ACTIVE_CAP, C-62 라운드 20) 초과 시: 가장 idle stale trace
+        자동 archive 후 진행. path=[root_cso_topic_id], status='active'.
+
+        (C-62, 2026-05-25) `origin` arg — 'behavioral' default (click hook),
+        'onboarding_boost' (bootstrap_interest_state), 'weekly_promotion'
+        (weekly_promotion_job). 첫 behavioral trace 생성 시 caller 가 boost trace
+        삭제 hook 호출.
         """
         import uuid
         from datetime import UTC, datetime
@@ -509,6 +527,7 @@ class DefaultTraversalEngine:
                 last_activity_active_day=active_day_counter,
                 score_tail=0.0,
                 merged_into_trace_id=None,
+                origin=origin,
                 created_at=now,
                 updated_at=now,
             )

@@ -104,6 +104,7 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
                     "doi",
                     "canonical_url",
                     "confidence",
+                    "recommendation_score",
                 ],
                 "properties": {
                     "title": {"type": "string"},
@@ -115,6 +116,13 @@ _SEARCH_OUTPUT_SCHEMA: dict[str, Any] = {
                     "doi": {"type": ["string", "null"]},
                     "canonical_url": {"type": ["string", "null"]},
                     "confidence": {"type": "number"},
+                    # (C-62, 2026-05-25) LLM-as-judge pool 상대 추천도. 1~10 정수.
+                    # null 허용 — fallback 안전성 (옛 fixture / parse 실패).
+                    "recommendation_score": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
                 },
             },
         }
@@ -499,6 +507,16 @@ def _parse_search_item(item: dict[str, Any]) -> SearchResult:
             published_at = None
     raw_field = item.get("raw", {})
     raw_dict: dict[str, Any] = dict(raw_field) if isinstance(raw_field, dict) else {}
+    # (C-62, 2026-05-25) recommendation_score parse — 1~10 clamp, 형변환 실패 시 None.
+    rec_raw = item.get("recommendation_score")
+    rec_score: int | None = None
+    if rec_raw is not None:
+        try:
+            rec_int = int(rec_raw)
+            if 1 <= rec_int <= 10:
+                rec_score = rec_int
+        except (TypeError, ValueError):
+            rec_score = None
     return SearchResult(
         title=str(item.get("title", "")),
         url=str(item.get("url", "")),
@@ -509,6 +527,7 @@ def _parse_search_item(item: dict[str, Any]) -> SearchResult:
         doi=item.get("doi"),
         canonical_url=item.get("canonical_url"),
         confidence=float(item.get("confidence", 0.8)),
+        recommendation_score=rec_score,
         raw=raw_dict,
     )
 

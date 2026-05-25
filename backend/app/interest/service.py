@@ -871,12 +871,16 @@ async def ingest_event_atomic(
                                 get_provider(settings.LLM_PROVIDER),
                                 cso_graph,
                             )
-                            # ingest_event: 매칭 trace 있으면 last_activity 갱신,
-                            # 없으면 새 trace (default.create_new_trace 호출).
+                            # ingest_event: 매칭 trace 있으면 last_activity 갱신
+                            # (origin=boost 면 behavioral 로 promote, return='promoted'),
+                            # 없으면 새 trace (default.create_new_trace 호출, return='new_trace').
                             # active_cap 초과 시 RuntimeError — 흡수.
-                            await engine.ingest_event(
+                            delta = await engine.ingest_event(
                                 user.user_id, active_day, cso_ids
                             )
+                            # (C-62, 2026-05-25) 첫 behavioral 신호 → 모든 boost trace 삭제.
+                            if delta in ("new_trace", "promoted"):
+                                await _cleanup_boost_traces(db, user.user_id)
                     except (RuntimeError, ValueError) as hook_exc:
                         logger.warning(
                             "trace creation hook failed user=%s err=%s",
@@ -980,6 +984,101 @@ async def bootstrap_interest_state(
                 params=params,
                 active_day=active_day,
             )
+
+    # 4) (C-62, 2026-05-25) 사용자 선택 cluster 별 boost trace 1개 INSERT.
+    # path=[seed_cso_id], origin='onboarding_boost', status='active'.
+    # behavioral trace 첫 생성 시 cleanup 됨 (interest/service.py click hook).
+    # 기존 trace 없을 때만 — 재가입/재호출 안전.
+    await _bootstrap_boost_traces(
+        db, user_id=user.user_id, seed_cso_ids=seed_cso_ids, active_day=active_day
+    )
+
+    return inserted
+
+
+async def _cleanup_boost_traces(db: AsyncSession, user_id: UUID) -> int:
+    """(C-62, 2026-05-25) 첫 behavioral trace 신호 발생 시 사용자의 모든 boost
+    trace DELETE — cold-start 종료 표식.
+
+    promoted (이미 behavioral 로 origin 갱신된 trace) 는 본 DELETE 에 포함 X
+    (origin 조건이 'onboarding_boost' 한정). 즉 사용자가 클릭한 cso 의 trace 는
+    promote 로 살아남고, 다른 boost trace 는 정리됨.
+
+    Args:
+        db: AsyncSession (caller 의 트랜잭션 안에서 실행)
+        user_id: target user
+    Returns:
+        삭제된 row 수 (통계용).
+    """
+    from app.contracts import TraceOrigin, TraversalStatus
+    from app.db.models import UserCSOTraversal
+
+    result = await db.execute(
+        sa_delete(UserCSOTraversal).where(
+            UserCSOTraversal.user_id == user_id,
+            UserCSOTraversal.origin == TraceOrigin.ONBOARDING_BOOST.value,
+            UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+        )
+    )
+    return int(result.rowcount or 0)
+
+
+async def _bootstrap_boost_traces(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    seed_cso_ids: list[UUID],
+    active_day: int,
+) -> int:
+    """(C-62) onboarding 선택 cluster 마다 임시 boost trace INSERT.
+
+    각 trace: path=[seed_cso_id], status='active', origin='onboarding_boost',
+    score_tail=0.0. 사용자가 click/save/dwell_tick 으로 behavioral trace 첫 생성
+    시점에 같은 사용자의 모든 boost trace DELETE (interest/service.py:_cleanup_boost_traces).
+
+    TRACE_ACTIVE_CAP (C-62 라운드 20) 초과 시 cap 까지만 INSERT.
+    """
+    from datetime import UTC, datetime
+    import uuid as _uuid_lib
+
+    from app.contracts import TraceOrigin, TraversalStatus
+    from app.db.models import UserCSOTraversal
+
+    if not seed_cso_ids:
+        return 0
+    settings = get_settings()
+    inserted = 0
+    now = datetime.now(UTC)
+    for seed_id in seed_cso_ids:
+        if inserted >= settings.TRACE_ACTIVE_CAP:
+            break
+        # 같은 cso path 의 active trace 가 이미 있으면 skip (idempotent — 재가입 안전).
+        existing = (
+            await db.execute(
+                select(UserCSOTraversal.trace_id).where(
+                    UserCSOTraversal.user_id == user_id,
+                    UserCSOTraversal.status == TraversalStatus.ACTIVE.value,
+                    UserCSOTraversal.path == [seed_id],
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        db.add(
+            UserCSOTraversal(
+                trace_id=_uuid_lib.uuid4(),
+                user_id=user_id,
+                path=[seed_id],
+                status=TraversalStatus.ACTIVE.value,
+                started_active_day=active_day,
+                last_activity_active_day=active_day,
+                score_tail=0.0,
+                origin=TraceOrigin.ONBOARDING_BOOST.value,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        inserted += 1
     return inserted
 
 

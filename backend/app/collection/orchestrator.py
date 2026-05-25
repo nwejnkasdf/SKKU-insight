@@ -22,6 +22,7 @@ clickbait placeholder: settings.CLICKBAIT_ENABLED=true 일 때 A5 호출 위치 
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
@@ -170,19 +171,58 @@ async def resolve_active_leaves(
 
     trace_targets = await _resolve_trace_leaves(db, user_id)
     if trace_targets:
-        return trace_targets
+        # (C-62 후속 round2, 2026-05-26) trace tail + day-seed adjacent 3개 합쳐서 수집.
+        # adjacent leaves 의 doc 매핑이 channel: dashboard 의 adjacent slot softmax 가
+        # 같은 day_seed sample 로 동일 cso 의 doc 픽 → 일관성.
+        adjacent_targets = await _resolve_adjacent_leaves(db, user_id)
+        return trace_targets + adjacent_targets
 
     return await _resolve_fallback_leaves(db, user_id)
+
+
+async def _resolve_adjacent_leaves(
+    db: AsyncSession, user_id: UUID, *, count: int = 3
+) -> list[LeafTarget]:
+    """(C-62 후속 round2, 2026-05-26) day-seed 기반 adjacent cso 3개 LeafTarget.
+
+    `trav_queries.get_1hop_neighbors_excluding_traces` 로 trace cso 의 1-hop 이웃 중
+    trace path 제외한 sorted list 가져옴 → `select_daily_adjacent_csos` 가 day_seed 로
+    deterministic 3 random sample → LeafTarget 변환.
+
+    dashboard 의 `fill_adjacent_slots_via_softmax` 가 같은 helper 호출 → 같은 cso 사용.
+    """
+    from app.recommendation.core_softmax import select_daily_adjacent_csos
+    from app.traversal.queries import get_1hop_neighbors_excluding_traces
+
+    neighbors = await get_1hop_neighbors_excluding_traces(db, user_id)
+    sampled = select_daily_adjacent_csos(user_id, neighbors, count=count)
+    if not sampled:
+        return []
+    label_map = await _load_cso_labels(db, sampled)
+    targets = [
+        LeafTarget(
+            leaf_label=label_map.get(topic_id, str(topic_id)),
+            parent_cso_topic_id=topic_id,
+            leaf_topic_id=None,
+        )
+        for topic_id in sampled
+    ]
+    logger.info(
+        "ADJACENT_LEAVES user=%s targets=%s",
+        user_id,
+        [t.leaf_label for t in targets],
+    )
+    return targets
 
 
 async def _resolve_trace_leaves(
     db: AsyncSession, user_id: UUID
 ) -> list[LeafTarget]:
-    """A7 dynamic leaf 부재 시 active trace 기반 수집 대상 구성.
+    """A7 dynamic leaf 부재 시 active trace tail 기반 leaf target.
 
-    docs/sdd/data-flow.md 의 "current + adjacent" 수집 규약을 코드에 맞춘다.
-    current 는 각 active trace 의 tail 노드이고, adjacent 는 tail 의 1-hop 이웃 중
-    deterministic hash 순서로 일부만 고른다. leaf_topic_id 는 아직 없으므로 NULL.
+    (C-62 후속 round2, 2026-05-26) **trace tail 만** — adjacent 는 별도 함수
+    `_resolve_adjacent_leaves` 가 day-seed 기반으로 처리. 옛 `_select_adjacent_topic_ids`
+    (user-hash, 시간 무관) 사용 폐기 — dashboard adjacent softmax 와 일관성 위해.
     """
     trace_stmt = (
         select(UserCSOTraversal)
@@ -208,26 +248,17 @@ async def _resolve_trace_leaves(
             break
     if not current_ids:
         return []
-
-    target_ids = list(current_ids)
-    needed = _TRACE_COLLECTION_LIMIT - len(target_ids)
-    if needed > 0:
-        adjacent_ids = await _select_adjacent_topic_ids(
-            db, user_id=user_id, seed_ids=current_ids, limit=needed
-        )
-        target_ids.extend(adjacent_ids)
-
-    label_map = await _load_cso_labels(db, target_ids)
+    label_map = await _load_cso_labels(db, current_ids)
     targets = [
         LeafTarget(
             leaf_label=label_map.get(topic_id, str(topic_id)),
             parent_cso_topic_id=topic_id,
             leaf_topic_id=None,
         )
-        for topic_id in target_ids
+        for topic_id in current_ids
     ]
     logger.info(
-        "USING_TRACE_FALLBACK user=%s targets=%s",
+        "TRACE_LEAVES user=%s targets=%s",
         user_id,
         [t.leaf_label for t in targets],
     )
@@ -548,16 +579,50 @@ async def run_collection_for_user(
         existing_keys = await load_existing_dedup_keys(db, user_id)
 
         documents_total = 0
-        for leaf in leaves:
+        # (C-62 후속, 2026-05-26) leaf 병렬화 — semaphore 로 동시 LLM 호출 cap.
+        # 옛 직렬 처리는 leaf 당 60~120s × 5 = 5~10분. 병렬 4 면 ~2~3분.
+        # LLM search 는 병렬, DocumentTopic INSERT/commit 은 단일 session 정합성 위해
+        # 순차 처리 (search 결과를 모두 모은 후 main loop 에서 persist + commit).
+        settings = get_settings()
+        sem = asyncio.Semaphore(settings.COLLECTION_PER_USER_PARALLEL)
+
+        async def _search_one(leaf_target: LeafTarget) -> tuple[LeafTarget, list[SearchResult] | None, Exception | None]:
+            async with sem:
+                try:
+                    return leaf_target, await llm_search.search_for_leaf(
+                        provider,
+                        trace_json=trace_json,
+                        leaf_label=leaf_target.leaf_label,
+                        parent_cso_topic_id=leaf_target.parent_cso_topic_id,
+                        user_id=user_id,
+                        top_n=_DEFAULT_TOP_N,
+                    ), None
+                except (ProviderError, LLMBudgetExceeded) as exc:
+                    return leaf_target, None, exc
+                except Exception as exc:
+                    return leaf_target, None, exc
+
+        search_results = await asyncio.gather(*(_search_one(lf) for lf in leaves))
+
+        # === persist 단계 — 순차 처리 (DB session race 회피). ===
+        for leaf, results, exc in search_results:
+            if exc is not None:
+                if isinstance(exc, (ProviderError, LLMBudgetExceeded)):
+                    msg = f"leaf={leaf.leaf_label}: {type(exc).__name__}: {exc}"
+                    job_result.failures.append(msg)
+                    logger.warning("collection leaf failed: %s", msg)
+                else:
+                    msg = f"leaf={leaf.leaf_label}: unexpected {type(exc).__name__}: {exc}"
+                    job_result.failures.append(msg)
+                    logger.exception(
+                        "collection leaf unexpected failure leaf=%s",
+                        leaf.leaf_label,
+                        exc_info=exc,
+                    )
+                continue
+            if results is None:
+                continue
             try:
-                results = await llm_search.search_for_leaf(
-                    provider,
-                    trace_json=trace_json,
-                    leaf_label=leaf.leaf_label,
-                    parent_cso_topic_id=leaf.parent_cso_topic_id,
-                    user_id=user_id,
-                    top_n=_DEFAULT_TOP_N,
-                )
                 # (C-02) collapse 가 2 그룹 분리: 신규 INSERT vs 기존 매핑 upsert
                 to_insert, to_link = dedup_module.collapse(existing_keys, results)
                 inserted_count, new_keys = await _persist_results(
@@ -565,20 +630,17 @@ async def run_collection_for_user(
                 )
                 documents_total += inserted_count
                 # 신규 INSERT 된 키만 existing 에 추가 (다음 leaf 와의 dedup 위해).
-                # to_link 는 이미 existing 안에 있는 키와 매칭됐으므로 추가 불필요.
                 existing_keys.extend(new_keys)
                 job_result.leaves_processed += 1
                 await db.commit()
-            except (ProviderError, LLMBudgetExceeded) as exc:
+            except Exception as persist_exc:
                 await db.rollback()
-                msg = f"leaf={leaf.leaf_label}: {type(exc).__name__}: {exc}"
+                msg = (
+                    f"leaf={leaf.leaf_label}: persist {type(persist_exc).__name__}: "
+                    f"{persist_exc}"
+                )
                 job_result.failures.append(msg)
-                logger.warning("collection leaf failed: %s", msg)
-            except Exception as exc:
-                await db.rollback()
-                msg = f"leaf={leaf.leaf_label}: unexpected {type(exc).__name__}: {exc}"
-                job_result.failures.append(msg)
-                logger.exception("collection leaf unexpected failure")
+                logger.exception("collection leaf persist failure")
 
         job_result.documents_inserted = documents_total
 
@@ -644,7 +706,11 @@ async def _persist_results(
         if doc_id is None:
             # Document INSERT 실패 (canonical_url/doi 둘 다 없거나 race 후 lookup 실패) — skip
             continue
-        await _upsert_document_topic(db, doc_id, leaf, r.confidence)
+        # (C-62) SearchResult.recommendation_score → DocumentTopic.recommendation_score.
+        await _upsert_document_topic(
+            db, doc_id, leaf, r.confidence,
+            recommendation_score=r.recommendation_score,
+        )
         new_keys.append(dedup_module.make_key(r, document_id=doc_id))
         if is_new:
             inserted_count += 1
@@ -654,7 +720,10 @@ async def _persist_results(
 
     # === 그룹 2: 매핑-only (이미 알려진 기존 Document) ===
     for r, existing_doc_id in to_link:
-        await _upsert_document_topic(db, existing_doc_id, leaf, r.confidence)
+        await _upsert_document_topic(
+            db, existing_doc_id, leaf, r.confidence,
+            recommendation_score=r.recommendation_score,
+        )
         # 통계상 inserted 카운트 X (Document 신규 INSERT 아님). new_keys 도 추가 X
         # (이미 existing 안에 있음).
 
@@ -738,12 +807,21 @@ async def _lookup_existing_document_id(
 
 
 async def _upsert_document_topic(
-    db: AsyncSession, document_id: UUID, leaf: LeafTarget, confidence: float
+    db: AsyncSession,
+    document_id: UUID,
+    leaf: LeafTarget,
+    confidence: float,
+    recommendation_score: int | None = None,
 ) -> None:
     """DocumentTopic upsert (round 3 R2-S04 fix).
 
     DO UPDATE SET confidence = greatest(excluded, current) — 더 높은 confidence 유지
     (조용한 staleness 차단). partial UNIQUE 3종 모두 conflict target 으로 시도.
+
+    (C-62, 2026-05-25) recommendation_score: LLM-as-judge 1~10 정수. None 이면 컬럼
+    INSERT 시 NULL, UPDATE 시 기존 값 유지. 새 값 도착 시 overwrite (last-writer-wins —
+    같은 doc-topic 매핑이 여러 user collection 에서 다른 score 받을 수 있음을 trade-off
+    수용. 사용자별 personalization 은 trace softmax 가 책임).
     """
     # cso_topic_id / leaf_topic_id 의 NULL 패턴에 따라 alembic 0003 의 3종 partial
     # UNIQUE INDEX 중 정확히 하나가 매칭. 그 index 의 conflict target 으로 DO UPDATE.
@@ -769,15 +847,20 @@ async def _upsert_document_topic(
         cso_topic_id=leaf.parent_cso_topic_id,
         leaf_topic_id=leaf.leaf_topic_id,
         confidence=confidence,
+        recommendation_score=recommendation_score,
     )
+    set_dict: dict[str, Any] = {
+        "confidence": sa_func.greatest(
+            base.excluded.confidence, DocumentTopic.confidence
+        ),
+    }
+    # (C-62) recommendation_score 가 새로 도착했으면 overwrite, NULL 이면 기존 보존.
+    if recommendation_score is not None:
+        set_dict["recommendation_score"] = base.excluded.recommendation_score
     stmt = base.on_conflict_do_update(
         index_elements=elements,
         index_where=index_where,
-        set_={
-            "confidence": sa_func.greatest(
-                base.excluded.confidence, DocumentTopic.confidence
-            ),
-        },
+        set_=set_dict,
     )
     await db.execute(stmt)
 

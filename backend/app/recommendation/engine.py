@@ -157,12 +157,18 @@ async def _has_only_cold_start_recommendations(
 
 
 async def _is_cold_start(db: AsyncSession, user: User) -> bool:
-    """active trace 0개 AND UserInterestState 행동 신호 0 (alpha_prior 만)."""
-    active_count = await trav_queries.count_active_traces(db, user.user_id)
-    if active_count > 0:
-        # Once an active trace exists, normal ranking should take over. Keeping
-        # the user on pseudo_cold_start rows here blocks newly collected
-        # current/adjacent documents from surfacing after refresh.
+    """(C-62, 2026-05-25) behavioral active trace 0개 AND UserInterestState 행동 신호 0.
+
+    bootstrap_interest_state 가 사용자 선택 cluster 마다 boost trace
+    (origin='onboarding_boost') INSERT 하므로 단순 count_active_traces 로는
+    cold-start 종료 시점 못 잡음. 본 함수는 behavioral trace 만 카운트 — 사용자
+    click/save/dwell 으로 형성된 trace 가 있어야 normal path 진입.
+    """
+    behavioral_count = await trav_queries.count_behavioral_active_traces(
+        db, user.user_id
+    )
+    if behavioral_count > 0:
+        # behavioral trace 존재 = 사용자가 실제 활동. normal path 인계.
         return False
     # boost_applied_at_active_day 가 있는 row 는 onboarding boost — 행동 신호 X.
     # 행동 신호 = boost 없이 long_alpha 가 prior 보다 큰 row.
@@ -172,8 +178,8 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
         # alpha 가 prior 보다 1.0 이상 큰 row 만 — view event 등 작은 신호는 제외.
         UserInterestState.long_alpha > 2.0,
     )
-    behavioral_count = (await db.execute(stmt)).scalar_one()
-    if behavioral_count == 0:
+    behavioral_signal_count = (await db.execute(stmt)).scalar_one()
+    if behavioral_signal_count == 0:
         return True
 
     # A9 demo guard: save/hide/not-interested feedback creates behavioral
@@ -1388,8 +1394,11 @@ async def build_dashboard(
 
     # 1. 후보 query base.
     current_csos = await trav_queries.get_current_topics(db, user.user_id)
-    adjacent_csos = await trav_queries.get_adjacent_topics(
-        db, cso_graph, user.user_id, hops=1
+    # (C-62 후속 round2, 2026-05-26) adjacent slot 의 1-hop 이웃 — DB query 기반 helper.
+    # orchestrator 가 같은 helper + 같은 day_seed 로 select 한 cso 들에 미리 doc 수집하므로
+    # 일관성 보장. (graph 기반 get_adjacent_topics 는 discovery / 기타 path 에서 계속 사용.)
+    adjacent_csos = await trav_queries.get_1hop_neighbors_excluding_traces(
+        db, user.user_id
     )
     current_leaves = await _fetch_current_leaves(db, user.user_id)
     trace_path_csos: set[UUID] = set(current_csos)
@@ -1503,16 +1512,70 @@ async def build_dashboard(
             "reincarnation", reincarnation_archived_trace_id,
         )
 
-    # 5. fill_slots — emerging quota + threshold + FR-42 fallback.
+    # 5. fill_slots — discovery 임계 로직 유지. core/adjacent 는 softmax 가 직후 교체.
+    # (C-62 + C-62 후속, 2026-05-26) core/adjacent 빈 list 전달 → fill_slots 가 둘 다
+    # 0 으로 마킹 → 직후 softmax fill 이 교체. discovery 는 그대로 임계 적용.
     filled = fill_slots(
-        core_pool=core_pool,
-        adjacent_pool=adjacent_pool,
+        core_pool=[],
+        adjacent_pool=[],  # adjacent 도 softmax 가 직후 채움
         discovery_pool=discovery_pool,
-        emerging_pool=emerging_pool,
+        emerging_pool=[],
         targets=config.slot_targets,
         thresholds=config.confidence_thresholds,
         quota=config.core_slot_quota,
     )
+
+    # 5b. (C-62, 2026-05-25) Core slot per-slot trace softmax.
+    # active traces (boost + behavioral) 중 softmax(weights=score_tail) sample →
+    # 그 trace 영역의 max(recommendation_score) doc 1개. soft cap max_per_trace.
+    # day 내 deterministic seed.
+    from .core_softmax import (
+        fill_adjacent_slots_via_softmax,
+        fill_core_slots_via_softmax,
+    )
+
+    core_raw = await fill_core_slots_via_softmax(
+        db,
+        user.user_id,
+        target_core=config.slot_targets.core,
+        cfg=config.core_slot_softmax,
+    )
+    if core_raw:
+        core_scored = score_candidates(
+            core_raw,
+            state_index,
+            params,
+            config.ranking_weights,
+            config.freshness_for_slot(SlotType.CORE.value),
+            config.trust_level_weights,
+            config.bucket_score,
+        )
+        filled.core = core_scored
+        # FR-42 가 추가했을 fallback_reason 정리 (core 가 채워졌으니).
+        filled.fallback_reasons.pop(SlotType.CORE, None)
+
+    # 5c. (C-62 후속, 2026-05-26) Adjacent slot per-slot 1-hop neighbor cso softmax.
+    # `adjacent_csos` (trav_queries.get_adjacent_topics, hops=1) 에서 target_adjacent
+    # 개 random select (day seed) → 슬롯별 softmax sample → 그 cso 산하 top doc.
+    adjacent_raw = await fill_adjacent_slots_via_softmax(
+        db,
+        user.user_id,
+        target_adjacent=config.slot_targets.adjacent,
+        adjacent_csos=list(adjacent_csos),
+        cfg=config.core_slot_softmax,
+    )
+    if adjacent_raw:
+        adjacent_scored = score_candidates(
+            adjacent_raw,
+            state_index,
+            params,
+            config.ranking_weights,
+            config.freshness_for_slot(SlotType.ADJACENT.value),
+            config.trust_level_weights,
+            config.bucket_score,
+        )
+        filled.adjacent = adjacent_scored
+        filled.fallback_reasons.pop(SlotType.ADJACENT, None)
 
     # 6. FR-43 — 전체 < 10 시 trend fallback.
     total = filled.total()

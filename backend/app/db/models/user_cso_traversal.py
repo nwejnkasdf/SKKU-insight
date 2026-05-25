@@ -49,6 +49,12 @@ class UserCSOTraversal(Base):
             "cardinality(path) >= 1",
             name="ck_user_cso_traversal_path_nonempty",
         ),
+        # (C-62, 2026-05-25) trace 출처 구분 — bootstrap boost vs behavioral vs weekly promotion.
+        CheckConstraint(
+            "origin IS NULL OR origin IN "
+            "('onboarding_boost', 'behavioral', 'weekly_promotion')",
+            name="ck_user_cso_traversal_origin",
+        ),
         Index(
             "ix_user_cso_traversal_user_status",
             "user_id",
@@ -69,6 +75,12 @@ class UserCSOTraversal(Base):
         Index(
             "ix_user_cso_traversal_archived_at_active_day",
             "archived_at_active_day",
+        ),
+        # (C-62 alembic 0011, 2026-05-25) boost trace 정리 hook 의 빠른 lookup.
+        Index(
+            "ix_user_cso_traversal_origin_boost",
+            "user_id",
+            postgresql_where=text("origin = 'onboarding_boost' AND status = 'active'"),
         ),
     )
 
@@ -102,6 +114,12 @@ class UserCSOTraversal(Base):
         ForeignKey("user_cso_traversal.trace_id", ondelete="SET NULL"),
         nullable=True,
     )
+    # (C-62 alembic 0011, 2026-05-25) trace 출처:
+    #   - 'onboarding_boost' = bootstrap_interest_state 가 사용자 선택 cluster INSERT
+    #   - 'behavioral'       = click/save/dwell_tick hook 이 INSERT (cold-start 종료 신호)
+    #   - 'weekly_promotion' = weekly_promotion_job 가 Reincarnation/Fusion bridge INSERT
+    #   - NULL               = 0011 이전 row (default 'behavioral' 로 간주 — backfill 적용)
+    origin: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

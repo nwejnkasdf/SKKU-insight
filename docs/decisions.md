@@ -1244,3 +1244,283 @@ C-62 적용 후 실측 시연에서 새 결함:
 
 PR #(TBD) merge commit `(TBD)`.
 
+## 27. C-65 라운드 — trace 시스템 D1/D2 코드 fix + cso-topic-traversal.md drift 전체 동기화 (2026-05-26)
+
+### 배경
+
+지금까지 풀스택 기능을 동작 수준까지 끌어왔으나, trace 시스템이 명세대로 작동하는지 논리 추론 검증 시 결정적 누락 2건 + cso-topic-traversal.md drift 11건 발견:
+
+**D1 — `UserCSOTraversal.score_tail` 갱신 caller 부재 (Critical)**
+
+`score_tail` 컬럼은 cso-topic-traversal.md §1 schema 와 data/schema.md 양쪽에 "path 끝 노드의 베이지안 사후 평균 (캐시)" 로 명세되어 있으나, 코드는 모든 INSERT 가 0.0 default 고정 + 갱신 caller 0건:
+
+- INSERT 4곳 (모두 `score_tail=0.0`): `_bootstrap_boost_traces` / `create_new_trace` / `execute_split` 새 T' / `_promote_fusion`
+- UPDATE 0곳 — 5 operation 어디서도 set 없음. interest 베이지안 사후 갱신 (`_atomic_upsert_interest_state`) 은 `UserInterestState.long_alpha/beta/long_score` 만 건드림
+
+**연쇄 영향**:
+1. Reincarnation discovery slot 완전 무력화 — `queries.get_archived_traces_with_score(score_tail_min=0.6)` 가 항상 0건 → `_build_reincarnation_subslot` → `deepening_seeds` 또는 trend fallback
+2. core_softmax 균등 분포 — `exp(0/T)=1.0` 모든 trace 동등, C-62 "강한 trace 우선" 가중치 무효
+3. mark_stale_if_idle 의 `score_tail <= TRACE_STALE_THRESHOLD_SCORE` 조건 redundant — 항상 통과 (사실상 idle 임계만 평가)
+4. UserProfile LLM prompt 의 active/archived trace 강도 정보 0.0 — LLM input 의미 약화
+
+**D2 — stale → active reactivation caller 부재 (Medium)**
+
+cso-topic-traversal.md §3.2 L102 명세 "사용자가 다시 path 위 노드에 신호를 주면 trace.status = active 복원" 명시. 코드는 `queries.find_active_trace_matching` (queries.py:192) `status == ACTIVE` 강제 → stale trace 매칭 X.
+
+**연쇄 영향**: 사용자가 stale trace path 영역에 활동 시 `find_active_trace_matching` None → `create_new_trace` 새 trace INSERT → 옛 stale trace 잔존 + 사용자 입장 같은 영역 trace 중복.
+
+**docs drift 11건** (명세 vs 코드 — 모두 코드 = SOR, docs 갱신):
+
+| # | 항목 | docs 옛 명세 | 코드 현실 (SOR) |
+|---|---|---|---|
+| D3/D15 | 실시간 trace 생성 (cold-start 후 첫 click) | "사용자가 첫 추천 카드 클릭 시점에... 새 UserCSOTraversal 생성" | C-63 실시간 hook 폐기, daily collection 직전 묶음 처리 |
+| D4 | extend LLM 검증 | "LLM 호출 (medium slot) '자식이 사용자 의도를 specific하게 표현하는가?'" | 1차 시연 stub — 룰 통과 시 즉시 path.append |
+| D6 | §9 의사 코드 | 실시간 update_trace_score / propagate / check_extend / check_split | C-63 daily 묶음 + ingest 는 last_activity 갱신만 |
+| D8 | discovery proactive 정의 | "trust=high 트렌드 + emerging" | A8-v2 (C-42) Fusion + Reincarnation pivot |
+| D10 | max_active_traces | ≤ 10 | C-62 결정 #10 TRACE_ACTIVE_CAP=20 |
+| D11 | LLM 동시 호출 cap | 전역 8 / per-user 2 | C-64 전역 32 (`LLM_MAX_CONCURRENT`) / per-user 16 (`LLM_MAX_CONCURRENT_PER_USER`) / collection leaf 병렬 16 (`COLLECTION_PER_USER_PARALLEL`) |
+| D12 | trace operation LLM cap | 사용자당 일 ≤ 2 | C-39 cap 폐지 (시연 단계) |
+| D13 | FR-55 settings 관심 수정 | 추가/제거 흐름 정의 | A8 결정 #4 stub 유지 (A9 electron-client 위임) |
+| D14 | "명시 선택은 trace 만들지 않는다" | §1.2 L32 | C-62 결정 #11 bootstrap boost trace INSERT |
+
+### 사용자 결정 (3건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | drift + D2 + D1 한 라운드 전체 동기화 | 논리적으로 trace 시스템 작동 회복 완전 — 큰 PR 이지만 한 PR 안에 닫힘 |
+| 2 | D2 코드 fix 방향 | `find_active_trace_matching` status IN (ACTIVE, STALE) 확장 + `ingest_event` 매칭 시 STALE → ACTIVE 자동 전이 (§3.2 명세 회복) |
+| 3 | D1 갱신 위치 = 옵션 C+D 결합 | (D) `ingest_event_atomic` step 7.5 (lock 보유, race-safe) — 사용자 전체 trace path tail sync. (C) `execute_archive` / `execute_merge` loser archive 직전 freeze — 단일 trace sync. mark_stale_if_idle 별도 caller 부재 (ingest hook 이 직전 sync) |
+
+### 자체 결정 (8건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | `find_active_trace_matching` 함수 이름 유지 | backward-compat — caller 변경 0 (의미만 확장: "active 또는 stale" 매칭) |
+| 2 | 정렬 = `status='active' DESC, last_activity DESC` | 같은 cso 매핑 시 active 우선 — stale 보다 신선한 후보 |
+| 3 | `TraversalDelta.reactivated` 신규 enum 값 | promoted/new_trace 와 분리 — caller (daily_trace_update) 가 cleanup_boost_traces 트리거 분기 |
+| 4 | reactivated 단독 시 cleanup_boost_traces 트리거 X | 옛 behavioral trace 복귀 케이스 — 이미 boost 정리됨 |
+| 5 | promoted/reactivated 동시 발생 시 promoted 반환 | boost cleanup 트리거가 status 복귀보다 의미상 강함 |
+| 6 | sync helper 2종 (`_for_user`, `_for_trace`) | user 전체 sync (ingest hook) + 단일 trace sync (archive freeze) 두 케이스. 단일 helper 통합 시 surgical 손실 |
+| 7 | `IS DISTINCT FROM` 가드 | 값 변동 없으면 UPDATE skip (no-op 트랜잭션 부담 회피) |
+| 8 | LEFT JOIN + COALESCE → 0.0 fallback | UserInterestState row 없는 cso 는 0.0 유지 (default 정합) |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `find_active_trace_matching` status IN (ACTIVE, STALE) 확장 + 정렬 변경 | `backend/app/traversal/queries.py` |
+| `DefaultTraversalEngine.ingest_event` STALE → ACTIVE 자동 전이 + reactivated 반환 | `backend/app/traversal/default.py` |
+| `TraversalDelta` Literal 에 "reactivated" 추가 | `backend/app/traversal/protocol.py` |
+| `daily_trace_update.update_traces_from_recent_events` 의 delta "reactivated" 카운트 | `backend/app/traversal/daily_trace_update.py` |
+| `sync_score_tail_for_user(db, user_id)` + `sync_score_tail_for_trace(db, trace_id)` 신규 helper | `backend/app/traversal/operations.py` |
+| `ingest_event_atomic` step 7.5 — lock 보유 직후 `sync_score_tail_for_user` 호출 | `backend/app/interest/service.py` |
+| `execute_archive` 진입 직전 `sync_score_tail_for_trace` 호출 | `backend/app/traversal/operations.py` |
+| `execute_merge` loser archive 직전 `sync_score_tail_for_trace` 호출 | 동 |
+| `cso-topic-traversal.md` §1.2 (bootstrap boost trace), §3.1 (extend stub 박스), §3.2 (D2 reactivation), §3.4 (D1 freeze), §6.1 (Fusion+Reincarnation), §7 (C-63 daily 묶음), §8 (A9 stub), §9 (의사 코드 재작성), §11 (cap 갱신) | `docs/algorithms/cso-topic-traversal.md` |
+| `decision-backlog.md` C-65 인덱스 추가 | `docs/decision-backlog.md` |
+| `docs/ops/env-vars.md` LLM concurrency cap 갱신 (C-64) + TRACE_ACTIVE_CAP 정합 (C-62) | `docs/ops/env-vars.md` |
+| `docs/data/schema.md` score_tail 갱신 caller 박스 (C-65) | `docs/data/schema.md` |
+| 회귀 가드 — 정적 source inspection 5~6건 | `backend/tests/traversal/test_audit_regressions.py` |
+
+### 검증
+
+- AST syntax pass (Python 5 modified)
+- 회귀 가드: `find_active_trace_matching` status 확장 / `ingest_event` reactivated 분기 / `sync_score_tail_for_user` `sync_score_tail_for_trace` 존재 / `execute_archive` 직전 sync 호출 / `ingest_event_atomic` step 7.5 sync 호출 / docs §3.2 reactivation 박스 / §11 cap 정합
+- 시연 narrative 회복:
+  - 사용자가 stale trace 영역 활동 시 status 복귀 + 중복 trace 회피
+  - archived trace 의 score_tail 이 archive 시점 long_score 로 freeze → Reincarnation discovery slot 실제 작동
+  - core_softmax 가 score_tail 가중치 기반 trace 다양성 sampling (C-62 의도 회복)
+
+### 후속 (별도 라운드)
+
+- ~~weekly_promotion `_promote_fusion` 의 새 trace 도 score_tail=0.0 INSERT~~ → **C-66 에서 fix**
+- ~~evaluate_retract path 변경 시 score_tail sync~~ → **C-66 에서 fix**
+- multi-cso 매핑 시 trace 과잉 생성 (#3 검증 결과) → **C-67 에서 fix**
+- find_active_trace_matching LIMIT 1 (#5 검증 결과) → **C-68 에서 fix**
+
+PR #(TBD) merge commit `(TBD)`.
+
+## 28. C-66 라운드 — path 변경 operation 의 `score_tail` sync caller 추가 (2026-05-26)
+
+### 배경
+
+C-65 fix 는 **ingest hook + archive freeze** 두 위치에만 sync 추가. 그러나 path 변경 operation 후 score_tail 갱신 누락 발견 — 후속 #1 + #2 통합 라운드:
+
+| Operation | path 변경 | C-65 후 score_tail | 결함 |
+|---|---|---|---|
+| `execute_extend` | `path + [new_cso]` (tail 변경) | 옛 tail long_score 잔존 | 새 tail (new_cso) long_score 반영 안 됨 |
+| `execute_retract` | `path.pop()` (tail 변경) | retracted cso long_score 잔존 | 새 tail (parent) long_score 반영 안 됨 |
+| `execute_split` source | `path + [child_A]` (tail 변경) | 분기점 cso long_score 잔존 | child_A long_score 반영 안 됨 |
+| `execute_split` new T' | INSERT `path=[..., child_B]` (0.0) | 0.0 | child_B long_score 반영 안 됨 |
+| `create_new_trace` | INSERT `path=[root]` (0.0) | 0.0 | root long_score 반영 안 됨 (boost trace promote 직후 reactivation 미적용 등) |
+| `_bootstrap_boost_traces` | batch INSERT `path=[cluster_root]` (0.0) | 0.0 | onboarding prior boost (alpha_prior +1, long_score ≈ 0.67) 미반영 |
+| `_promote_fusion` | INSERT `path=[bridge_cso]` (0.0) | 0.0 | bridge_cso long_score (save 신호 강도) 미반영 |
+| `_promote_reincarnation` | `archived → active` (path 보존) | archive freeze 값 보존 | **B1 의도 — sync 안 함** (Serendipity narrative 정합) |
+
+다음 ingest hook 까지 1d 지연으로 자연 동기화 가능. 그러나 사용자가 그 trace 영역 활동 안 하면 영원히 옛 값. core_softmax 가중치 + Reincarnation 후보 임계 + stale 마킹 조건 모두 영향.
+
+### 사용자 결정 (3건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 후속 #1 + #2 한 라운드 통합 (path 변경 score_tail sync) | 같은 결함 — 별개 분리 무의미 |
+| 2 | sync caller 위치 = 옵션 A1 (operations.py 안 sync 호출 추가) | caller (default / weekly_promotion / interest service) 변경 0. operations 가 path 변경 책임이므로 sync 도 같은 함수. |
+| 3 | `_promote_reincarnation` 정책 = B1 freeze 보존 | Serendipity "taste reincarnation" 본질 — archive 시점 강도 그대로 active 복귀. 사용자 활동 시 ingest sync 가 자연 갱신. |
+
+### 자체 결정 (5건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | `sync_score_tail_for_trace` 기존 helper 재사용 (C-65 신규) | 같은 SQL 패턴. 별도 helper 신규 X. |
+| 2 | `_bootstrap_boost_traces` 는 `sync_score_tail_for_user` 사용 + `await db.flush()` 선행 | batch `db.add()` 만으로 SELECT 안 보임 — flush 후 user 전체 sync (단일 SQL 로 N trace 처리) |
+| 3 | `_promote_fusion` 도 `db.flush()` 선행 + 단일 trace sync | weekly_promotion job 의 `db.add()` 도 같은 패턴 |
+| 4 | `execute_extend/retract/split` 직후 sync — 같은 트랜잭션 안 동일 row UPDATE 2번 | path UPDATE + score_tail UPDATE — IS DISTINCT FROM 가드로 no-op 시 skip. 가독성 우선 (단일 SQL 통합 회피) |
+| 5 | `execute_merge` 의 winner trace = sync 호출 부재 | winner path 보존 + last_activity 만 갱신 — score_tail 의미상 변경 없음. loser archive 는 C-65 freeze 가 처리. |
+
+### 영구화 (6 caller + 회귀 가드)
+
+| 변경 | 위치 |
+|---|---|
+| `execute_extend` 가 path append 직후 `sync_score_tail_for_trace(trace_id)` 호출 | `backend/app/traversal/operations.py` |
+| `execute_retract` 가 path pop UPDATE 직후 + leaf 변경 직전 sync | 동 |
+| `execute_split` 가 source UPDATE 직후 + new T' INSERT 직후 양쪽 sync | 동 |
+| `create_new_trace` 가 INSERT 직후 sync_score_tail_for_trace | `backend/app/traversal/default.py` |
+| `_bootstrap_boost_traces` 가 batch INSERT 후 `await db.flush()` + sync_score_tail_for_user | `backend/app/interest/service.py` |
+| `_promote_fusion` 가 INSERT 후 `await db.flush()` + sync_score_tail_for_trace | `backend/app/worker/jobs/weekly_promotion.py` |
+| `_promote_reincarnation` 변경 0 (B1 freeze 보존) | 동 |
+| `TestC66PathChangeSyncScoreTail` class 7 회귀 가드 | `backend/tests/traversal/test_audit_regressions.py` |
+| `cso-topic-traversal.md` §3.1 (extend sync 박스) / §3.2 (retract sync 박스) / §3.3 (split sync 박스 양쪽) | `docs/algorithms/cso-topic-traversal.md` |
+| `decision-backlog.md` C-66 인덱스 + count 47 → 48 | `docs/decision-backlog.md` |
+
+### 검증
+
+- AST syntax pass (Python 4 modified)
+- 회귀 가드 7건 (정적 source inspection): extend/retract/split 직후 sync 호출 + path UPDATE / leaf decisions 순서 검증 + create_new_trace / _bootstrap_boost_traces / _promote_fusion sync 호출 + `_promote_reincarnation` sync 호출 부재 (B1)
+- 시연 narrative 회복:
+  - 사용자가 trace path 의 tail 영역 활동 → 다음 daily extend 시 score_tail 가 새 tail 값으로 즉시 갱신
+  - onboarding 4 cluster 선택 시 boost trace 의 score_tail ≈ 0.67 (prior boost 반영) → cold-start 직후 core_softmax 가 의미 있는 가중치 sampling
+  - Fusion save → core 부활 시 새 trace score_tail = bridge_cso long_score (강한 신호 반영) → 다음 dashboard 의 core_softmax 우선
+
+### 후속 (별도 라운드)
+
+- ~~**C-67** multi-cso 매핑 시 trace 과잉 생성~~ → **본 라운드 §29 에서 fix**
+- **C-68** find_active_trace_matching LIMIT 1 multi-trace (옵션 A — find_active_traces_matching multi 반환)
+
+PR #(TBD) merge commit `(TBD)`.
+
+## 29. C-67 라운드 — daily_trace_update 통합 ingest_event 호출 (후속 #3, 2026-05-26)
+
+### 배경
+
+C-59 fix 후 cold_start LLM doc 이 `cluster_root + related_csos` multi-매핑 → 사용자가 1 doc 2번 click → DocumentTopic 4개 cso 매핑 → 4 cso 모두 ≥2 events. 직전 `update_traces_from_recent_events` 가 cso 별 `ingest_event(user, ad, [cso_id])` **4번 호출** → 매칭 1개 (cluster_root boost promote) + 새 trace 3개 (child1/2/3) → **behavioral trace 4개 생성**.
+
+사용자 의도: 1 doc click = 1 trace 변동 (사용자가 그 영역에 흥미). multi-cso 매핑은 LLM 의 fine-grained 분류 산물이지 사용자 활동 단위 아님.
+
+### 사용자 결정
+
+옵션 A (simple, surgical) — `daily_trace_update` 가 qualifying_csos list 통째 `ingest_event` 1번 호출. `ingest_event` 의 현재 동작 (cso list 의 첫 매칭만 갱신, 미매칭 시 첫 cso 새 trace) 그대로 활용. 4 → 1 로 자연 정리.
+
+### 자체 결정 3건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | `qualifying_csos` 정렬 = `count DESC + cso_id ASC` (deterministic) | ingest_event 가 첫 매칭/첫 cso 우선 처리하므로 가장 빈도 높은 영역이 우선. tie 시 cso_id ASC — 같은 사용자 같은 날 결과 재현. |
+| 2 | `updated` 카운트 = 1 (delta 단일) | 단일 ingest_event 호출 결과 1건 — updated += 1 패턴 폐기, `updated = 1` 단일 set. 통계 의미 명확. |
+| 3 | try/except 분기 — RuntimeError 시 delta="noop" set | active_cap_exceeded 등 cap 도달 시 무시. cleanup_boost_traces 트리거 X. |
+
+### 영향 받는 호출 시퀀스
+
+| Before (C-63 ~ C-66) | After (C-67) |
+|---|---|
+| `for cso_id in qualifying_csos: ingest_event(user, ad, [cso_id])` (N번 호출) | `ingest_event(user, ad, qualifying_csos)` (1번 호출, list 통째) |
+| 4 cso 매핑 doc → 4 trace 생성 가능 | 4 cso → 매칭 1개 또는 새 trace 1개 |
+
+사용자가 child cso 영역에 더 깊이 들어가려면 그 child 산하 doc 추가 활동 → 다음 daily 의 events 누적 → child cso 가 또 qualifying → 그 시점 ingest_event 시 다른 매칭 없으면 새 trace. **자연 narrative**.
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `update_traces_from_recent_events` 가 qualifying_csos list 통째 ingest_event 1번 호출 + sorted (count DESC + cso_id ASC) | `backend/app/traversal/daily_trace_update.py` |
+| `TestC67MultiCsoTraceOverproduction` class 3 회귀 가드 (단일 호출 + 정렬 + updated=1 패턴) | `backend/tests/traversal/test_audit_regressions.py` |
+| `cso-topic-traversal.md` §9 의사 코드 collection_job_for_user 안 ingest_event 호출 표현 변경 + C-67 박스 | `docs/algorithms/cso-topic-traversal.md` |
+| `decision-backlog.md` C-67 인덱스 + count 48 → 49 | `docs/decision-backlog.md` |
+
+### 검증
+
+- AST syntax pass (Python 1 modified)
+- 회귀 가드 3건 (단일 ingest_event 호출 + 정렬 + updated=1)
+- 시연 narrative 회복: 사용자 1 doc click (multi-cso 매핑) → trace 1개 변동 → dashboard 안정. 사용자가 child cso 영역 활동 추가 → 다음 daily 에 그 영역 trace 형성 (자연 narrative).
+
+### 후속 (별도 라운드)
+
+- ~~**C-68** `find_active_trace_matching` LIMIT 1 multi-trace 매칭 결함~~ → **본 라운드 §30 에서 fix**
+
+PR #(TBD) merge commit `(TBD)`.
+
+## 30. C-68 라운드 — find_active_traces_matching multi-trace 매칭 (후속 #4, 2026-05-26)
+
+### 배경
+
+같은 cso 가 multi-trace path 매핑된 케이스 — split 후 source/new T' 양쪽이 분기점 cso 공유 (source.path = [..., child_A], new.path = [..., child_B] 의 path[-2] = 분기점 cso), 또는 weekly_promotion fusion bridge_cso 가 다른 trace 의 extend 후 path 위 노드. 직전 `find_active_trace_matching` LIMIT 1 → last_activity DESC 정렬 1개만 반환 → ingest_event 가 한 trace 만 갱신 → 다른 trace 는 last_activity 갱신 누락 → 의도와 달리 idle 누적 → 결국 stale 마킹.
+
+### 발생 빈도 분석
+
+- onboarding boost trace = path [cluster_root] — 다른 boost 와 노드 공유 X (cluster 다름).
+- behavioral trace 첫 생성 — 새 cso 로 path = [cso]. 기존 trace 와 path 공유 X.
+- **split 후 source.path = [..., child_A], new T'.path = [..., child_B]** — 분기점 (path[-2]) 양쪽 공유. 사용자가 분기점 산하 doc 활동 시 둘 다 매칭해야 정합. **본 라운드 fix 의 1차 대상**.
+- extend 후 path 가 다른 trace 의 노드와 겹치는 경우 — 가능하나 빈도 낮음.
+- weekly_promotion fusion = 새 trace path = [bridge_cso]. fusion 직전 `_resolve_seed_id` 가 active path 위 노드면 거부 (engine.py). 다만 추후 extend 로 bridge_cso 가 path 들어오면 multi-매핑 발생 가능.
+
+빈도 자체는 낮으나 split 후 분기점 매핑 케이스는 의미 손실 — 사용자가 split 분기점 (= 두 trace 의 공통 부모) 활동 시 두 trace 모두 활동 영역인데 한쪽만 갱신.
+
+### 사용자 결정
+
+옵션 A 즉시 fix — `find_active_traces_matching` (multi 반환) + caller (`ingest_event`) iterate.
+
+### 자체 결정 4건
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 함수 이름 = `find_active_traces_matching` (복수형 — multi 반환 명시) | 의미 명확. 옛 함수는 backward-compat alias 로 유지 (`list[0]` 또는 `None` 반환). |
+| 2 | LIMIT 절 제거 | multi 반환 — order_by 만 유지. 결과 list 정렬은 ingest_event 가 활용 (boost / stale 우선순위 결정). |
+| 3 | `ingest_event` 가 첫 매칭 cso 의 모든 trace 갱신 후 return | C-67 의 "1 doc click = 1 trace 변동" 의미 유지 + C-68 의 multi-trace 모두 갱신. 첫 매칭 cso 에서 multi-trace 매칭 시 모두 처리, 다음 cso 안 봄. |
+| 4 | `promoted_any` / `reactivated_any` 변수 = 1개라도 boost/stale 였으면 분기 | promoted 우선 (boost cleanup 트리거 의미 강함) > reactivated > noop. |
+
+### 영향 받는 호출 시퀀스
+
+| Before (C-65 ~ C-67) | After (C-68) |
+|---|---|
+| `find_active_trace_matching → UserCSOTraversal | None` (LIMIT 1) | `find_active_traces_matching → list[UserCSOTraversal]` (LIMIT 부재) |
+| `ingest_event` 가 첫 매칭 1개만 갱신 | `ingest_event` 가 matches list iterate 모두 갱신 |
+| split 후 분기점 활동 시 한쪽만 갱신, 다른 쪽 idle 누적 | 양쪽 모두 last_activity 갱신, status/origin 정합 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `find_active_traces_matching` (multi 반환) 신규 + 옛 `find_active_trace_matching` 은 backward-compat alias | `backend/app/traversal/queries.py` |
+| `__all__` 갱신 — multi 함수 추가 + count_behavioral_active_traces / get_1hop_neighbors_excluding_traces 정합 | 동 |
+| `DefaultTraversalEngine.ingest_event` 가 multi 함수 호출 + `for matched in matches` iterate + `promoted_any` / `reactivated_any` 분기 | `backend/app/traversal/default.py` |
+| `TestC68MultiTraceMatching` class 3 회귀 가드 (list 반환 + alias 첫 결과 반환 + ingest_event multi iterate) | `backend/tests/traversal/test_audit_regressions.py` |
+| `TestC65TraceSystemFixes.test_find_active_trace_matching_includes_stale` 가 multi 함수 검사로 갱신 | 동 |
+| `cso-topic-traversal.md` §3.2 multi-trace 매칭 박스 신규 | `docs/algorithms/cso-topic-traversal.md` |
+| `decision-backlog.md` C-68 인덱스 + count 49 → 50 | `docs/decision-backlog.md` |
+
+### 검증
+
+- AST syntax pass (Python 3 modified)
+- 회귀 가드 3건 (multi 반환 + alias + ingest_event iterate)
+- 시연 narrative 회복 (split 케이스):
+  - 사용자가 trace 의 child_A / child_B 양쪽 영역 활동 → daily_trace_update 가 분기점 cso events 누적 → ingest_event 가 분기점 매칭 시 source + new T' 양쪽 갱신 → 양쪽 stale 마킹 회피.
+
+### 후속 모두 해소 — 라운드 종료
+
+- ~~후속 #1 + #2~~ → C-66 fix 완료
+- ~~후속 #3~~ → C-67 fix 완료
+- ~~후속 #4~~ → C-68 fix 완료 (본 라운드)
+
+trace 시스템 검증 후 발견된 결정적 누락 2건 + drift 11건 + 후속 4건 모두 해소. trace 시스템이 명세대로 작동.
+
+PR #(TBD) merge commit `(TBD)`.
+

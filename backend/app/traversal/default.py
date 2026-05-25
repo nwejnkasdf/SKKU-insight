@@ -235,37 +235,64 @@ class DefaultTraversalEngine:
         active_day_counter: int,
         cso_topic_ids: list[UUID],
     ) -> TraversalDelta:
-        """A6 ingest_event_atomic hook. 매칭 trace 발견 시 last_activity 갱신만 (no extend
-        — extend 는 daily cron 또는 명시 evaluate_extend 호출). 매칭 없으면 새 trace.
+        """A6 ingest_event_atomic hook. 매칭 trace 발견 시 last_activity 갱신
+        + (C-65) STALE 매칭 시 status='active' 자동 복귀 + (C-62) boost 매칭 시
+        origin='behavioral' promote. 매칭 없으면 첫 cso 로 새 trace 생성.
 
-        cso_topic_ids: 이벤트의 Document 매핑 cso_topic_id list (DocumentTopic).
-        보통 1~3개. 첫 매칭 trace 만 갱신, 나머지는 skip (단순화).
+        (C-65, 2026-05-26) cso-topic-traversal.md §3.2 명세 "사용자가 다시 path 위 노드에
+        신호를 주면 trace.status = active 복원" 회복 (D2). queries 의 status filter 가
+        ACTIVE + STALE 양쪽 검색하므로 STALE 매칭 시 본 메서드가 status 전이.
+
+        (C-68, 2026-05-26) **multi-trace 매칭 처리** — `find_active_traces_matching` 가
+        같은 cso 의 모든 매칭 trace list 반환. split 후 분기점 매핑 / fusion bridge_cso 가
+        다른 trace path 위 노드 등 multi-trace 케이스 모두 갱신 (후속 #4 fix).
+
+        cso_topic_ids 흐름: cso 순서대로 매칭 검색 → 첫 매칭 cso 의 **모든 trace 갱신** →
+        return (C-67 의 "1 doc click = 1 trace 변동" 의미 유지하되, 그 cso 가 multi-trace
+        매핑이면 모두 갱신). 다음 cso 는 검색 안 함.
+
+        Returns:
+        - "promoted": 매칭된 trace 중 1개라도 boost 였음 (cleanup_boost_traces 트리거)
+        - "reactivated": 매칭된 trace 중 1개라도 stale 였음 (active 복귀)
+        - "noop": 매칭 trace 모두 이미 active — last_activity 만 갱신
+        - "new_trace": 모든 cso 매칭 없음 → 첫 cso 로 새 behavioral trace
+
+        promoted/reactivated 동시 발생 시 promoted 우선 — boost cleanup 트리거가 status
+        복귀보다 의미상 강함.
         """
         if not cso_topic_ids:
             return "noop"
         for cso_id in cso_topic_ids:
-            matched = await queries.find_active_trace_matching(
+            matches = await queries.find_active_traces_matching(
                 self.db, user_id, cso_id
             )
-            if matched is None:
+            if not matches:
                 continue
-            # 매칭 trace 의 last_activity 만 갱신 (path 는 그대로 — extend 임계 평가는 daily cron).
-            # (C-62, 2026-05-25) boost trace 매칭 시 behavioral 로 promote — cold-start
-            # 종료 신호. caller (interest/service.py) 가 본 사용자의 다른 boost trace 도 정리.
-            update_values: dict[str, object] = {
-                "last_activity_active_day": active_day_counter,
-            }
-            promoted = False
-            if matched.origin == "onboarding_boost":
-                update_values["origin"] = "behavioral"
-                promoted = True
-            await self.db.execute(
-                update(UserCSOTraversal)
-                .where(UserCSOTraversal.trace_id == matched.trace_id)
-                .values(**update_values)
-            )
-            return "promoted" if promoted else "noop"
-        # 매칭 없음 — 새 trace 생성 (cold-start). 첫 cso 만. origin='behavioral'.
+            # (C-68) 매칭된 모든 trace 갱신 — multi-trace 매핑 케이스 (split 후 분기점,
+            # fusion bridge_cso 가 active path 위 노드 등) 정합.
+            promoted_any = False
+            reactivated_any = False
+            for matched in matches:
+                update_values: dict[str, object] = {
+                    "last_activity_active_day": active_day_counter,
+                }
+                if matched.origin == "onboarding_boost":
+                    update_values["origin"] = "behavioral"
+                    promoted_any = True
+                if matched.status == TraversalStatus.STALE.value:
+                    update_values["status"] = TraversalStatus.ACTIVE.value
+                    reactivated_any = True
+                await self.db.execute(
+                    update(UserCSOTraversal)
+                    .where(UserCSOTraversal.trace_id == matched.trace_id)
+                    .values(**update_values)
+                )
+            if promoted_any:
+                return "promoted"
+            if reactivated_any:
+                return "reactivated"
+            return "noop"
+        # 모든 cso 매칭 없음 — 첫 cso 로 새 trace 생성. origin='behavioral'.
         await self.create_new_trace(
             user_id, active_day_counter, cso_topic_ids[0], origin="behavioral"
         )
@@ -536,7 +563,14 @@ class DefaultTraversalEngine:
         )
         result = await self.db.execute(stmt)
         inserted = result.scalar_one_or_none()
-        return inserted if inserted is not None else new_trace_id
+        final_id = inserted if inserted is not None else new_trace_id
+        # (C-66, 2026-05-26) INSERT 후 score_tail sync — path tail (root_cso_topic_id) 의
+        # UserInterestState.long_score. 신규 trace 도 사용자 활동 누적 강도 즉시 반영.
+        # weekly_promotion / bootstrap 등 caller 가 같은 패턴 답습.
+        if inserted is not None:
+            from app.traversal.operations import sync_score_tail_for_trace
+            await sync_score_tail_for_trace(self.db, inserted)
+        return final_id
 
     # --- read (A6 propagation + A8 추천 의존) ---
 

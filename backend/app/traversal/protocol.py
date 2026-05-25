@@ -88,6 +88,10 @@ TraversalDelta = Literal[
     # (C-62, 2026-05-25) boost trace 매칭 — origin onboarding_boost → behavioral 로 promote.
     # caller 는 본 신호로 다른 boost trace 정리.
     "promoted",
+    # (C-65, 2026-05-26) stale trace 매칭 — 사용자가 path 위 노드에 신호 → status active 복원.
+    # cso-topic-traversal.md §3.2 명세 회복 (D2). caller 는 reactivated 단독 시 boost
+    # cleanup 트리거 안 함 (옛 behavioral trace 복귀 케이스, 이미 boost 정리됨).
+    "reactivated",
 ]
 
 
@@ -112,14 +116,16 @@ class TraversalEngine(Protocol):
     ) -> TraversalDelta:
         """이벤트 1건의 cso_topic 매핑들을 받아 매칭 trace 업데이트 또는 새 trace 생성.
 
-        A6 service.ingest_event_atomic 의 hook 으로 호출됨. 매칭되는 active trace 가
-        없으면 새 trace 생성 (cold-start, 결정 #6). user-level mutex 보유 상태에서
-        호출 (caller 가 traversal_lock 잠그고 호출).
+        A6 service.ingest_event_atomic 의 hook 으로 호출됨. 매칭되는 active 또는 stale
+        trace 가 없으면 새 trace 생성 (cold-start, 결정 #6). user-level mutex 보유
+        상태에서 호출 (caller 가 traversal_lock 잠그고 호출). path 변경 (extend) 은
+        본 메서드 책임 외 — daily cron 또는 명시 evaluate_extend 호출.
 
         return:
-        - "new_trace": 새 trace 생성 (path = [cso_topic_id])
-        - "extend": 자식 매칭 — path.append (룰 임계 통과 + LLM 검증 후)
-        - "noop": 매칭 trace 발견 — 인터랙션만 누적, 임계 미달
+        - "new_trace": 매칭 없음 → 새 behavioral trace 생성 (path = [cso_topic_id])
+        - "promoted": (C-62) boost 매칭 → origin='behavioral' 갱신 (cold-start 종료 신호)
+        - "reactivated": (C-65) stale 매칭 → status='active' 복귀 (§3.2 명세 회복)
+        - "noop": active 매칭 → last_activity 만 갱신
         """
         ...
 

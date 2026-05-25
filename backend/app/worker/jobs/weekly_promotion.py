@@ -110,9 +110,10 @@ async def _promote_fusion(
     ).scalar_one_or_none()
     if existing is not None:
         return False
+    new_trace_id = uuid.uuid4()
     db.add(
         UserCSOTraversal(
-            trace_id=uuid.uuid4(),
+            trace_id=new_trace_id,
             user_id=user_id,
             path=[bridge_cso_topic_id],
             status=TraversalStatus.ACTIVE.value,
@@ -121,6 +122,13 @@ async def _promote_fusion(
             score_tail=0.0,
         )
     )
+    # (C-66, 2026-05-26) Fusion 새 trace 의 score_tail sync — bridge_cso 의 long_score.
+    # 사용자가 fusion discovery 카드를 save 했다 = bridge 영역에 강한 신호. 그 long_score
+    # 가 새 trace 의 score_tail 에 반영되어야 core_softmax 다양성 가중치 의미.
+    # _promote_reincarnation 은 archive 시점 freeze 값 보존 (Serendipity narrative 정합).
+    from app.traversal.operations import sync_score_tail_for_trace
+    await db.flush()
+    await sync_score_tail_for_trace(db, new_trace_id)
     return True
 
 

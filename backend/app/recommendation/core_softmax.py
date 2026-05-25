@@ -342,10 +342,34 @@ async def fill_adjacent_slots_via_softmax(
     return filled
 
 
+def select_daily_discovery_csos(
+    user_id: UUID, candidate_csos: list[UUID], count: int = 3
+) -> list[UUID]:
+    """(C-70, 2026-05-26) day_seed 기반 deterministic discovery 영역 cso sample.
+
+    cold_start orchestrator 의 `_collect_discovery_documents` 가 caller —
+    사용자 선택 외 cluster 의 cso_seed_topic_id list 받아 day_seed 로 3 sample.
+    select_daily_adjacent_csos 와 별도 seed salt 사용 (`discovery` 접미) — 같은 user
+    같은 날 adjacent / discovery sample 이 서로 다른 결과 보장.
+
+    Args:
+        candidate_csos: 사용자 선택 외 cluster_seed_topic_id list (BroadInterest -
+                        boost trace path 위 cluster). caller 가 정렬된 list 전달.
+        count: sample 개수. default 3 = discovery slot prefetch 기본.
+    """
+    if not candidate_csos:
+        return []
+    # adjacent 와 다른 seed — 같은 날 같은 user 라도 adjacent/discovery 결과 분리.
+    rng = random.Random(_day_seed(user_id) + 1)  # +1 salt — adjacent 와 다른 stream
+    n = min(len(candidate_csos), count)
+    return rng.sample(candidate_csos, n)
+
+
 __all__ = [
     "_day_seed",
     "_softmax_sample",
     "fill_adjacent_slots_via_softmax",
     "fill_core_slots_via_softmax",
     "select_daily_adjacent_csos",
+    "select_daily_discovery_csos",
 ]

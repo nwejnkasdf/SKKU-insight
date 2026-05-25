@@ -78,10 +78,11 @@ class Settings(BaseSettings):
     CODEX_OAUTH_TOKEN: str = ""
     LLM_REQUEST_TIMEOUT_SECONDS: int = 180
     LLM_DAILY_TOKEN_BUDGET: int = 1_000_000_000_000
-    LLM_MAX_CONCURRENT: int = 8
-    # (C-62 후속 round2, 2026-05-26) 2 → 4 상향 — COLLECTION_PER_USER_PARALLEL=4 정합.
-    # 옛 cap 2 가 leaf 병렬 4 일 때 나머지 2 leaves 가 semaphore_timeout → 실패.
-    LLM_MAX_CONCURRENT_PER_USER: int = 4
+    # (C-64, 2026-05-26) 시연 환경 burst 확보 — global 8 → 32 (per-user 16 의 ≥2배).
+    LLM_MAX_CONCURRENT: int = 32
+    # (C-62 후속 round2 → C-64, 2026-05-26) 2 → 4 → 16 단계 상향.
+    # COLLECTION_PER_USER_PARALLEL=16 정합 — 한 user collection 의 leaf 병렬 cap 과 일치.
+    LLM_MAX_CONCURRENT_PER_USER: int = 16
 
     # === CodexOAuthProvider (2026-05-18 본문) ===
     # `LLM_PROVIDER=codex_oauth` 토글 시 사용. `~/.codex/auth.json` 의 ChatGPT
@@ -137,7 +138,7 @@ class Settings(BaseSettings):
     # === Schedule (cron, UTC) ===
     COLLECTION_CRON: str = "0 3 * * *"
     COLLECTION_CRON_DEMO: str = "0 * * * *"  # demo 모드 — 매시 트리거
-    COLLECTION_PER_USER_PARALLEL: int = 4
+    COLLECTION_PER_USER_PARALLEL: int = 16
     COLLECTION_GLOBAL_CONCURRENCY: int = 8
     COLLECTION_USER_JITTER_SECONDS: int = 300
     LIFECYCLE_EVALUATOR: Literal["hybrid_d", "batch_llm", "rule_only"] = "hybrid_d"

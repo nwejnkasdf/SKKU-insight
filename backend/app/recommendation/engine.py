@@ -32,6 +32,7 @@ from app.config import Settings
 from app.contracts import (
     ContentType,
     EventType,
+    RedisKey,
     SentinelSource,
     SlotType,
     TopicChip,

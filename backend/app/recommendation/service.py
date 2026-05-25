@@ -70,14 +70,23 @@ def _consent_required_error() -> HTTPException:
 async def _try_load_cache(
     redis: aioredis.Redis, user_id: UUID
 ) -> DashboardResponse | None:
-    """recommendation_cache hit 시 DashboardResponse 반환."""
+    """recommendation_cache hit 시 DashboardResponse 반환.
+
+    C-61 후속 (2026-05-25): `collection_in_progress` 는 cache 저장 시점 값이라 stale 가능.
+    응답 직전 redis.exists 로 재계산 — UI lock 정합 보장.
+    """
     cached_raw = await redis.get(RedisKey.recommendation_cache(user_id))
     if not cached_raw:
         return None
     try:
         resp = DashboardResponse.model_validate_json(cached_raw)
-        # cache hit 명시 — 저장 시 "miss" 였더라도.
-        return resp.model_copy(update={"cache": "hit"})
+        in_progress = bool(
+            await redis.exists(RedisKey.collection_lock(user_id))
+        )
+        # cache hit 명시 — 저장 시 "miss" 였더라도. collection_in_progress 는 현재 시점.
+        return resp.model_copy(
+            update={"cache": "hit", "collection_in_progress": in_progress}
+        )
     except Exception:
         # corrupt cache — invalidate.
         await redis.delete(RedisKey.recommendation_cache(user_id))
@@ -201,9 +210,22 @@ async def refresh_dashboard(
     config: RecommendationConfig,
     user: User,
 ) -> DashboardResponse:
-    """rate_limit (decorator) + cache delete + force_refresh build."""
+    """rate_limit (decorator) + cache delete + force_refresh build.
+
+    C-61 후속 (2026-05-25): 진행 중 collection_lock 보유 시 409 차단. UI 측 disabled
+    button 우회 (devtool / race / stale state) 방어. client 는 `recommendation.
+    collection_in_progress` 코드로 banner / toast 안내.
+    """
     if not await is_consent_active(user.user_id, redis, db):
         raise _consent_required_error()
+    if await redis.exists(RedisKey.collection_lock(user.user_id)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": ErrorCode.RECOMMENDATION_COLLECTION_IN_PROGRESS.value,
+                "message": "수집 중에는 새로고침할 수 없습니다. 완료 후 다시 시도해주세요.",
+            },
+        )
     # cache delete (single-flight lock 안에서만 — rate_limit 통과 시).
     await redis.delete(RedisKey.recommendation_cache(user.user_id))
     return await get_dashboard(

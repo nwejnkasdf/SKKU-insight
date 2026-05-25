@@ -241,6 +241,10 @@ async def _ensure_active_state_for_decay(
 _LEAF_PROMOTION_EVENT_TYPES = frozenset(
     {EventType.CLICK.value, EventType.SAVE.value, EventType.DWELL_TICK.value}
 )
+# A8 trace creation hook trigger 집합 — cso-topic-traversal.md §3 ("실제로 활동한 노드
+# 클릭/저장 등") 명세. C-56 leaf hook 과 동일한 긍정 engagement 집합 공유: 한 쪽 갱신
+# 시 다른 쪽도 함께 검토. HIDE/NOT_INTERESTED 부정 신호, VIEW 수동 스크롤이라 제외.
+_TRACE_CREATION_EVENT_TYPES = _LEAF_PROMOTION_EVENT_TYPES
 
 
 async def _update_leaf_last_signal(
@@ -851,8 +855,11 @@ async def ingest_event_atomic(
             try:
                 # (a) A7 stale 마킹.
                 await mark_stale_if_idle(db, user.user_id, active_day)
-                # (b) A8 trace creation hook — click 이벤트만 trigger.
-                if event_type == EventType.CLICK and document_id is not None:
+                # (b) A8 trace creation hook — _TRACE_CREATION_EVENT_TYPES 정의 주석 참조.
+                if (
+                    event_type.value in _TRACE_CREATION_EVENT_TYPES
+                    and document_id is not None
+                ):
                     try:
                         from app.llm_provider import get_provider
                         from app.traversal.default import DefaultTraversalEngine

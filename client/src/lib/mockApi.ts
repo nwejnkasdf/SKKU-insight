@@ -427,7 +427,8 @@ function dashboardResponse(cache: "hit" | "miss"): DashboardResponse {
     ],
     generated_at: now(),
     cache,
-    cold_start: true
+    cold_start: true,
+    collection_in_progress: false
   };
 }
 

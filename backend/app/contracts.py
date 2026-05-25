@@ -252,6 +252,10 @@ class ErrorCode(str, Enum):
     COLLECTION_JOB_NOT_FOUND = "collection.job_not_found"
     COLLECTION_SOURCE_DISABLED = "collection.source_disabled"
     COLLECTION_RATE_LIMITED = "collection.rate_limited"
+    # C-61 후속 (2026-05-25): 수집 중 dashboard refresh 차단 — 진행 중 collection_lock 보유 시
+    # `build_dashboard` 가 부분 수집 상태로 빌드되어 normal path 의 임계 미달 → trend fallback.
+    # UI lock + backend 409 둘 다 가드.
+    RECOMMENDATION_COLLECTION_IN_PROGRESS = "recommendation.collection_in_progress"
 
     # --- admin ---
     ADMIN_UNAUTHORIZED = "admin.unauthorized"

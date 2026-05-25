@@ -1059,3 +1059,55 @@ PR [#53](https://github.com/nwejnkasdf/SKKU-insight/pull/53) merge commit `cd5a9
 
 PR #(TBD) merge commit `(TBD)`.
 
+## 24. C-61 라운드 — trace creation hook event type 확장 (2026-05-25)
+
+### 배경
+
+`backend/app/interest/service.py:854` 의 A8 trace creation hook 이 **CLICK 단일 event type 만** trigger 로 가드 — `cso-topic-traversal.md §3` 명세 ("사용자가 실제로 활동(**클릭/저장 등**)한 노드") 위배. 결과:
+
+- 사용자가 카드 save / dwell 만 하고 click 안 하면 `UserCSOTraversal` row 영원히 0개 → `_is_cold_start()` True 유지
+- cold-start 탈출은 오직 click 으로만 가능 — 모바일 UX 의 save-without-detail-view 패턴에서 영구 cold-start
+- 본 hook 외 C-56 leaf 활성 신호 hook 은 이미 `_LEAF_PROMOTION_EVENT_TYPES = {click, save, dwell_tick}` 로 올바르게 구현 — 두 hook 간 정의 불일치
+
+진단 출처: 수집 중 dashboard refresh → 전체 trend fallback 결함 추적 중 발견 (`_is_cold_start()` False flip → normal path 진입했지만 후보 임계 미달 → FR-43 으로 10장 전부 trend fallback). hook 결함이 cold-start 탈출 자체를 막아 본 결함을 가속.
+
+### 결정
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | hook trigger 집합 = `{click, save, dwell_tick}` (`_LEAF_PROMOTION_EVENT_TYPES` 와 동일) | §3 명세 정합 + C-56 leaf hook 과 의미상 동일 (긍정 engagement) |
+| 2 | 상수 = `_TRACE_CREATION_EVENT_TYPES = _LEAF_PROMOTION_EVENT_TYPES` alias | 양쪽 의미 정렬 — 한 쪽 갱신 시 다른 쪽도 함께 검토 명시 |
+| 3 | HIDE / NOT_INTERESTED / VIEW 제외 유지 | HIDE/NOT_INTERESTED = 부정 신호 (trace 가 표현하는 "관심" 의미 반대), VIEW = 수동 스크롤 (§5.1 "단순 dashboard 조회" 제외 정합) |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `_TRACE_CREATION_EVENT_TYPES` 상수 (`_LEAF_PROMOTION_EVENT_TYPES` alias) | `backend/app/interest/service.py` |
+| `ingest_event_atomic` A8 hook trigger 가드 확장 | `backend/app/interest/service.py` |
+| `test_trace_creation_hook.py` docstring 정합 | `backend/tests/recommendation/test_trace_creation_hook.py` |
+
+### 검증
+
+- 기존 테스트 회귀 0건 (CLICK-only 음성 단정 테스트 부재 확인 — `grep EventType.SAVE|EventType.DWELL_TICK` 흔적 0)
+- 스키마 변경 0. Settings 변경 0. API 계약 변경 0.
+
+### 후속
+
+본 fix 는 cold-start 탈출 자체를 회복시킬 뿐, "탈출 후 trend fallback" 본질은 별도 라운드 — `_is_cold_start()` 게이트 조건 강화 (trace 존재 + 산하 threshold 통과 doc ≥ N개) 가 필요. backlog 등록 예정.
+
+본 라운드에 함께 들어간 1차 안전장치 (수집 중 dashboard refresh 차단):
+
+| 변경 | 위치 |
+|---|---|
+| `DashboardResponse.collection_in_progress: bool` 필드 + `_try_load_cache` 가 redis.exists 로 응답 직전 재계산 (cache hit 정합) | `backend/app/recommendation/schemas.py`, `backend/app/recommendation/service.py` |
+| `_is_collection_in_progress(redis, user_id)` helper + normal/cold-start path 둘 다 채움 | `backend/app/recommendation/engine.py` |
+| `refresh_dashboard` 진입 시 `collection_lock` 보유 검사 → 409 + `RECOMMENDATION_COLLECTION_IN_PROGRESS` | `backend/app/recommendation/service.py` |
+| `ErrorCode.RECOMMENDATION_COLLECTION_IN_PROGRESS` | `backend/app/contracts.py` |
+| `DashboardResponse.collection_in_progress: boolean` TypeScript 타입 + mock fixture | `client/src/generated/api.ts`, `client/src/lib/mockApi.ts` |
+| 새로고침 버튼 `disabled` + tooltip + 5s 폴링 + 완료 toast | `client/src/App.tsx` |
+| `messageForError` 가 `recommendation.collection_in_progress` 코드 매핑 | `client/src/App.tsx` |
+| 회귀 가드 6건 (DashboardResponse 필드 / ErrorCode / refresh 409 / cache hit 재계산 / engine 양쪽 path / helper redis.exists) | `backend/tests/recommendation/test_audit_regressions.py` (`TestC61CollectionInProgressGuard`) |
+
+PR #(TBD) merge commit `(TBD)`.
+

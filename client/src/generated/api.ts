@@ -135,6 +135,8 @@ export type DashboardResponse = {
   generated_at: string;
   cache: "hit" | "miss";
   cold_start: boolean;
+  // C-61 후속 — true 시 refresh 버튼 비활성 + 폴링. 백엔드 refresh endpoint 도 409 차단.
+  collection_in_progress: boolean;
 };
 
 export type DocumentSummary = {

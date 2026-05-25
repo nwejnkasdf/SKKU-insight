@@ -46,6 +46,9 @@ class DashboardResponse(BaseModel):
     generated_at: datetime
     cache: Literal["hit", "miss"]
     cold_start: bool
+    # C-61 후속 (2026-05-25): 진행 중 collection_lock 존재 여부. true 시 client 는 refresh
+    # 버튼 비활성 + 폴링. cache hit 응답도 service._try_load_cache 가 redis.exists 로 재계산.
+    collection_in_progress: bool = False
 
 
 class DocumentDetailResponse(BaseModel):

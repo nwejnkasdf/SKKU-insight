@@ -1,20 +1,24 @@
-"""A8 cold-start 후 첫 click → trace 생성 hook 통합.
+"""A8 cold-start 후 첫 engagement → trace 생성 hook 통합.
 
 ingest_event_atomic 의 traversal_lock 보유 구간 안 mark_stale_if_idle 옆에서:
-- event_type=CLICK AND document_id 존재 AND active_traces=0 AND DocumentTopic cso 매핑 존재
+- event_type ∈ _TRACE_CREATION_EVENT_TYPES ({CLICK, SAVE, DWELL_TICK}) AND
+  document_id 존재 AND DocumentTopic cso 매핑 존재
 - → DefaultTraversalEngine.ingest_event() 위임 (매칭 trace 있으면 last_activity, 없으면 새 trace).
 
 검증 항목: _document_topic_cso_ids helper 정확성 + ingest_event_atomic 가 hook 실행.
 """
 from __future__ import annotations
 
+import inspect
 import uuid
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contracts import EventType
 from app.db.models import DocumentTopic, UserCSOTraversal
+from app.interest import service
 from app.interest.service import _document_topic_cso_ids
 
 
@@ -160,3 +164,35 @@ async def test_traversal_engine_noop_when_match(
         )
     ).scalars().all()
     assert len(traces) == 1
+
+
+class TestC61TraceCreationHookEventTypes:
+    """C-61 회귀 가드 — trace creation hook trigger 가 click/save/dwell_tick 3종 모두 포함.
+
+    cso-topic-traversal.md §3 "실제로 활동한 노드 (클릭/저장 등)" 명세 정합.
+    A8 trace creation hook 이 다시 CLICK-only 로 좁아지지 않게 정적 source 검증.
+    """
+
+    def test_trace_creation_event_types_constant_exists(self) -> None:
+        assert hasattr(service, "_TRACE_CREATION_EVENT_TYPES")
+
+    def test_trace_creation_covers_click_save_dwell_tick(self) -> None:
+        types = service._TRACE_CREATION_EVENT_TYPES
+        assert EventType.CLICK.value in types
+        assert EventType.SAVE.value in types
+        assert EventType.DWELL_TICK.value in types
+
+    def test_trace_creation_excludes_negative_signals(self) -> None:
+        """HIDE / NOT_INTERESTED 는 부정 신호 — trace 관심 의미 반대라 제외."""
+        types = service._TRACE_CREATION_EVENT_TYPES
+        assert EventType.HIDE.value not in types
+        assert EventType.NOT_INTERESTED.value not in types
+        assert EventType.VIEW.value not in types
+
+    def test_ingest_event_atomic_uses_trace_creation_constant(self) -> None:
+        """hook 코드가 module 상수를 참조 — 다시 CLICK 단일 비교로 회귀 방지."""
+        src = inspect.getsource(service.ingest_event_atomic)
+        assert "_TRACE_CREATION_EVENT_TYPES" in src
+        # 회귀 검출 — CLICK 단일 비교 패턴 (== EventType.CLICK) 잔재 없어야 함.
+        # (다른 코드 경로의 정상 CLICK 사용은 OK — hook 가드 표현만 막음.)
+        assert "event_type == EventType.CLICK" not in src

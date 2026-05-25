@@ -185,8 +185,16 @@ async def _is_cold_start(db: AsyncSession, user: User) -> bool:
     return await _has_only_cold_start_recommendations(db, user.user_id)
 
 
+async def _is_collection_in_progress(
+    redis: aioredis.Redis, user_id: UUID
+) -> bool:
+    """현재 user 의 collection_lock 보유 여부 — UI lock + refresh 차단 판단."""
+    return bool(await redis.exists(RedisKey.collection_lock(user_id)))
+
+
 async def _load_cold_start_dashboard(
     db: AsyncSession,
+    redis: aioredis.Redis,
     user: User,
     params: InterestParams,
     config: RecommendationConfig,
@@ -224,6 +232,7 @@ async def _load_cold_start_dashboard(
         config=config,
     )
     cards = await _with_feedback_flags(db, user.user_id, cards)
+    collection_in_progress = await _is_collection_in_progress(redis, user.user_id)
     return DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -231,6 +240,7 @@ async def _load_cold_start_dashboard(
         generated_at=datetime.now(UTC),
         cache="miss",
         cold_start=True,
+        collection_in_progress=collection_in_progress,
     )
 
 
@@ -1366,7 +1376,9 @@ async def build_dashboard(
     """
     if await _is_cold_start(db, user):
         return DashboardBuildResult(
-            response=await _load_cold_start_dashboard(db, user, params, config)
+            response=await _load_cold_start_dashboard(
+                db, redis, user, params, config
+            )
         )
     # (C-58, 2026-05-25) normal ranking 전환 시 옛 pseudo Recommendation 자동 정리.
     # (C-58 followup) DELETE 발생 시 Redis cache 도 invalidate (caller 가 매 호출 cache
@@ -1567,6 +1579,7 @@ async def build_dashboard(
         config=config,
     )
     cards = await _with_feedback_flags(db, user.user_id, cards)
+    collection_in_progress = await _is_collection_in_progress(redis, user.user_id)
     response = DashboardResponse(
         user_id=user.user_id,
         cards=cards,
@@ -1574,6 +1587,7 @@ async def build_dashboard(
         generated_at=datetime.now(UTC),
         cache="miss",
         cold_start=False,
+        collection_in_progress=collection_in_progress,
     )
     return DashboardBuildResult(response=response)
 

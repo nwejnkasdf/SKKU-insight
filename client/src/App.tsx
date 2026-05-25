@@ -21,7 +21,7 @@ import {
   TrendingUp,
   Trash2
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { subscribeStatus, type OfflineQueueStatus } from "./lib/offlineQueue";
 
@@ -453,6 +453,9 @@ function DashboardView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const topicRanks = useMemo(() => dashboard ? buildTopicRanks(dashboard.cards) : [], [dashboard]);
+  // C-61 후속 — 진행 중 collection_lock 보유 시 refresh 버튼 비활성. 백엔드 refresh
+  // endpoint 도 409 차단 — UI 우회 방어.
+  const collectionInProgress = dashboard?.collection_in_progress ?? false;
 
   async function load(refresh = false, silent = false) {
     if (!silent) {
@@ -486,10 +489,32 @@ function DashboardView({
     void load();
   }, []);
 
+  // C-61 후속 — 수집 진행 중엔 5s 폴링으로 완료 시점 감지. 완료 시 toast 안내 + 자동 새 데이터.
+  useEffect(() => {
+    if (!collectionInProgress) return;
+    const interval = window.setInterval(() => void load(false, true), 5000);
+    return () => window.clearInterval(interval);
+  }, [collectionInProgress]);
+
+  // 완료 flip 감지 — toast 1회 (in-progress → not-in-progress 전이만).
+  const previouslyInProgress = useRef(false);
+  useEffect(() => {
+    if (previouslyInProgress.current && !collectionInProgress) {
+      showToast({ tone: "ok", text: "수집이 완료되어 추천이 갱신되었습니다." });
+    }
+    previouslyInProgress.current = collectionInProgress;
+  }, [collectionInProgress, showToast]);
+
   return (
     <section>
       <Header title="오늘의 추천" subtitle="중심 · 인접 · 탐색 큐">
-        <button className="iconButton" title="새로고침" onClick={() => void load(true)}><RefreshCcw size={17} /></button>
+        <button
+          className="iconButton"
+          title={collectionInProgress ? "수집 중에는 새로고침할 수 없습니다" : "새로고침"}
+          onClick={() => void load(true)}
+          disabled={collectionInProgress}
+          aria-disabled={collectionInProgress}
+        ><RefreshCcw size={17} /></button>
       </Header>
       {loading && <Loading label="추천을 불러오는 중" />}
       {!loading && error && <Empty title="추천 엔진을 기다리는 중입니다" body={error} />}
@@ -1533,6 +1558,9 @@ function messageForError(err: unknown): string {
   const maybe = err as Partial<ApiError>;
   if (maybe.status === 429) {
     return "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+  }
+  if (maybe.code === "recommendation.collection_in_progress") {
+    return "수집 중에는 새로고침할 수 없습니다. 완료 후 다시 시도해주세요.";
   }
   if (maybe.code === "auth.weak_password") {
     const subCode = (maybe.details?.sub_code as string | undefined) ?? "";

@@ -354,6 +354,9 @@ class Settings(BaseSettings):
     # 총 connection = UVICORN_WORKERS * PG_API_POOL_MAX + (worker container) *
     # PG_WORKER_POOL_MAX 가 PostgreSQL `max_connections` 를 넘지 않도록 운영자가 조정.
     UVICORN_WORKERS: int = 1
+    # (C-65, 2026-05-26) RQ WorkerPool spawn 수 — 동시 N job 처리. DB pool 영향:
+    # total = UVICORN_WORKERS * PG_API_POOL_MAX + WORKER_POOL_SIZE * PG_WORKER_POOL_MAX.
+    WORKER_POOL_SIZE: int = 4
 
 
 @lru_cache(maxsize=1)

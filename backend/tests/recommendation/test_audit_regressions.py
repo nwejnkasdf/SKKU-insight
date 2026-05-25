@@ -60,3 +60,11 @@ class TestC58CleanupPseudoRecommendations:
         cold_start_idx = src.find("_is_cold_start")
         cleanup_idx = src.find("_cleanup_pseudo_recommendations")
         assert cold_start_idx >= 0 and cleanup_idx > cold_start_idx
+
+    def test_cleanup_invalidates_redis_cache(self) -> None:
+        """(C-58 followup) DELETE 발생 시 Redis cache 도 invalidate — stale pseudo
+        카드 cache hit 복원 race 차단.
+        """
+        src = _source(engine._cleanup_pseudo_recommendations)
+        assert "redis.delete" in src
+        assert "RedisKey.recommendation_cache" in src

@@ -1719,6 +1719,10 @@ function buildInterestModelLayers(
 ): ModelLayer[] {
   const interestTopics = (interest?.topics ?? [])
     .map(displayTopicChip);
+  // (C-60, 2026-05-25) 초기 seed = backend is_onboarding_selected 실측. UI hardcoded
+  // slice(0,3) + bucket 필터 제거 — 사용자 onboarding 선택 (cluster + 1-hop child boost)
+  // 모두 표시. 사용자가 4개 골랐으면 4개 표시 (실측 정합).
+  const onboardingTopics = interestTopics.filter((topic) => topic.is_onboarding_selected);
   const trackedTopics = interestTopics.filter((topic) => topic.bucket !== "neutral");
   const fallbackTopics = displayTopicNodes(
     dashboard.cards.flatMap((card) => card.related_topics.map((topic) => topic.label))
@@ -1730,16 +1734,14 @@ function buildInterestModelLayers(
       key: "prior",
       kicker: "1",
       title: "초기 seed",
-      nodes: (trackedTopics.length ? trackedTopics : fallbackTopics)
-        .slice(0, 3)
+      nodes: (onboardingTopics.length ? onboardingTopics : fallbackTopics)
         .map((topic) => ({ label: topic.label, rawLabel: topic.rawLabel, tone: "prior", meta: "CSO seed" }))
     },
     {
       key: "bayes",
       kicker: "2",
       title: "Bayesian 신호",
-      nodes: (trackedTopics.length ? trackedTopics : interestTopics.slice(0, 4))
-        .slice(0, 4)
+      nodes: (trackedTopics.length ? trackedTopics : interestTopics)
         .map((topic) => ({ label: topic.label, rawLabel: topic.rawLabel, tone: topic.bucket, meta: bucketLabel(topic.bucket) }))
     },
     {
@@ -1747,14 +1749,13 @@ function buildInterestModelLayers(
       kicker: "3",
       title: "활성 trace",
       nodes: activeTraces.length
-        ? activeTraces.slice(0, 4).map((trace) => ({
+        ? activeTraces.map((trace) => ({
             label: displayTopicLabels(trace.path_labels).join(" > "),
             rawLabel: trace.path_labels.join(" > "),
             tone: "trace",
             meta: trace.path_labels.length > 1 ? `${trace.path_labels.length} nodes` : "단일 노드"
           })).filter((node) => node.label.length > 0)
         : buildTrackedNodes(dashboard, interest, traces)
-            .slice(0, 4)
             .map((label) => ({ label, rawLabel: label, tone: "trace", meta: "생성 대기" }))
     },
     {

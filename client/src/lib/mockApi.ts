@@ -329,7 +329,8 @@ export class MockInsightApi implements Partial<InsightApi> {
         cso_topic_id: cluster.cso_topic_id,
         leaf_topic_id: null,
         label: cluster.label,
-        bucket: index < 2 ? "high" : index < 4 ? "medium" : "neutral"
+        bucket: index < 2 ? "high" : index < 4 ? "medium" : "neutral",
+        is_onboarding_selected: index < 4
       }))
     };
   }

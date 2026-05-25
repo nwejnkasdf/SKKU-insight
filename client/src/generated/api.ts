@@ -186,6 +186,7 @@ export type InterestTopicView = {
   leaf_topic_id: UUID | null;
   label: string;
   bucket: InterestBucket;
+  is_onboarding_selected: boolean;
 };
 
 export type InterestStateResponse = {

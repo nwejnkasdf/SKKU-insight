@@ -1023,5 +1023,39 @@ PR [#49](https://github.com/nwejnkasdf/SKKU-insight/pull/49) merge commit `b9d2b
 - 그 자료 click 5건 → daily_lifecycle_evaluation extend trigger 발동
 - 다음 weekly leaf_lifecycle → leaf 가 CSO 14k 외 신생 토픽만 식별 (rejected reason="cso_exists" 로 기존 CSO 중복 거부)
 
+PR [#53](https://github.com/nwejnkasdf/SKKU-insight/pull/53) merge commit `cd5a9cf`.
+
+## 23. C-60 라운드 — InterestTopicView.is_onboarding_selected + UI 실측 표시 (2026-05-25)
+
+### 배경
+
+실측 시연 (test@skku.edu, 4 cluster onboarding) 에서 UI "초기 seed" 가 3개만 표시 (실제 4개). 진단: `buildInterestModelLayers` 가 `interestTopics.filter(bucket !== "neutral").slice(0, 3)` 하드코딩 + onboarding 선택 메타 정보가 API 응답에 없음. 사용자 의도: "실측 기반으로 다 보여주도록".
+
+### 사용자 결정 1건 + 자체 결정 3건
+
+| # | 결정 |
+|---|---|
+| 사용자 1 | (옵션 C) backend `InterestTopicView.is_onboarding_selected` 필드 + frontend 필터 |
+| 자체 1 | 매핑 룰 = `boost_applied_at_active_day IS NOT NULL` (onboarding bootstrap 가 채우는 컬럼) |
+| 자체 2 | frontend 초기 seed slice 제거 → onboarding 선택 전부 표시 |
+| 자체 3 | Bayesian / 활성 trace 도 slice 제거 → 실측 전부 |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `InterestTopicView.is_onboarding_selected: bool` | `backend/app/interest/schemas.py` |
+| `get_interest_state` router 채움 | `backend/app/interest/router.py` |
+| `generated/api.ts` codegen 수동 갱신 | `client/src/generated/api.ts` |
+| `buildInterestModelLayers` onboardingTopics 분리 + slice 제거 | `client/src/App.tsx` |
+| mock fixture 정합 | `client/src/lib/mockApi.ts` |
+| 회귀 가드 1건 | `backend/tests/interest/test_audit_regressions.py` |
+
+### 검증
+
+- `npx tsc --noEmit -p client/tsconfig.json` exit 0
+- backend syntax exit 0
+- 시연 — test@skku.edu dashboard "초기 seed" 4개 표시
+
 PR #(TBD) merge commit `(TBD)`.
 

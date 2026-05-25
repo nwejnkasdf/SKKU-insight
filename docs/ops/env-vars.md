@@ -255,6 +255,7 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 | Var | 예시 값 | 비고 |
 |---|---|---|
 | `UVICORN_WORKERS` | `1` | uvicorn worker process 수. 데모 default 1. multi-worker 시 LLM 동시성은 Redis 분산 (자동), DB pool 합산은 운영자 책임 |
+| `WORKER_POOL_SIZE` | `4` | (C-65) RQ WorkerPool 안 worker 인스턴스 수. 동시에 N job 처리 |
 
 **DB connection 합산 공식** (PostgreSQL `max_connections` 초과 방지):
 
@@ -462,6 +463,7 @@ STRUCTLOG_RENDER=json
 
 # === Worker 병렬 정책 (decision-backlog C-20) ===
 UVICORN_WORKERS=1
+WORKER_POOL_SIZE=4
 ```
 
 ## 검증

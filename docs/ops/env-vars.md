@@ -54,8 +54,8 @@
 | `OPENROUTER_API_KEY` | `sk-or-...` | LLM_PROVIDER=openrouter 일 때 필수 |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `180` | |
 | `LLM_DAILY_TOKEN_BUDGET` | `1000000000000` | 운영 가드, 초과 시 fallback |
-| `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
-| `LLM_MAX_CONCURRENT_PER_USER` | `4` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
+| `LLM_MAX_CONCURRENT` | `32` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
+| `LLM_MAX_CONCURRENT_PER_USER` | `16` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
 | `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS` | `30` | 분산 semaphore acquire 재시도 한도. 초과 시 `LLMBudgetExceeded` (fallback 진입) |
 
 ## 클릭베이트 모듈
@@ -96,7 +96,7 @@
 |---|---|---|
 | `COLLECTION_CRON` | `0 3 * * *` | UTC 기준 매일 3시 (KST 12:00) |
 | `COLLECTION_CRON_DEMO` | `0 * * * *` | demo 모드: 매시 |
-| `COLLECTION_PER_USER_PARALLEL` | `4` | **(v13 라운드 의미 변경)** 사용자 trace 당 동시 LLM 검색 호출 수 (이전: 어댑터 병렬) |
+| `COLLECTION_PER_USER_PARALLEL` | `16` | **(v13 라운드 의미 변경)** 사용자 trace 당 동시 LLM 검색 호출 수 (이전: 어댑터 병렬) |
 | `COLLECTION_GLOBAL_CONCURRENCY` | `8` | 전체 동시 잡 cap |
 | `COLLECTION_USER_JITTER_SECONDS` | `300` | 사용자별 잡 시작 시각 분산 윈도우 — LLM provider RL 보호 ([`../sdd/concurrency.md §8`](../sdd/concurrency.md)) |
 | `LIFECYCLE_EVALUATOR` | `hybrid_d` | hybrid_d | batch_llm | rule_only |
@@ -326,8 +326,8 @@ OPENROUTER_API_KEY=
 CODEX_OAUTH_TOKEN=
 LLM_REQUEST_TIMEOUT_SECONDS=180
 LLM_DAILY_TOKEN_BUDGET=1000000000000
-LLM_MAX_CONCURRENT=8
-LLM_MAX_CONCURRENT_PER_USER=4
+LLM_MAX_CONCURRENT=32
+LLM_MAX_CONCURRENT_PER_USER=16
 LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30
 
 # === Clickbait (URL은 운영 시점 결정 — 호스팅·transport와 무관) ===
@@ -357,7 +357,7 @@ RATE_LIMIT_EVENTS=600/minute
 # === Schedule ===
 COLLECTION_CRON=0 3 * * *
 COLLECTION_CRON_DEMO=0 * * * *
-COLLECTION_PER_USER_PARALLEL=4
+COLLECTION_PER_USER_PARALLEL=16
 COLLECTION_GLOBAL_CONCURRENCY=8
 COLLECTION_USER_JITTER_SECONDS=300
 LIFECYCLE_EVALUATOR=hybrid_d

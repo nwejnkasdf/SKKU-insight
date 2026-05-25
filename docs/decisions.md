@@ -1059,3 +1059,131 @@ PR [#53](https://github.com/nwejnkasdf/SKKU-insight/pull/53) merge commit `cd5a9
 
 PR #(TBD) merge commit `(TBD)`.
 
+## 24. C-61 라운드 — trace creation hook event type 확장 (2026-05-25)
+
+### 배경
+
+`backend/app/interest/service.py:854` 의 A8 trace creation hook 이 **CLICK 단일 event type 만** trigger 로 가드 — `cso-topic-traversal.md §3` 명세 ("사용자가 실제로 활동(**클릭/저장 등**)한 노드") 위배. 결과:
+
+- 사용자가 카드 save / dwell 만 하고 click 안 하면 `UserCSOTraversal` row 영원히 0개 → `_is_cold_start()` True 유지
+- cold-start 탈출은 오직 click 으로만 가능 — 모바일 UX 의 save-without-detail-view 패턴에서 영구 cold-start
+- 본 hook 외 C-56 leaf 활성 신호 hook 은 이미 `_LEAF_PROMOTION_EVENT_TYPES = {click, save, dwell_tick}` 로 올바르게 구현 — 두 hook 간 정의 불일치
+
+진단 출처: 수집 중 dashboard refresh → 전체 trend fallback 결함 추적 중 발견 (`_is_cold_start()` False flip → normal path 진입했지만 후보 임계 미달 → FR-43 으로 10장 전부 trend fallback). hook 결함이 cold-start 탈출 자체를 막아 본 결함을 가속.
+
+### 결정
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | hook trigger 집합 = `{click, save, dwell_tick}` (`_LEAF_PROMOTION_EVENT_TYPES` 와 동일) | §3 명세 정합 + C-56 leaf hook 과 의미상 동일 (긍정 engagement) |
+| 2 | 상수 = `_TRACE_CREATION_EVENT_TYPES = _LEAF_PROMOTION_EVENT_TYPES` alias | 양쪽 의미 정렬 — 한 쪽 갱신 시 다른 쪽도 함께 검토 명시 |
+| 3 | HIDE / NOT_INTERESTED / VIEW 제외 유지 | HIDE/NOT_INTERESTED = 부정 신호 (trace 가 표현하는 "관심" 의미 반대), VIEW = 수동 스크롤 (§5.1 "단순 dashboard 조회" 제외 정합) |
+
+### 영구화
+
+| 변경 | 위치 |
+|---|---|
+| `_TRACE_CREATION_EVENT_TYPES` 상수 (`_LEAF_PROMOTION_EVENT_TYPES` alias) | `backend/app/interest/service.py` |
+| `ingest_event_atomic` A8 hook trigger 가드 확장 | `backend/app/interest/service.py` |
+| `test_trace_creation_hook.py` docstring 정합 | `backend/tests/recommendation/test_trace_creation_hook.py` |
+
+### 검증
+
+- 기존 테스트 회귀 0건 (CLICK-only 음성 단정 테스트 부재 확인 — `grep EventType.SAVE|EventType.DWELL_TICK` 흔적 0)
+- 스키마 변경 0. Settings 변경 0. API 계약 변경 0.
+
+### 후속
+
+본 fix 는 cold-start 탈출 자체를 회복시킬 뿐, "탈출 후 trend fallback" 본질은 별도 라운드 — `_is_cold_start()` 게이트 조건 강화 (trace 존재 + 산하 threshold 통과 doc ≥ N개) 가 필요. backlog 등록 예정.
+
+본 라운드에 함께 들어간 1차 안전장치 (수집 중 dashboard refresh 차단):
+
+| 변경 | 위치 |
+|---|---|
+| `DashboardResponse.collection_in_progress: bool` 필드 + `_try_load_cache` 가 redis.exists 로 응답 직전 재계산 (cache hit 정합) | `backend/app/recommendation/schemas.py`, `backend/app/recommendation/service.py` |
+| `_is_collection_in_progress(redis, user_id)` helper + normal/cold-start path 둘 다 채움 | `backend/app/recommendation/engine.py` |
+| `refresh_dashboard` 진입 시 `collection_lock` 보유 검사 → 409 + `RECOMMENDATION_COLLECTION_IN_PROGRESS` | `backend/app/recommendation/service.py` |
+| `ErrorCode.RECOMMENDATION_COLLECTION_IN_PROGRESS` | `backend/app/contracts.py` |
+| `DashboardResponse.collection_in_progress: boolean` TypeScript 타입 + mock fixture | `client/src/generated/api.ts`, `client/src/lib/mockApi.ts` |
+| 새로고침 버튼 `disabled` + tooltip + 5s 폴링 + 완료 toast | `client/src/App.tsx` |
+| `messageForError` 가 `recommendation.collection_in_progress` 코드 매핑 | `client/src/App.tsx` |
+| 회귀 가드 6건 (DashboardResponse 필드 / ErrorCode / refresh 409 / cache hit 재계산 / engine 양쪽 path / helper redis.exists) | `backend/tests/recommendation/test_audit_regressions.py` (`TestC61CollectionInProgressGuard`) |
+
+PR #(TBD) merge commit `(TBD)`.
+
+## 25. C-62 라운드 — Bootstrap trace + recommendation_score + per-slot softmax (2026-05-26)
+
+### 배경
+
+C-61 본 fix + 후속 (수집 중 refresh 차단) 적용 후 실측 시연 결함:
+- 사용자 1 click 후 dashboard refresh → core 0/5 + adjacent 0/3 + discovery 0/2 + fallback_trend 10
+- 즉 본질 결함: trace 1개 (information_retrieval) 산하 doc 23개 있음에도 bucket=LOW (long_score=0.467) → core_min_topic_match=0.75 임계 미달
+
+근본 원인 — 사용자 짚어주신 핵심 (메타 검증 + 본질 분리):
+
+1. **표면 처방 X**: 임계값 낮추는 fix 는 증상 처방. 사용자가 "최고 관심 받은 것만 편중하면 core 너무 쏠려버리는 결함" 으로 본질 짚음.
+2. **Trace 1개 = 1 cso 도배**: query_core 가 trace tail cso 만 후보. 1 trace 면 core 5장 모두 같은 cso.
+3. **명세 ↔ 구현 drift**: bootstrap_interest_state 가 boost row 만 INSERT, trace 자동 생성 X — onboarding 선택 cluster 가 dashboard 후보 풀에 영향 안 줌.
+
+### 사용자 결정 11건 + 자체 결정 다수
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 새 지표 이름 = `recommendation_score` | confidence ↔ user_relevance 분리 |
+| 2 | 1~10 정수, pool 내 상대값 + hidden 제외 | LLM-as-judge 절대값보다 상대값이 안정 |
+| 3 | 저장 = `DocumentTopic.recommendation_score` 컬럼 확장 | 별도 테이블보다 단순. cross-user contamination 수용 (personalization 은 trace softmax 가 책임) |
+| 4 | Core 슬롯 임계 제거 | softmax → top doc unconditional pick |
+| 5 | `generate_reasons` 유지 | 카드 결정 후 slot context 반영 |
+| 6 | Softmax temperature = config + default 1.0 | 균형 |
+| 7 | Replacement = soft cap, max 2 per trace | concentration ↔ 다양성 균형 |
+| 8 | Determinism = day seed `hash(user_id, utc_date)` | 새로고침 안정 |
+| 9 | Adjacent slot — collection 시점에 day-seed 3개 cso select → LLM 검색 → dashboard 같은 cso 사용 | producer/consumer 일관성 (round2 본질 fix) |
+| 10 | `TRACE_ACTIVE_CAP` 10 → 20 | bootstrap 시 12 cluster + behavioral 여유 |
+| 11 | Trace origin 컬럼 추가 + cold-start 종료 시 boost trace 삭제 | trace 의미 분리 |
+| (B) | Cold-start orchestrator 보존 | 변경 최소 + 시연 안전 |
+
+Round2 본질 fix (collection ↔ dashboard 일관성):
+- 옛 (땜빵): dashboard 가 adjacent_csos 28개 중 doc 있는 것만 사후 필터
+- 새 (surgical, producer layer): collection orchestrator 가 day_seed 로 3 cso select + LLM 검색 → dashboard 가 같은 helper 호출 → 동일 cso pick
+
+### 자체 결정 + 영구화
+
+| 변경 | 위치 |
+|---|---|
+| alembic 0011 — `DocumentTopic.recommendation_score INTEGER (1-10 check)` + `UserCSOTraversal.origin VARCHAR(32)` + origin='behavioral' backfill + partial index | `backend/alembic/versions/0011_c62_recommendation_score.py` |
+| ORM 컬럼 매핑 (recommendation_score / origin) | `backend/app/db/models/{document_topic,user_cso_traversal}.py` |
+| `TraceOrigin` enum (3 value) | `backend/app/contracts.py` |
+| `bootstrap_interest_state` + `_bootstrap_boost_traces` — 선택 cluster 마다 boost trace INSERT | `backend/app/interest/service.py` |
+| `_cleanup_boost_traces` — 첫 behavioral 신호 시 DELETE | 동 |
+| `ingest_event` — boost trace 매칭 시 origin=behavioral promote + return 'promoted' | `backend/app/traversal/default.py` |
+| `_is_cold_start` 의미 변경 — behavioral active trace 카운트로 (boost 제외) | `backend/app/recommendation/engine.py` |
+| `count_behavioral_active_traces` + `get_1hop_neighbors_excluding_traces` helpers | `backend/app/traversal/queries.py` |
+| `core_softmax.py` 신규 — `fill_core_slots_via_softmax` + `fill_adjacent_slots_via_softmax` + `select_daily_adjacent_csos` + `_softmax_sample` + `_day_seed` + `_query_top_doc_for_trace` | `backend/app/recommendation/core_softmax.py` (~270 LOC) |
+| `CoreSlotSoftmaxConfig` (temperature + max_per_trace) | `backend/app/recommendation/config_loader.py` + `recommendation.toml` |
+| Engine `build_dashboard` core/adjacent slot fill 교체 | `backend/app/recommendation/engine.py` |
+| Orchestrator `_resolve_adjacent_leaves` (day-seed 3 cso) + `_resolve_trace_leaves` 단순화 (trace tail only) | `backend/app/collection/orchestrator.py` |
+| Orchestrator leaf 병렬화 (`asyncio.gather` + `Semaphore(COLLECTION_PER_USER_PARALLEL)`) — LLM search 병렬, persist 순차 | 동 |
+| LLM schema/prompt — `recommendation_score: int 1-10` 필드 추가 + import-time assert | `backend/app/collection/llm_search.py` + `backend/app/llm_provider/codex_oauth.py` (SEARCH_OUTPUT_SCHEMA) + `backend/app/llm_provider/openai.py` (parse) + `backend/app/llm_provider/protocol.py` (SearchResult) |
+| Orchestrator `_upsert_document_topic` 가 `recommendation_score` 저장 (last-writer-wins) | `backend/app/collection/orchestrator.py` |
+| Admin endpoint `POST /admin/cron/user-profile/trigger` + admin console 버튼 | `backend/app/admin/router.py` + `admin-console/public/app.js` |
+| `.env.example` + `backend/.env.example` + `docs/ops/env-vars.md` — `TRACE_ACTIVE_CAP=20`, `LLM_MAX_CONCURRENT_PER_USER=4` 동기화 | env files + docs |
+| `Settings` default — `TRACE_ACTIVE_CAP=20`, `LLM_MAX_CONCURRENT_PER_USER=4` | `backend/app/config/__init__.py` |
+
+### 검증
+
+- AST syntax pass (Python 18 files)
+- 시연 검증 (실 GPT-5.5 codex_oauth):
+  - 신규 사용자 onboarding 4 cluster → bootstrap_boost_traces 4개 active
+  - Click 1회 → behavioral trace promote + 다른 boost cleanup
+  - 수동 collection trigger → 6 leaves 병렬 처리 (~2분)
+  - Dashboard refresh → core 5/5 + adjacent 3/3
+  - UserProfile cron 트리거 후 discovery 1~2/2
+
+### 후속
+
+- `_create_demo_backfill_candidates` 폐기 검토 (C-58 정합)
+- Weekly cron 자동화 (현재 admin button 수동)
+- Codex audit 라운드 (R2-RG 패턴 후속 검토)
+
+PR #(TBD) merge commit `(TBD)`.
+

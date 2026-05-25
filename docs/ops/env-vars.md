@@ -55,7 +55,7 @@
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `180` | |
 | `LLM_DAILY_TOKEN_BUDGET` | `1000000` | 운영 가드, 초과 시 fallback |
 | `LLM_MAX_CONCURRENT` | `8` | 전역 동시 LLM 호출 cap — Redis 분산 semaphore (multi-worker 안전, [`../sdd/concurrency.md §5`](../sdd/concurrency.md), decision-backlog C-19) |
-| `LLM_MAX_CONCURRENT_PER_USER` | `2` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
+| `LLM_MAX_CONCURRENT_PER_USER` | `4` | 한 사용자가 burst로 잡을 수 있는 LLM 호출 cap (분산) |
 | `LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS` | `30` | 분산 semaphore acquire 재시도 한도. 초과 시 `LLMBudgetExceeded` (fallback 진입) |
 
 ## 클릭베이트 모듈
@@ -191,7 +191,7 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 
 | Var | 예시 값 | 비고 |
 |---|---|---|
-| `TRACE_ACTIVE_CAP` | `10` | 사용자당 active trace 최대 수. 초과 시 새 trace 생성 거부. |
+| `TRACE_ACTIVE_CAP` | `20` | 사용자당 active trace 최대 수. 초과 시 새 trace 생성 거부. |
 | `TRACE_PATH_DEPTH_CAP` | `8` | trace.path 최대 깊이. extend 시 cap 초과 차단. |
 | `TRACE_STALE_IDLE_DAYS` | `21` | 1단계 stale 마킹 — path 말단 score_tail ≤ 임계 AND idle ≥ N active days (ingest 직후 즉시, no LLM). |
 | `TRACE_STALE_THRESHOLD_SCORE` | `0.30` | stale 마킹 score 임계. |
@@ -327,7 +327,7 @@ CODEX_OAUTH_TOKEN=
 LLM_REQUEST_TIMEOUT_SECONDS=180
 LLM_DAILY_TOKEN_BUDGET=1000000
 LLM_MAX_CONCURRENT=8
-LLM_MAX_CONCURRENT_PER_USER=2
+LLM_MAX_CONCURRENT_PER_USER=4
 LLM_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS=30
 
 # === Clickbait (URL은 운영 시점 결정 — 호스팅·transport와 무관) ===
@@ -414,7 +414,7 @@ LEAF_MERGE_JACCARD_MIN=0.6
 LEAF_MERGE_LABEL_SIMILARITY_MIN=0.75
 LEAF_MERGE_MAX_PER_USER=50
 MERGE_EVALUATION_LOCK_TTL_SECONDS=120
-TRACE_ACTIVE_CAP=10
+TRACE_ACTIVE_CAP=20
 TRACE_PATH_DEPTH_CAP=8
 TRACE_STALE_IDLE_DAYS=21
 TRACE_STALE_THRESHOLD_SCORE=0.30

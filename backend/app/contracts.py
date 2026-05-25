@@ -89,6 +89,20 @@ class TraversalStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class TraceOrigin(str, Enum):
+    """(C-62, 2026-05-25) UserCSOTraversal.origin 컬럼 값.
+
+    - ONBOARDING_BOOST: bootstrap_interest_state 가 사용자 선택 cluster 마다 INSERT.
+      behavioral trace 첫 생성 시 같은 사용자의 모든 boost trace DELETE.
+    - BEHAVIORAL: click/save/dwell_tick hook 이 INSERT (cold-start 종료 신호).
+    - WEEKLY_PROMOTION: weekly_promotion_job 이 Reincarnation/Fusion bridge INSERT.
+    """
+
+    ONBOARDING_BOOST = "onboarding_boost"
+    BEHAVIORAL = "behavioral"
+    WEEKLY_PROMOTION = "weekly_promotion"
+
+
 class ClickbaitDecision(str, Enum):
     """clickbait_module 응답. algorithms/clickbait-integration.md."""
 
@@ -252,6 +266,10 @@ class ErrorCode(str, Enum):
     COLLECTION_JOB_NOT_FOUND = "collection.job_not_found"
     COLLECTION_SOURCE_DISABLED = "collection.source_disabled"
     COLLECTION_RATE_LIMITED = "collection.rate_limited"
+    # C-61 후속 (2026-05-25): 수집 중 dashboard refresh 차단 — 진행 중 collection_lock 보유 시
+    # `build_dashboard` 가 부분 수집 상태로 빌드되어 normal path 의 임계 미달 → trend fallback.
+    # UI lock + backend 409 둘 다 가드.
+    RECOMMENDATION_COLLECTION_IN_PROGRESS = "recommendation.collection_in_progress"
 
     # --- admin ---
     ADMIN_UNAUTHORIZED = "admin.unauthorized"

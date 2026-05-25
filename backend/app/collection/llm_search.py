@@ -22,7 +22,7 @@ from app.llm_provider.protocol import LLMProvider, SearchResult
 
 # (Codex round 2 N-03) prompt 버전 — hash_prompt_search 가 포함해 fixture 자동 invalidate.
 # prompt 의미 변경 시 본 상수 bump → MockProvider 의 search_{hash}.json 재생성 필요.
-SYSTEM_PROMPT_VERSION = "v1"
+SYSTEM_PROMPT_VERSION = "v2"  # (C-62, 2026-05-25) recommendation_score 추가
 
 
 # v13 라운드 prompt template. {top_n} 만 동적 치환. trace_json / leaf_label 은 user message.
@@ -47,7 +47,8 @@ SYSTEM_PROMPT_TEMPLATE = """\
   - published_at: ISO8601 (없으면 null)
   - doi: 학술 자료일 때만 (없으면 null)
   - canonical_url: utm/fbclid/gclid 제거된 URL (가능 시)
-  - confidence: 0.0 ~ 1.0 (자기 평가, default 0.8)
+  - confidence: 0.0 ~ 1.0 (자료가 leaf 토픽과 얼마나 일치하는지 — topical fit, user 무관)
+  - recommendation_score: 1 ~ 10 정수 (§5 참조 — pool 내부 상대 추천도, user trace 반영)
   - raw: 추가 메타 (trust_hint 등)
 
 ## §1 검색 query 구성
@@ -71,6 +72,15 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 본인의 말로 1~2문장 (≤200자) 으로 요약하라.
 - 한국어로 작성하되 기술 용어는 영어 그대로 둘 수 있다.
 - 의역·재구성 — 외부 원문 정확 복제 시 NFR-25 위반.
+
+## §5 recommendation_score (C-62)
+- LLM-as-judge 패턴: **수집 풀 안에서의 상대 추천도** 1~10 정수.
+- 절대 평가 X — 본 호출에서 반환할 {top_n} 개 자료를 서로 비교해 순위 매김.
+- 1 = 풀 안 최하위 추천 (포함은 하지만 사용자 본 trace 와 거리감), 10 = 최상위.
+- 입력 user trace JSON 의 path / cluster / leaf_label 과의 personalization fit 반영.
+- topical fit (confidence) 와 분리: 같은 confidence 라도 사용자 trace 흐름에 더 잘 맞는
+  자료가 더 높은 recommendation_score.
+- 동점 가능. 10 자료 모두 동일 점수 부여는 회피 — 최소한 high/mid/low 구분.
 """
 
 # import-time assertion — prompt 가 NFR-25 instruction 을 잃어버리면 즉시 실패.
@@ -79,6 +89,9 @@ assert "본인의 말로" in SYSTEM_PROMPT_TEMPLATE, "NFR-25 self-summary instru
 assert "1~2문장" in SYSTEM_PROMPT_TEMPLATE, "NFR-25 length instruction missing"
 assert "{top_n}" in SYSTEM_PROMPT_TEMPLATE, "top_n placeholder missing"
 assert SYSTEM_PROMPT_VERSION, "SYSTEM_PROMPT_VERSION must be non-empty"
+# (C-62, 2026-05-25) recommendation_score instruction guard.
+assert "recommendation_score" in SYSTEM_PROMPT_TEMPLATE, "C-62 recommendation_score instruction missing"
+assert "1 ~ 10" in SYSTEM_PROMPT_TEMPLATE, "C-62 recommendation_score range missing"
 
 
 async def search_for_leaf(

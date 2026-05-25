@@ -123,3 +123,4 @@ CSO.*.csv
 # --- OS·시스템 ---
 Thumbs.db
 Desktop.ini
+.tmp_copy_*.sh

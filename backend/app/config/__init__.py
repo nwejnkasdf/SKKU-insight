@@ -79,7 +79,9 @@ class Settings(BaseSettings):
     LLM_REQUEST_TIMEOUT_SECONDS: int = 180
     LLM_DAILY_TOKEN_BUDGET: int = 1_000_000
     LLM_MAX_CONCURRENT: int = 8
-    LLM_MAX_CONCURRENT_PER_USER: int = 2
+    # (C-62 후속 round2, 2026-05-26) 2 → 4 상향 — COLLECTION_PER_USER_PARALLEL=4 정합.
+    # 옛 cap 2 가 leaf 병렬 4 일 때 나머지 2 leaves 가 semaphore_timeout → 실패.
+    LLM_MAX_CONCURRENT_PER_USER: int = 4
 
     # === CodexOAuthProvider (2026-05-18 본문) ===
     # `LLM_PROVIDER=codex_oauth` 토글 시 사용. `~/.codex/auth.json` 의 ChatGPT
@@ -252,7 +254,9 @@ class Settings(BaseSettings):
 
     # --- trace operation (extend/retract/split/archive/merge) ---
     # cso-topic-traversal.md §11 cap. archive auto 임계.
-    TRACE_ACTIVE_CAP: int = 10
+    # (C-62, 2026-05-25) 10 → 20 상향 — bootstrap_interest_state 가 사용자 선택 cluster
+    # 마다 boost trace INSERT (최대 12) + behavioral trace 여유 8.
+    TRACE_ACTIVE_CAP: int = 20
     TRACE_PATH_DEPTH_CAP: int = 8
     # 1단계 stale 마킹 (ingest 직후 즉시, no LLM). path 말단 score_tail ≤ 임계
     # AND idle ≥ N active days.

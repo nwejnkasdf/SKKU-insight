@@ -77,3 +77,11 @@ adjacent_hops_2 = 2
 trend_window_days = 7
 # 3단계: 신뢰 소스 archive (최근 30 wallclock days).
 archive_window_days = 30
+
+[core_slot_softmax]
+# (C-62, 2026-05-25) Core slot per-slot trace softmax sampling.
+# 슬롯마다 softmax(traces, weights=score_tail) 로 trace 1개 추첨 → 그 trace 영역의
+# DocumentTopic.recommendation_score 최고 doc 픽. 같은 trace 가 5 슬롯 안 max_per_trace
+# 번까지만 뽑힘 (soft cap). day 내 deterministic seed = hash(user_id, utc_date).
+temperature = 1.0
+max_per_trace = 2

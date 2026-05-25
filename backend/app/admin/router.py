@@ -355,6 +355,40 @@ async def admin_run_user_collection_now(
     )
 
 
+@router.post(
+    "/cron/user-profile/trigger",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="UserProfile daily cron 즉시 실행 (C-62 후속)",
+)
+@limiter.limit("5/hour")
+async def admin_trigger_user_profile_cron(
+    request: Request,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+) -> dict[str, str]:
+    """(C-62 후속, 2026-05-26) 관리자가 모든 사용자의 UserProfile cron 을 RQ 큐잉.
+
+    Discovery slot 의 Fusion/Reincarnation 가 UserProfile 의 fusion_candidates /
+    broadening_seeds / deepening_seeds 에 의존하므로, 데모 환경에서 daily 19 UTC cron
+    안 돌았으면 본 endpoint 로 수동 트리거. 사용자 전원 순회.
+
+    Args: admin (super 권한). rate_limit 5/hour (LLM 호출 비용 가드).
+    """
+    _ = request, admin
+    import redis as sync_redis
+    from rq import Queue
+
+    settings = get_settings()
+    sync_conn = sync_redis.Redis.from_url(settings.REDIS_URL_QUEUE)
+    queue = Queue("default", connection=sync_conn)
+    rq_job = queue.enqueue(
+        "app.worker.jobs.user_profile.user_profile_generation_job",
+        job_timeout=7200,
+        failure_ttl=86_400,
+        result_ttl=3_600,
+    )
+    return {"status": "queued", "rq_job_id": str(rq_job.id)}
+
+
 # ============================================================
 # 재실행 요청 이력 (2)
 # ============================================================

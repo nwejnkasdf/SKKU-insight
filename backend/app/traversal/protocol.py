@@ -85,6 +85,9 @@ TraversalDelta = Literal[
     "archive",
     "merge",
     "new_trace",  # cold-start trace 생성 (사용자 첫 카드 클릭 hook)
+    # (C-62, 2026-05-25) boost trace 매칭 — origin onboarding_boost → behavioral 로 promote.
+    # caller 는 본 신호로 다른 boost trace 정리.
+    "promoted",
 ]
 
 
@@ -182,11 +185,15 @@ class TraversalEngine(Protocol):
         user_id: UUID,
         active_day_counter: int,
         root_cso_topic_id: UUID,
+        *,
+        origin: str = "behavioral",
     ) -> UUID:
         """사용자 첫 카드 클릭 시 cold-start trace 생성 (결정 #6).
 
         A6 ingest_event_atomic hook 이 매칭 trace 없을 시 호출.
-        active_cap=10 초과 시 LEAF_TRAVERSAL_ACTIVE_CAP_EXCEEDED 응답 (가장 idle stale archive).
+        active_cap (TRACE_ACTIVE_CAP, C-62 라운드 20) 초과 시 LEAF_TRAVERSAL_ACTIVE_CAP_EXCEEDED
+        응답 (가장 idle stale archive).
+        (C-62) origin arg — 'behavioral' default, 'onboarding_boost'/'weekly_promotion' 선택.
         path = [root_cso_topic_id], status='active'.
         return: 생성된 trace_id.
         """

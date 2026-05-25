@@ -23,6 +23,7 @@ from app.worker.jobs import (
     leaf_lifecycle,
     merge_evaluation,
     naver_cleanup,
+    simulate_user_day_job,
     trace_merge,
 )
 
@@ -35,5 +36,6 @@ __all__ = [
     "leaf_lifecycle",
     "merge_evaluation",
     "naver_cleanup",
+    "simulate_user_day_job",
     "trace_merge",
 ]

@@ -18,6 +18,7 @@
 | POST | `/admin/auth/refresh` | 토큰 갱신 |
 | POST | `/admin/auth/logout` | 로그아웃 |
 | POST | `/admin/auth/change-password` | 비밀번호 변경 (부트스트랩 시 강제) |
+| GET | `/admin/auth/me` | 관리자 자기 정보 (role 포함, C-61) |
 
 ### 수집 (collection.md와 중복 표기)
 | Method | Path | 설명 |
@@ -45,9 +46,31 @@
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/admin/users` | 사용자 목록 (페이징) |
-| GET | `/admin/users/{user_id}/interest-state` | 사용자 관심 상태 (점수 포함, 관리자만) |
+| GET | `/admin/users/{user_id}/interest-state` | 사용자 관심 상태 (점수 포함, **SUPER 전용** C-61) |
 | GET | `/admin/users/{user_id}/events` | 사용자 행동 로그 |
 | POST | `/admin/users/{user_id}/collection/run-now` | 동의 활성 사용자 문서 수집 즉시 실행 |
+
+### 인사이트 (C-61, SUPER 전용 — 디버그 콘솔)
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/admin/users/{user_id}/traces` | traversal trace 전체 (raw: path/path_labels/status/score_tail/leaf_count) |
+| GET | `/admin/users/{user_id}/leaves` | dynamic leaf 전체 (raw: label/confidence/status/cso_mappings) |
+| GET | `/admin/users/{user_id}/recommendations` | recommendation 최근 N (raw: slot/score/origin_type/origin_ref + document.title) |
+
+### 운영 액션 (C-61, SUPER 전용)
+| Method | Path | 설명 |
+|---|---|---|
+| POST | `/admin/users/{user_id}/leaves/{leaf_id}/archive` | dynamic leaf 강제 archive (204) |
+| POST | `/admin/users/{user_id}/traces/{trace_id}/retract` | traversal trace 강제 종료 (204, 실 SQL = `status='archived'`) |
+| POST | `/admin/users/{user_id}/recommendations/cleanup-pseudo` | pseudo_cold_start recommendation 일괄 DELETE |
+| POST | `/admin/users/{user_id}/simulate` | RQ enqueue (mode: next_day/full_day/weekly + days 1~30, weekly auto-chain) |
+| GET | `/admin/users/{user_id}/simulate/status` | Redis `simulate:{user_id}:status` 폴링 |
+
+### 시스템 설정 (C-61, SUPER 전용)
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/admin/system-config` | system_config 전체 |
+| PUT | `/admin/system-config/{key}` | UPSERT + Redis cache invalidate |
 
 ### 재실행 요청 이력
 | Method | Path | 설명 |
@@ -205,6 +228,8 @@ class AdminInterestTopicView(BaseModel):
 | PATCH source toggle | yes | yes | no |
 | 사용자 점수 열람 | yes | yes | no (마스킹) |
 | 관리자 추가/제거 | yes | no | no |
+| **C-61 인사이트 4 endpoint (`/traces` / `/leaves` / `/recommendations` / `/interest-state`)** | yes | **no (403 `admin.role_insufficient`)** | no |
+| **C-61 운영 액션 (force-archive / cleanup-pseudo / simulate / system-config)** | yes | **no** | no |
 
 ## 비즈니스 룰
 
@@ -220,6 +245,15 @@ class AdminInterestTopicView(BaseModel):
 - `/admin/users` 는 관리자 콘솔의 행 단위 운영 판단을 위해 사용자별 최신 `daily_collect` job 상태와 생성/시작/종료 시각을 함께 반환한다.
 - 관리자 수동 수집은 worker jitter 없이 바로 실행 대기열에 태우며, 콘솔은 `/admin/users` 의 최신 job 상태를 주기적으로 갱신해 `queued/running/succeeded/failed/skipped` 를 행 단위로 표시한다.
 - ClickbaitStats는 매일 자정에 미리 계산해 캐시 (Redis 24h TTL).
+- **(C-61) `/admin/auth/me`** 는 `aud="admin"` + `must_change_password` 통과 강제만 적용, role 게이트 X (모든 admin role 호출 가능 — SPA 가 본 응답으로 자기 role 분기).
+- **(C-61) 인사이트 4 endpoint** 는 NFR-04 마스킹 우회 (admin 노출 허용 — `score` / `long_score` / `short_score` / `origin_ref` 등 raw 그대로). SUPER role 만 호출 가능.
+- **(C-61) `POST /admin/users/{id}/traces/{tid}/retract`** 의 URL 은 사용자 의도 (강제 종료) 보존이지만 실 SQL = `UserCSOTraversal.status='archived'` UPDATE. `execute_retract` 의 path.pop + LLM leaf_remap 은 본 endpoint 범위 밖 (후속 라운드).
+- **(C-61) `POST /admin/users/{id}/simulate`** body:
+  - `mode`: `"next_day"` | `"full_day"` | `"weekly"`
+  - `days`: 1~30 정수 (`weekly` 에서 무시)
+  - **weekly auto-chain**: `mode=next_day|full_day` 시 매 1일 후 `user.active_day_counter % 7 == 0` 도달하면 worker 가 자동으로 weekly chain (leaf_lifecycle + trace_merge + user_profile) 실행. days=14 → weekly 2회 자동.
+  - RQ enqueue 즉시 202. status polling = `GET /admin/users/{id}/simulate/status`, Redis key `simulate:{user_id}:status` (TTL 1h).
+- **(C-61) `PUT /admin/system-config/{key}`** 는 UPSERT (없으면 생성, 있으면 갱신) + Redis `system_config:{key}` DEL. `interest_params` / `event_weights` 같은 캐시 키는 다음 read 시 신선 DB lookup.
 
 ## 오류 응답
 

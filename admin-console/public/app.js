@@ -16,7 +16,29 @@ const state = {
   collectionAutoRefreshTimer: null,
   users: [],
   health: null,
-  view: window.location.hash === "#account" ? "account" : "operations"
+  view: window.location.hash === "#insights"
+    ? "insights"
+    : window.location.hash === "#account"
+      ? "account"
+      : "operations",
+  // C-61 admin debug console (SUPER 전용)
+  adminRole: null,
+  insightsTargetInput: "",
+  insightsTarget: null,
+  insightsLoading: false,
+  insightsError: "",
+  insightsData: null,
+  insightsTab: "trace",
+  insightsBusyAction: null,
+  simulateMode: "next_day",
+  simulateDays: 1,
+  simulateStatus: null,
+  simulatePollTimer: null,
+  systemConfig: null,
+  systemConfigBusy: false,
+  systemConfigEditing: null,
+  systemConfigEditValue: "",
+  actionConfirm: null
 };
 
 const root = document.querySelector("#root");
@@ -42,6 +64,19 @@ const navIcons = {
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M12 3 5 6v5c0 4.5 2.8 8.4 7 10 4.2-1.6 7-5.5 7-10V6l-7-3Z" />
       <path d="M9 12l2 2 4-5" />
+    </svg>
+  `,
+  insights: `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3" />
+      <path d="M12 19v3" />
+      <path d="M2 12h3" />
+      <path d="M19 12h3" />
+      <path d="M5 5l2 2" />
+      <path d="M17 17l2 2" />
+      <path d="M5 19l2-2" />
+      <path d="M17 7l2-2" />
     </svg>
   `
 };
@@ -177,6 +212,14 @@ async function logout() {
     // local logout still wins
   }
   clearTokens();
+  state.adminRole = null;
+  state.insightsData = null;
+  state.insightsTarget = null;
+  state.insightsTargetInput = "";
+  state.simulateStatus = null;
+  state.systemConfig = null;
+  state.actionConfirm = null;
+  stopSimulatePolling();
   render();
   stopCollectionPolling();
   stopCollectionAutoRefresh();
@@ -189,12 +232,14 @@ async function loadDashboard() {
   state.noticeTone = "success";
   render();
   try {
-    const [users, health] = await Promise.all([
+    const [users, health, me] = await Promise.all([
       request("/admin/users?limit=20"),
-      loadHealth()
+      loadHealth(),
+      request("/admin/auth/me").catch(() => null)
     ]);
     state.users = users.items || [];
     state.health = health;
+    state.adminRole = me && typeof me === "object" ? me.role || null : null;
   } catch (error) {
     if (error.status === 409) {
       state.mustChangePassword = true;
@@ -576,6 +621,25 @@ function changePasswordView() {
 
 function shellView() {
   const isAccount = state.view === "account";
+  const isInsights = state.view === "insights";
+  const isSuper = state.adminRole === "super";
+  const showInsights = isInsights && isSuper;
+  let title;
+  let sub;
+  let body;
+  if (showInsights) {
+    title = "사용자 인사이트";
+    sub = "trace · leaf · 추천 · interest raw + 운영 액션 (SUPER 전용 디버그)";
+    body = insightsView();
+  } else if (isAccount) {
+    title = "내 계정";
+    sub = "관리자 세션과 계정 작업을 확인합니다.";
+    body = accountView();
+  } else {
+    title = "운영";
+    sub = "사용자 상태와 시스템 상태를 확인합니다.";
+    body = operationsView();
+  }
   return `
     <div class="shell">
       <aside class="sidebar">
@@ -583,6 +647,7 @@ function shellView() {
         <nav class="nav">
           ${navButton("operations", "운영")}
           ${navButton("account", "내 계정")}
+          ${isSuper ? navButton("insights", "사용자 인사이트") : ""}
         </nav>
         <div class="sidebarFoot">
           <button class="secondary" id="logoutButton">로그아웃</button>
@@ -591,14 +656,15 @@ function shellView() {
       <section class="main">
         <header class="pageTitle">
           <div>
-            <h1>${isAccount ? "내 계정" : "운영"}</h1>
-            <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
+            <h1>${title}</h1>
+            <p>${sub}</p>
           </div>
         </header>
         <div id="messageArea">${messageView()}</div>
-        ${isAccount ? accountView() : operationsView()}
+        ${body}
       </section>
     </div>
+    ${state.actionConfirm ? actionConfirmDialog() : ""}
   `;
 }
 
@@ -779,10 +845,20 @@ function bindApp() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       state.view = button.getAttribute("data-view") || "operations";
-      window.location.hash = state.view === "account" ? "account" : "operations";
+      window.location.hash =
+        state.view === "account"
+          ? "account"
+          : state.view === "insights"
+            ? "insights"
+            : "operations";
       render();
       updateCollectionPolling();
       updateCollectionAutoRefresh();
+      if (state.view === "insights") {
+        refreshSimulateStatusIfNeeded();
+      } else {
+        stopSimulatePolling();
+      }
     });
   });
   document.querySelectorAll("[data-refresh]").forEach((button) => {
@@ -790,6 +866,7 @@ function bindApp() {
   });
   bindCollectionButtons();
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
+  if (state.view === "insights") bindInsights();
 }
 
 function bindCollectionButtons() {
@@ -827,6 +904,676 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+// ============================================================
+// C-61 인사이트 view (SUPER 전용 디버그 콘솔)
+// ============================================================
+
+function insightsView() {
+  const target = state.insightsTarget;
+  const data = state.insightsData;
+  return `
+    <section class="insightsBoard">
+      <div class="card">
+        <div class="cardHead">
+          <h2>대상 사용자</h2>
+        </div>
+        <div class="insightsSearch">
+          <input
+            type="text"
+            id="insightsTargetInput"
+            placeholder="이메일 또는 user_id (UUID)"
+            value="${escapeHtml(state.insightsTargetInput)}"
+            ${state.insightsLoading ? "disabled" : ""}
+          />
+          <button type="button" id="insightsLookupButton" ${state.insightsLoading ? "disabled" : ""}>
+            ${state.insightsLoading ? `${buttonSpinner()}로드 중` : "인사이트 로드"}
+          </button>
+          ${
+            target
+              ? `<span class="muted">${escapeHtml(target.email || "?")} · ${escapeHtml(target.user_id)}</span>`
+              : ""
+          }
+        </div>
+        ${state.insightsError ? `<p class="error">${escapeHtml(state.insightsError)}</p>` : ""}
+        ${
+          target
+            ? `<p class="muted">최근 사용자 ${state.users.length}건 안에서 매칭. 다른 사용자는 운영 view 에서 새로고침 후 시도.</p>`
+            : ""
+        }
+      </div>
+      ${data ? insightsDomainsCard(target, data) : `<p class="muted">사용자 검색 후 4 도메인 raw 노출.</p>`}
+      ${target ? insightsSimulateCard(target) : ""}
+      ${insightsSystemConfigCard()}
+    </section>
+  `;
+}
+
+function insightsDomainsCard(target, data) {
+  const tabs = [
+    ["trace", `Traces (${data.traces.length})`],
+    ["leaves", `Leaves (${data.leaves.length})`],
+    ["recommendations", `Recommendations (${data.recommendations.length})`],
+    ["interest", `Interest (${data.interest.topics.length})`]
+  ];
+  let body = "";
+  if (state.insightsTab === "trace") body = renderTraceTable(target, data.traces);
+  else if (state.insightsTab === "leaves") body = renderLeafTable(target, data.leaves);
+  else if (state.insightsTab === "recommendations") body = renderRecoTable(target, data.recommendations);
+  else if (state.insightsTab === "interest") body = renderInterestTable(target, data.interest);
+  return `
+    <div class="card">
+      <div class="cardHead">
+        <h2>4 도메인 raw</h2>
+        <button class="iconRefresh" type="button" id="insightsRefreshButton" title="다시 로드">↻</button>
+      </div>
+      <div class="insightsTabs">
+        ${tabs
+          .map(
+            ([k, label]) =>
+              `<button type="button" class="${state.insightsTab === k ? "active" : ""}" data-tab="${k}">${escapeHtml(label)}</button>`
+          )
+          .join("")}
+      </div>
+      <div class="insightsTable">
+        ${body}
+      </div>
+    </div>
+  `;
+}
+
+function renderTraceTable(target, traces) {
+  if (!traces.length) return `<p class="muted">trace 없음.</p>`;
+  const header = `
+    <div class="row header">
+      <span>status / path</span>
+      <span>started ad</span>
+      <span>last ad</span>
+      <span>arch ad</span>
+      <span>tail score</span>
+      <span>leaves</span>
+      <span>액션</span>
+    </div>
+  `;
+  const rows = traces
+    .map((t) => {
+      const canArchive = t.status === "active" || t.status === "stale";
+      return `
+        <div class="row">
+          <span>
+            <b class="status ${t.status === "archived" ? "danger" : t.status === "stale" ? "warn" : ""}">${escapeHtml(t.status)}</b>
+            <div class="pathChips">${t.path_labels.map((l) => `<span>${escapeHtml(l)}</span>`).join("")}</div>
+            <small class="raw">${escapeHtml(t.trace_id)}</small>
+          </span>
+          <span>${t.started_active_day}</span>
+          <span>${t.last_activity_active_day}</span>
+          <span>${t.archived_at_active_day ?? "-"}</span>
+          <span>${(t.score_tail || 0).toFixed(3)}</span>
+          <span>${t.leaf_count}</span>
+          <span>
+            ${
+              canArchive
+                ? `<button class="dangerAction" type="button" data-action="retract-trace" data-trace-id="${escapeHtml(t.trace_id)}" data-trace-label="${escapeHtml(t.path_labels.join(" › "))}">강제 종료</button>`
+                : `<span class="muted">-</span>`
+            }
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+  return header + rows;
+}
+
+function renderLeafTable(target, leaves) {
+  if (!leaves.length) return `<p class="muted">leaf 없음.</p>`;
+  const header = `
+    <div class="row header">
+      <span>label · status</span>
+      <span>confidence</span>
+      <span>created ad</span>
+      <span>last signal</span>
+      <span>cso 매핑</span>
+      <span>merged into</span>
+      <span>액션</span>
+    </div>
+  `;
+  const rows = leaves
+    .map((l) => {
+      const canArchive = l.status === "emerging" || l.status === "active";
+      return `
+        <div class="row">
+          <span>
+            <b>${escapeHtml(l.label)}</b>
+            ${l.label_en ? `<small class="muted"> · ${escapeHtml(l.label_en)}</small>` : ""}
+            <b class="status ${l.status === "archived" || l.status === "merged" ? "danger" : l.status === "stale" ? "warn" : ""}">${escapeHtml(l.status)}</b>
+            <small class="raw">${escapeHtml(l.leaf_topic_id)}</small>
+          </span>
+          <span>${(l.confidence || 0).toFixed(3)}</span>
+          <span>${l.created_active_day}</span>
+          <span>${l.last_signal_active_day}</span>
+          <span class="pathChips">${l.cso_mapping_labels.map((c) => `<span>${escapeHtml(c)}</span>`).join("") || `<span class="muted">없음</span>`}</span>
+          <span>${l.merged_into_leaf_topic_id ? `<small class="raw">${escapeHtml(l.merged_into_leaf_topic_id)}</small>` : "-"}</span>
+          <span>
+            ${
+              canArchive
+                ? `<button class="dangerAction" type="button" data-action="archive-leaf" data-leaf-id="${escapeHtml(l.leaf_topic_id)}" data-leaf-label="${escapeHtml(l.label)}">archive</button>`
+                : `<span class="muted">-</span>`
+            }
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+  return header + rows;
+}
+
+function renderRecoTable(target, recos) {
+  const header = `
+    <div class="row header">
+      <span>title · slot</span>
+      <span>score</span>
+      <span>reason</span>
+      <span>origin_type</span>
+      <span>origin_ref</span>
+      <span>created_at</span>
+      <span></span>
+    </div>
+  `;
+  const rows = recos
+    .map(
+      (r) => `
+        <div class="row">
+          <span>
+            <b>${escapeHtml(r.document_title)}</b>
+            <b class="status">${escapeHtml(r.slot_type)}</b>
+            <small class="raw">${escapeHtml(r.recommendation_id)}</small>
+          </span>
+          <span>${r.score === null || r.score === undefined ? "-" : r.score.toFixed(3)}</span>
+          <span>${escapeHtml(r.reason || "-")}</span>
+          <span>${escapeHtml(r.origin_type || "-")}</span>
+          <span><small class="raw">${escapeHtml(r.origin_ref || "-")}</small></span>
+          <span class="muted">${formatDate(r.created_at)}</span>
+          <span></span>
+        </div>
+      `
+    )
+    .join("");
+  const cleanupBtn = `<button class="dangerAction" type="button" id="cleanupPseudoButton">pseudo recommendation 일괄 정리</button>`;
+  return (
+    `<div style="display:flex;gap:.5rem;justify-content:flex-end;margin-bottom:.5rem">${cleanupBtn}</div>` +
+    header +
+    (rows || `<p class="muted">recommendation 없음.</p>`)
+  );
+}
+
+function renderInterestTable(target, interest) {
+  if (!interest.topics.length) return `<p class="muted">interest 없음.</p>`;
+  const header = `
+    <div class="row header">
+      <span>label</span>
+      <span>bucket</span>
+      <span>long_score</span>
+      <span>short_score</span>
+      <span>cso_id</span>
+      <span>leaf_id</span>
+      <span></span>
+    </div>
+  `;
+  const rows = interest.topics
+    .map(
+      (t) => `
+        <div class="row">
+          <span>${escapeHtml(t.label)}</span>
+          <span><b class="status ${t.bucket === "neutral" ? "" : ""}">${escapeHtml(t.bucket)}</b></span>
+          <span>${(t.long_score || 0).toFixed(3)}</span>
+          <span>${(t.short_score || 0).toFixed(3)}</span>
+          <span><small class="raw">${escapeHtml(t.cso_topic_id || "-")}</small></span>
+          <span><small class="raw">${escapeHtml(t.leaf_topic_id || "-")}</small></span>
+          <span></span>
+        </div>
+      `
+    )
+    .join("");
+  return header + rows;
+}
+
+function insightsSimulateCard(target) {
+  const sim = state.simulateStatus;
+  const running = sim && (sim.state === "queued" || sim.state === "running");
+  return `
+    <div class="card">
+      <div class="cardHead">
+        <h2>시간 시뮬레이션</h2>
+        ${sim ? `<span class="status ${sim.state === "failed" ? "danger" : sim.state === "succeeded" ? "" : "warn"}">${escapeHtml(sim.state)}</span>` : ""}
+      </div>
+      <div class="simulatePanel">
+        <div class="simulateControls">
+          <select id="simulateMode" ${running ? "disabled" : ""}>
+            <option value="next_day" ${state.simulateMode === "next_day" ? "selected" : ""}>next_day (수집 X)</option>
+            <option value="full_day" ${state.simulateMode === "full_day" ? "selected" : ""}>full_day (수집 + 평가)</option>
+            <option value="weekly" ${state.simulateMode === "weekly" ? "selected" : ""}>weekly (단독 갱신)</option>
+          </select>
+          <input
+            type="number"
+            id="simulateDays"
+            min="1"
+            max="30"
+            value="${state.simulateDays}"
+            ${running || state.simulateMode === "weekly" ? "disabled" : ""}
+          />
+          <button type="button" id="simulateStartButton" ${running ? "disabled" : ""}>
+            ${running ? `${buttonSpinner()}진행 중` : "시뮬레이션 시작"}
+          </button>
+        </div>
+        ${
+          sim
+            ? `<div class="simulateProgress">
+                <div><b>mode</b>${escapeHtml(sim.mode || "-")}</div>
+                <div><b>days</b>${sim.days_done ?? 0} / ${sim.days_total ?? 0}</div>
+                <div><b>weekly chains</b>${sim.weekly_chains ?? 0}</div>
+                <div><b>started</b><small>${escapeHtml(sim.started_at || "-")}</small></div>
+                <div><b>finished</b><small>${escapeHtml(sim.finished_at || "-")}</small></div>
+                ${sim.message ? `<div style="grid-column:1/-1"><b>message</b><small>${escapeHtml(sim.message)}</small></div>` : ""}
+              </div>`
+            : `<p class="muted">아직 실행된 시뮬레이션이 없습니다.</p>`
+        }
+        <p class="muted">next_day/full_day 가 active_day 를 7 배수로 도달시키면 weekly 자동 chain. days 14 → weekly 2회.</p>
+      </div>
+    </div>
+  `;
+}
+
+function insightsSystemConfigCard() {
+  const cfg = state.systemConfig;
+  return `
+    <div class="card">
+      <div class="cardHead">
+        <h2>system_config</h2>
+        <button class="iconRefresh" type="button" id="systemConfigReloadButton" title="다시 로드">↻</button>
+      </div>
+      ${
+        cfg === null
+          ? `<p class="muted">아래 새로고침으로 로드.</p>`
+          : cfg.items.length === 0
+            ? `<p class="muted">row 없음.</p>`
+            : `<div class="systemConfigEditor">${cfg.items.map(systemConfigRowView).join("")}</div>`
+      }
+    </div>
+  `;
+}
+
+function systemConfigRowView(item) {
+  const editing = state.systemConfigEditing === item.key;
+  return `
+    <div class="systemConfigRow">
+      <span>
+        <b>${escapeHtml(item.key)}</b>
+        <small class="muted">${formatDate(item.updated_at)}</small>
+        ${item.description ? `<p class="muted" style="font-size:.78rem">${escapeHtml(item.description)}</p>` : ""}
+      </span>
+      <span>
+        ${
+          editing
+            ? `<textarea data-system-config-edit="${escapeHtml(item.key)}">${escapeHtml(state.systemConfigEditValue)}</textarea>`
+            : `<code>${escapeHtml(JSON.stringify(item.value, null, 2))}</code>`
+        }
+      </span>
+      <span>
+        ${
+          editing
+            ? `<button type="button" data-system-config-save="${escapeHtml(item.key)}" ${state.systemConfigBusy ? "disabled" : ""}>저장</button>
+               <button class="secondary" type="button" data-system-config-cancel="1">취소</button>`
+            : `<button class="secondary" type="button" data-system-config-edit-key="${escapeHtml(item.key)}">편집</button>`
+        }
+      </span>
+    </div>
+  `;
+}
+
+function actionConfirmDialog() {
+  const c = state.actionConfirm;
+  if (!c) return "";
+  return `
+    <div class="dialogBackdrop">
+      <div class="dialogBox">
+        <h2>${escapeHtml(c.title)}</h2>
+        <p>${escapeHtml(c.message)}</p>
+        <textarea id="actionConfirmReason" placeholder="사유 (선택)"></textarea>
+        <div class="dialogActions">
+          <button type="button" id="actionConfirmCancel">취소</button>
+          <button type="button" class="primary" id="actionConfirmOk">${escapeHtml(c.okLabel || "실행")}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindInsights() {
+  document.querySelector("#insightsTargetInput")?.addEventListener("input", (event) => {
+    state.insightsTargetInput = event.currentTarget.value;
+  });
+  document.querySelector("#insightsLookupButton")?.addEventListener("click", runInsightsLookup);
+  document.querySelector("#insightsRefreshButton")?.addEventListener("click", () => {
+    if (state.insightsTarget) loadInsightsData(state.insightsTarget);
+  });
+  document.querySelectorAll("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.insightsTab = button.getAttribute("data-tab") || "trace";
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="archive-leaf"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const leafId = button.getAttribute("data-leaf-id");
+      const label = button.getAttribute("data-leaf-label") || leafId;
+      if (!leafId) return;
+      openConfirm({
+        title: "leaf 강제 archive",
+        message: `${label} (leaf=${leafId}) 을 강제 archive 처리합니다. 시연 시 다른 액션과 함께 신중히.`,
+        okLabel: "archive",
+        onConfirm: () => runForceArchiveLeaf(leafId)
+      });
+    });
+  });
+  document.querySelectorAll('[data-action="retract-trace"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const traceId = button.getAttribute("data-trace-id");
+      const label = button.getAttribute("data-trace-label") || traceId;
+      if (!traceId) return;
+      openConfirm({
+        title: "trace 강제 종료",
+        message: `${label} (trace=${traceId}) 를 archive 처리합니다 (path.pop 없음).`,
+        okLabel: "강제 종료",
+        onConfirm: () => runForceRetractTrace(traceId)
+      });
+    });
+  });
+  document.querySelector("#cleanupPseudoButton")?.addEventListener("click", () => {
+    openConfirm({
+      title: "pseudo recommendation 정리",
+      message: "현재 사용자의 pseudo_cold_start 추천 row 를 일괄 DELETE 합니다.",
+      okLabel: "정리",
+      onConfirm: runCleanupPseudo
+    });
+  });
+  document.querySelector("#simulateMode")?.addEventListener("change", (event) => {
+    state.simulateMode = event.currentTarget.value;
+    render();
+  });
+  document.querySelector("#simulateDays")?.addEventListener("change", (event) => {
+    const v = Number(event.currentTarget.value);
+    state.simulateDays = Number.isFinite(v) && v >= 1 ? Math.min(Math.floor(v), 30) : 1;
+  });
+  document.querySelector("#simulateStartButton")?.addEventListener("click", runSimulateStart);
+  document.querySelector("#systemConfigReloadButton")?.addEventListener("click", loadSystemConfig);
+  document.querySelectorAll("[data-system-config-edit-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.getAttribute("data-system-config-edit-key");
+      const item = state.systemConfig?.items.find((i) => i.key === key);
+      if (!item) return;
+      state.systemConfigEditing = key;
+      state.systemConfigEditValue = JSON.stringify(item.value, null, 2);
+      render();
+    });
+  });
+  document.querySelector("[data-system-config-cancel]")?.addEventListener("click", () => {
+    state.systemConfigEditing = null;
+    state.systemConfigEditValue = "";
+    render();
+  });
+  document.querySelectorAll("[data-system-config-edit]").forEach((textarea) => {
+    textarea.addEventListener("input", (event) => {
+      state.systemConfigEditValue = event.currentTarget.value;
+    });
+  });
+  document.querySelectorAll("[data-system-config-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.getAttribute("data-system-config-save");
+      if (key) runUpdateSystemConfig(key);
+    });
+  });
+  document.querySelector("#actionConfirmCancel")?.addEventListener("click", closeConfirm);
+  document.querySelector("#actionConfirmOk")?.addEventListener("click", () => {
+    const c = state.actionConfirm;
+    if (!c) return;
+    const reasonNode = document.querySelector("#actionConfirmReason");
+    const reason = reasonNode ? reasonNode.value : "";
+    closeConfirm();
+    if (typeof c.onConfirm === "function") c.onConfirm(reason);
+  });
+}
+
+function openConfirm(opts) {
+  state.actionConfirm = opts;
+  render();
+}
+
+function closeConfirm() {
+  state.actionConfirm = null;
+  render();
+}
+
+function resolveInsightsTarget(input) {
+  const trimmed = (input || "").trim();
+  if (!trimmed) return { ok: false, error: "이메일 또는 user_id 를 입력하세요." };
+  // UUID 형태인지 검사 (정규식).
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRe.test(trimmed)) {
+    const match = state.users.find((u) => u.user_id === trimmed);
+    return {
+      ok: true,
+      target: { user_id: trimmed, email: match ? match.email : null }
+    };
+  }
+  // email 매칭 — 운영 view 의 최근 사용자 20명 안에서.
+  const lower = trimmed.toLowerCase();
+  const match = state.users.find((u) => (u.email || "").toLowerCase() === lower);
+  if (!match) {
+    return {
+      ok: false,
+      error: `'${trimmed}' 사용자를 최근 20명 안에서 못 찾음. 운영 view 새로고침 또는 user_id 직접 입력.`
+    };
+  }
+  return { ok: true, target: { user_id: match.user_id, email: match.email } };
+}
+
+async function runInsightsLookup() {
+  const resolved = resolveInsightsTarget(state.insightsTargetInput);
+  if (!resolved.ok) {
+    state.insightsError = resolved.error || "사용자를 찾지 못했습니다.";
+    state.insightsTarget = null;
+    state.insightsData = null;
+    render();
+    return;
+  }
+  state.insightsError = "";
+  state.insightsTarget = resolved.target;
+  await loadInsightsData(resolved.target);
+}
+
+async function loadInsightsData(target) {
+  state.insightsLoading = true;
+  render();
+  try {
+    const [traces, leaves, recommendations, interest] = await Promise.all([
+      request(`/admin/users/${encodeURIComponent(target.user_id)}/traces`),
+      request(`/admin/users/${encodeURIComponent(target.user_id)}/leaves`),
+      request(`/admin/users/${encodeURIComponent(target.user_id)}/recommendations`),
+      request(`/admin/users/${encodeURIComponent(target.user_id)}/interest-state`)
+    ]);
+    state.insightsData = {
+      traces: Array.isArray(traces) ? traces : [],
+      leaves: Array.isArray(leaves) ? leaves : [],
+      recommendations: Array.isArray(recommendations) ? recommendations : [],
+      interest: interest || { topics: [], updated_at: null }
+    };
+    state.insightsError = "";
+    // simulate status 도 같이 갱신 (이미 큐잉돼 있다면 진행률 보임).
+    refreshSimulateStatusIfNeeded();
+  } catch (error) {
+    state.insightsError = messageForError(error);
+  } finally {
+    state.insightsLoading = false;
+    render();
+  }
+}
+
+async function runForceArchiveLeaf(leafId) {
+  if (!state.insightsTarget) return;
+  state.insightsBusyAction = `archive-leaf:${leafId}`;
+  render();
+  try {
+    await request(`/admin/users/${encodeURIComponent(state.insightsTarget.user_id)}/leaves/${encodeURIComponent(leafId)}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "" })
+    });
+    setMessage("leaf archive 완료. 인사이트 다시 로드.", "success");
+    await loadInsightsData(state.insightsTarget);
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  } finally {
+    state.insightsBusyAction = null;
+    render();
+  }
+}
+
+async function runForceRetractTrace(traceId) {
+  if (!state.insightsTarget) return;
+  state.insightsBusyAction = `retract-trace:${traceId}`;
+  render();
+  try {
+    await request(`/admin/users/${encodeURIComponent(state.insightsTarget.user_id)}/traces/${encodeURIComponent(traceId)}/retract`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "" })
+    });
+    setMessage("trace 강제 종료 완료.", "success");
+    await loadInsightsData(state.insightsTarget);
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  } finally {
+    state.insightsBusyAction = null;
+    render();
+  }
+}
+
+async function runCleanupPseudo() {
+  if (!state.insightsTarget) return;
+  try {
+    const res = await request(`/admin/users/${encodeURIComponent(state.insightsTarget.user_id)}/recommendations/cleanup-pseudo`, {
+      method: "POST"
+    });
+    setMessage(`pseudo recommendation ${res?.deleted_count ?? 0}건 삭제.`, "success");
+    await loadInsightsData(state.insightsTarget);
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  }
+}
+
+async function runSimulateStart() {
+  if (!state.insightsTarget) {
+    setMessage("대상 사용자 먼저 검색.", "warn");
+    return;
+  }
+  const days = state.simulateMode === "weekly" ? 1 : Math.max(1, Math.min(30, state.simulateDays || 1));
+  try {
+    await request(`/admin/users/${encodeURIComponent(state.insightsTarget.user_id)}/simulate`, {
+      method: "POST",
+      body: JSON.stringify({ mode: state.simulateMode, days })
+    });
+    setMessage("시뮬레이션 큐잉 완료. worker 가 곧 시작합니다.", "success");
+    startSimulatePolling();
+    refreshSimulateStatus();
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  }
+}
+
+function startSimulatePolling() {
+  if (state.simulatePollTimer) return;
+  state.simulatePollTimer = window.setInterval(refreshSimulateStatus, 5000);
+}
+
+function stopSimulatePolling() {
+  if (!state.simulatePollTimer) return;
+  window.clearInterval(state.simulatePollTimer);
+  state.simulatePollTimer = null;
+}
+
+async function refreshSimulateStatus() {
+  if (!state.insightsTarget) {
+    stopSimulatePolling();
+    return;
+  }
+  try {
+    const res = await request(`/admin/users/${encodeURIComponent(state.insightsTarget.user_id)}/simulate/status`);
+    state.simulateStatus = res || null;
+    const finished = !res || res.state === "idle" || res.state === "succeeded" || res.state === "failed";
+    if (finished) {
+      stopSimulatePolling();
+      if (res && (res.state === "succeeded" || res.state === "failed")) {
+        // succeeded → 인사이트 자동 reload.
+        if (res.state === "succeeded") await loadInsightsData(state.insightsTarget);
+      }
+    }
+    render();
+  } catch (error) {
+    // 폴링 에러는 silently 무시 (다음 tick 재시도).
+  }
+}
+
+function refreshSimulateStatusIfNeeded() {
+  if (!state.insightsTarget) return;
+  refreshSimulateStatus();
+  // running 상태면 polling 유지.
+  if (state.simulateStatus && (state.simulateStatus.state === "queued" || state.simulateStatus.state === "running")) {
+    startSimulatePolling();
+  }
+}
+
+async function loadSystemConfig() {
+  state.systemConfigBusy = true;
+  render();
+  try {
+    const res = await request("/admin/system-config");
+    state.systemConfig = res || { items: [] };
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  } finally {
+    state.systemConfigBusy = false;
+    render();
+  }
+}
+
+async function runUpdateSystemConfig(key) {
+  let parsed;
+  try {
+    parsed = JSON.parse(state.systemConfigEditValue);
+  } catch (error) {
+    setMessage("JSON 파싱 실패: " + (error.message || error), "warn");
+    return;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    setMessage("JSON object 만 허용 (배열/null/primitive X).", "warn");
+    return;
+  }
+  state.systemConfigBusy = true;
+  render();
+  try {
+    await request(`/admin/system-config/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value: parsed })
+    });
+    setMessage(`system_config '${key}' 갱신 + 캐시 invalidate.`, "success");
+    state.systemConfigEditing = null;
+    state.systemConfigEditValue = "";
+    await loadSystemConfig();
+  } catch (error) {
+    setMessage(messageForError(error), "warn");
+  } finally {
+    state.systemConfigBusy = false;
+    render();
+  }
 }
 
 if (state.accessToken && !state.mustChangePassword) {

@@ -1059,3 +1059,83 @@ PR [#53](https://github.com/nwejnkasdf/SKKU-insight/pull/53) merge commit `cd5a9
 
 PR #(TBD) merge commit `(TBD)`.
 
+## §24 C-61 라운드 결정 매트릭스 (admin debug console — 2026-05-25)
+
+### 배경
+
+C-55 narrative 정책 — "fusion / reincarnation / leaf / trace internals 는 사용자에게 직접 노출 X, 별도 디버그/관리자 화면에서만" — 의 *관리자 화면* 측이 비어 있던 상태. 기존 admin-console (vanilla JS SPA + node:http static, Next.js 아님) 은 사용자 목록 / 동의 분포 / per-user collection run-now 만. 본 라운드 = 사용자가 명시적으로 "디버그·관리 용도" 콘솔 신설.
+
+발표용 standalone 화면은 다음 라운드 별도 작업 (사용자 결정).
+
+### 사용자 결정 (5건)
+
+| # | 결정 | 근거 |
+|---|---|---|
+| 1 | **디버그·관리 용도** (raw 데이터 + 운영 액션, narrative 강조 X) | 발표용은 별도 standalone 으로 분리 |
+| 2 | **SUPER 권한 게이트** (3 등급 enum SUPER/OPERATOR/READ_ONLY 중 SUPER 만 인사이트 view + 액션) | backend 권한 인프라 (`require_admin_role(SUPER)`) 이미 구현 — 신규 endpoint 마다 한 줄로 게이트 |
+| 3 | **raw 데이터 전부 노출** (UUID/timestamp/score/confidence/origin_ref 그대로) | 디버그 우선. NFR-04 마스킹은 admin 허용 (decisions §11 #4) |
+| 4 | **운영 액션 전부** (force-archive leaf + force-retract trace + cleanup-pseudo + simulate + system_config 토글) | 자기 디버그용. 신중한 confirm dialog + 사유 입력 필수 |
+| 5 | **alembic migration X** | 모든 테이블·CHECK 기존 활용 (AdminRole enum / SystemConfig / RedisKey 전부 기 등록) |
+
+### 자체 결정 (5건)
+
+| # | 결정 | 근거 |
+|---|---|---|
+| A | **trace force-action = archive 통일** (path.pop 정밀 retract 는 본 라운드 범위 밖) | URL `/retract` 유지 (사용자 의도 = 강제 종료) — 실 SQL = `status='archived'`. LLM leaf_remap 동반 정밀 retract 는 후속 라운드 별도 op |
+| B | **SPA 사용자 검색 = state.users 안 매칭 + UUID 정규식 검증** | operations view 의 최근 사용자 20명 안에서 매칭 → 추가 backend endpoint 0건. 시연 환경 사용자 ≤2명이라 충분 |
+| C | **simulate = RQ enqueue + Redis `simulate:{user_id}:status` polling** | sync 호출 시 5~10분 block + browser timeout 위험. collection run-now 와 같은 패턴 |
+| D | **simulate worker job = subprocess `scripts/simulate_user_day.py` 호출** | 격리 + 검증된 패턴 재사용 (in-process call 은 다른 worker job 의 `asyncio.run()` 과 nested loop 위험) |
+| E | **weekly auto-chain 룰 = `active_day % 7 == 0` 도달 시 자동 trigger** | "더 큰 시간 단위도 정합" — days=14 → weekly 2회 자동, days=21 → 3회. 명세 weekly cron 와 같은 룰 |
+| F | **A10 vanilla SPA 채택** (Next.js 마이그레이션 X) | 작업량 ×3, narrative 영향 0. AGENTS.md A10 행 표기 정정 (Next.js → vanilla SPA + node:http static) |
+| G | **READ_ONLY role 분기 미구현** | 사용자 결정 "구현 안 함". SPA 측 분기 0, backend 측 게이트는 enum 그대로 (보존) |
+
+### 권한 매트릭스
+
+| 기능 | OPERATOR | SUPER |
+|---|---|---|
+| operations view (사용자 목록, consent/deletion 상태) | ✅ | ✅ |
+| `POST /admin/users/{id}/collection/run-now` | ✅ | ✅ |
+| `/admin/auth/me` | ✅ | ✅ |
+| **인사이트 view (4 도메인 raw 노출)** | ❌ | ✅ |
+| **force-archive leaf / force-retract trace** | ❌ | ✅ |
+| **cleanup-pseudo / simulate / system-config** | ❌ | ✅ |
+
+### 신규 endpoint (12)
+
+| URL | 메서드 | 책임 |
+|---|---|---|
+| `/admin/auth/me` | GET | `AdminMeResponse` (role 포함) — SPA 분기용 |
+| `/admin/users/{id}/traces` | GET | `list[AdminTraceView]` — path label + 산하 leaf 수 |
+| `/admin/users/{id}/leaves` | GET | `list[AdminLeafView]` — cso 매핑 label |
+| `/admin/users/{id}/recommendations` | GET | `list[AdminRecommendationView]` — score + origin_type + document.title |
+| `/admin/users/{id}/interest-state` | GET | `AdminUserInterestState` — long/short_score + bucket (Phase 0b stub 본문화) |
+| `/admin/users/{id}/leaves/{lid}/archive` | POST | force-archive leaf (204) |
+| `/admin/users/{id}/traces/{tid}/retract` | POST | force-archive trace (204, URL 은 의도 그대로) |
+| `/admin/users/{id}/recommendations/cleanup-pseudo` | POST | `CleanupPseudoResponse` — pseudo row DELETE 수 |
+| `/admin/users/{id}/simulate` | POST | `SimulateAcceptedResponse` — RQ enqueue (202) |
+| `/admin/users/{id}/simulate/status` | GET | `SimulateStatusResponse` — Redis polling |
+| `/admin/system-config` | GET | `SystemConfigListResponse` |
+| `/admin/system-config/{key}` | PUT | `SystemConfigItem` — UPSERT + Redis cache invalidate |
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/app/admin/schemas.py` | 신규 schema 11 (AdminTraceView / AdminLeafView / AdminRecommendationView / SimulateRequest / SimulateAcceptedResponse / SimulateStatusResponse / ForceActionRequest / CleanupPseudoResponse / SystemConfigItem / SystemConfigListResponse / SystemConfigUpdateRequest) |
+| `backend/app/admin/insights_service.py` | 신규 — 5 service (me / traces / leaves / recommendations / interest_state) |
+| `backend/app/admin/actions_service.py` | 신규 — 7 service (force_archive_leaf / force_archive_trace / cleanup_pseudo_recos / enqueue_simulate / get_simulate_status / list_system_config / update_system_config) |
+| `backend/app/admin/router.py` | endpoint 12 신규 + Phase 0b stub `interest-state` 본문화 |
+| `backend/app/worker/jobs/simulate_user_day_job.py` | 신규 — subprocess 패턴 + weekly auto-chain |
+| `backend/app/worker/jobs/__init__.py` | import 추가 (RQ unpickle 정합) |
+| `backend/app/contracts.py` | `RedisKey.simulate_status` 신규 |
+| `admin-console/public/app.js` | state 확장 + nav 3번째 (SUPER 만) + insightsView() + 모든 handlers + polling |
+| `admin-console/public/styles.css` | 인사이트 view 클래스 추가 (insightsBoard / Table / Tabs / dialog 등) |
+
+### 검증
+
+- backend AST parse exit 0 (`schemas / insights_service / actions_service / router / simulate_user_day_job / contracts`)
+- admin-console `node --check public/app.js` exit 0 + `node --check server.mjs` exit 0
+- 시연 검증 (Phase 4) — WSL docker compose + admin SUPER login → 인사이트 view → simulate next_day days=7 → weekly auto-chain 발동 worker log 확인
+
+PR #(TBD) merge commit `(TBD)`.
+

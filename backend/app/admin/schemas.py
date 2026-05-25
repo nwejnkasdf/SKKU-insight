@@ -19,7 +19,10 @@ from app.contracts import (
     CollectionJobStatus,
     EventType,
     InterestBucket,
+    LeafTopicStatus,
+    SlotType,
     SourceType,
+    TraversalStatus,
     TrustLevel,
 )
 
@@ -204,25 +207,149 @@ class AdminEventView(BaseModel):
     server_received_at: datetime
 
 
+# ============================================================
+# 인사이트 (C-61 디버그 콘솔 — SUPER 전용 raw 노출)
+# decisions.md §24, api/admin.md §인사이트
+# ============================================================
+
+
+class AdminTraceView(BaseModel):
+    """user_cso_traversal row raw. 마스킹 X (admin 노출 허용)."""
+
+    trace_id: UUID
+    path: list[UUID]
+    path_labels: list[str]
+    status: TraversalStatus
+    started_active_day: int
+    last_activity_active_day: int
+    archived_at_active_day: int | None = None
+    score_tail: float
+    merged_into_trace_id: UUID | None = None
+    leaf_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminLeafView(BaseModel):
+    """dynamic_leaf_topic row raw + cso 매핑 라벨."""
+
+    leaf_topic_id: UUID
+    label: str
+    label_en: str | None = None
+    confidence: float
+    status: LeafTopicStatus
+    created_active_day: int
+    last_signal_active_day: int
+    merged_into_leaf_topic_id: UUID | None = None
+    cso_mappings: list[UUID]
+    cso_mapping_labels: list[str]
+    created_at: datetime
+
+
+class AdminRecommendationView(BaseModel):
+    """recommendation row raw + 카드 표시용 document 제목."""
+
+    recommendation_id: UUID
+    document_id: UUID
+    document_title: str
+    slot_type: SlotType
+    score: float | None = None
+    reason: str | None = None
+    origin_type: str | None = None
+    origin_ref: UUID | None = None
+    created_at: datetime
+
+
+# ============================================================
+# 운영 액션 (C-61 — SUPER 전용)
+# ============================================================
+
+
+class SimulateRequest(BaseModel):
+    """`POST /admin/users/{id}/simulate` — RQ enqueue + Redis status key."""
+
+    mode: Literal["next_day", "full_day", "weekly"]
+    days: int = 1  # next_day / full_day 시 반복 횟수. weekly 는 무시.
+    reason: str | None = None
+
+
+class SimulateAcceptedResponse(BaseModel):
+    """RQ enqueue 응답. status polling = GET /admin/users/{id}/simulate/status."""
+
+    job_id: str
+    enqueued_at: datetime
+
+
+class SimulateStatusResponse(BaseModel):
+    """Redis simulate:{user_id}:status 직렬화."""
+
+    state: Literal["idle", "queued", "running", "succeeded", "failed"]
+    mode: str | None = None
+    days_total: int | None = None
+    days_done: int | None = None
+    weekly_chains: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    message: str | None = None
+
+
+class ForceActionRequest(BaseModel):
+    """force-archive / force-retract 공통 본문."""
+
+    reason: str | None = None
+
+
+class CleanupPseudoResponse(BaseModel):
+    deleted_count: int
+
+
+class SystemConfigItem(BaseModel):
+    key: str
+    value: dict[str, object]
+    description: str | None = None
+    updated_at: datetime
+    updated_by_admin_id: UUID | None = None
+
+
+class SystemConfigListResponse(BaseModel):
+    items: list[SystemConfigItem]
+
+
+class SystemConfigUpdateRequest(BaseModel):
+    value: dict[str, object]
+    reason: str | None = None
+
+
 __all__ = [
     "AdminEventView",
     "AdminInterestTopicView",
+    "AdminLeafView",
     "AdminLoginRequest",
     "AdminLogoutRequest",
     "AdminMeResponse",
+    "AdminRecommendationView",
     "AdminRefreshRequest",
     "AdminTokenPair",
+    "AdminTraceView",
     "AdminUserInterestState",
     "AdminUserListItem",
     "ChangeAdminPasswordRequest",
+    "CleanupPseudoResponse",
     "ClickbaitBySource",
     "ClickbaitResultView",
     "ClickbaitStatsResponse",
     "CollectionJobView",
     "CollectionStatsResponse",
+    "ForceActionRequest",
     "ReprocessRequestPayload",
     "ReprocessRequestView",
+    "SimulateAcceptedResponse",
+    "SimulateRequest",
+    "SimulateStatusResponse",
     "SourceTogglePatch",
     "SourceView",
+    "SystemConfigItem",
+    "SystemConfigListResponse",
+    "SystemConfigUpdateRequest",
     "TopicLinkageErrorView",
 ]

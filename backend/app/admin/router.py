@@ -16,31 +16,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collection.schemas import RunNowResponse
 from app.config import get_settings
-from app.contracts import CollectionJobStatus, PagedResponse
+from app.contracts import AdminRole, CollectionJobStatus, PagedResponse
 from app.db.models import AdminUser
 from app.db.session import get_session
 from app.redis import get_redis
-from app.security.deps import get_current_admin
+from app.security.deps import get_current_admin, require_admin_role
 from app.security.rate_limit import limiter
 
-from . import auth_service, users_service
+from . import actions_service, auth_service, insights_service, users_service
 from .schemas import (
     AdminEventView,
+    AdminLeafView,
     AdminLoginRequest,
     AdminLogoutRequest,
+    AdminMeResponse,
+    AdminRecommendationView,
     AdminRefreshRequest,
     AdminTokenPair,
+    AdminTraceView,
     AdminUserInterestState,
     AdminUserListItem,
     ChangeAdminPasswordRequest,
+    CleanupPseudoResponse,
     ClickbaitResultView,
     ClickbaitStatsResponse,
     CollectionJobView,
     CollectionStatsResponse,
+    ForceActionRequest,
     ReprocessRequestPayload,
     ReprocessRequestView,
+    SimulateAcceptedResponse,
+    SimulateRequest,
+    SimulateStatusResponse,
     SourceTogglePatch,
     SourceView,
+    SystemConfigItem,
+    SystemConfigListResponse,
+    SystemConfigUpdateRequest,
     TopicLinkageErrorView,
 )
 
@@ -127,6 +139,18 @@ async def admin_change_password_endpoint(
         admin, req, request=request, db=db, redis=_redis_default()
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/auth/me",
+    response_model=AdminMeResponse,
+    summary="관리자 자기 정보 (role 포함)",
+)
+async def admin_me_endpoint(
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+) -> AdminMeResponse:
+    """SPA 가 role 분기 시 사용 (C-61). aud=admin + must_change_password 통과 강제."""
+    return insights_service.get_admin_me(admin)
 
 
 # ============================================================
@@ -295,11 +319,17 @@ async def admin_list_users_endpoint(
 @router.get(
     "/users/{user_id}/interest-state",
     response_model=AdminUserInterestState,
-    summary="사용자 관심 상태 (점수 포함, 관리자만)",
+    summary="사용자 관심 상태 (점수 포함, SUPER 전용)",
 )
-async def admin_user_interest_state(user_id: UUID) -> AdminUserInterestState:
-    """NFR-04 우회 — long_score/short_score 노출."""
-    raise NotImplementedError("Phase 0b A6에서 구현")
+async def admin_user_interest_state(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminUserInterestState:
+    """C-61 본문화: NFR-04 우회 (admin 노출 허용) — long_score/short_score 그대로."""
+    return await insights_service.get_admin_interest_state(
+        db=db, redis=_redis_default(), user_id=user_id
+    )
 
 
 @router.get(
@@ -313,6 +343,179 @@ async def admin_user_events(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> PagedResponse[AdminEventView]:
     raise NotImplementedError("Phase 0b A6에서 구현")
+
+
+@router.get(
+    "/users/{user_id}/traces",
+    response_model=list[AdminTraceView],
+    summary="사용자 traversal trace 전체 (raw, SUPER 전용)",
+)
+async def admin_user_traces(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[AdminTraceView]:
+    """C-61 인사이트: active/stale/archived 전체 + path label + 산하 leaf 수."""
+    return await insights_service.get_admin_traces(db=db, user_id=user_id)
+
+
+@router.get(
+    "/users/{user_id}/leaves",
+    response_model=list[AdminLeafView],
+    summary="사용자 dynamic leaf 전체 (raw, SUPER 전용)",
+)
+async def admin_user_leaves(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> list[AdminLeafView]:
+    """C-61 인사이트: emerging~archived 전체 + cso 매핑 label."""
+    return await insights_service.get_admin_leaves(db=db, user_id=user_id)
+
+
+@router.get(
+    "/users/{user_id}/recommendations",
+    response_model=list[AdminRecommendationView],
+    summary="사용자 recommendation 최근 N개 (raw, SUPER 전용)",
+)
+async def admin_user_recommendations(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[AdminRecommendationView]:
+    """C-61 인사이트: slot/score/origin_type/origin_ref + document.title."""
+    return await insights_service.get_admin_recommendations(
+        db=db, user_id=user_id, limit=limit
+    )
+
+
+# ============================================================
+# 운영 액션 (C-61) — 전부 SUPER 전용. confirm/사유는 SPA dialog 측에서 강제.
+# ============================================================
+
+
+@router.post(
+    "/users/{user_id}/leaves/{leaf_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="dynamic leaf 강제 archive (SUPER)",
+)
+async def admin_force_archive_leaf(
+    user_id: UUID,
+    leaf_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    payload: ForceActionRequest | None = None,
+) -> Response:
+    """leaf status='archived' UPDATE + recommendation cache invalidate."""
+    _ = payload  # reason 은 RQ/audit 로깅 없이 현 라운드 SPA 측 표시만
+    await actions_service.force_archive_leaf(
+        db=db, redis_async=_redis_default(), user_id=user_id, leaf_id=leaf_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/users/{user_id}/traces/{trace_id}/retract",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="traversal trace 강제 종료 (SUPER) — 실 SQL = archive",
+)
+async def admin_force_retract_trace(
+    user_id: UUID,
+    trace_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    payload: ForceActionRequest | None = None,
+) -> Response:
+    """trace status='archived' UPDATE. URL 은 사용자 의도 그대로 (강제 종료)."""
+    _ = payload
+    await actions_service.force_archive_trace(
+        db=db, redis_async=_redis_default(), user_id=user_id, trace_id=trace_id
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/users/{user_id}/recommendations/cleanup-pseudo",
+    response_model=CleanupPseudoResponse,
+    summary="pseudo_cold_start recommendation row 1회 정리 (SUPER)",
+)
+async def admin_cleanup_pseudo_recos(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> CleanupPseudoResponse:
+    """C-58 이후 자동 정리 외에 명시적 트리거 — 진단/시연용."""
+    return await actions_service.cleanup_pseudo_recos(
+        db=db, redis_async=_redis_default(), user_id=user_id
+    )
+
+
+@router.post(
+    "/users/{user_id}/simulate",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SimulateAcceptedResponse,
+    summary="시간 시뮬레이션 enqueue (next_day/full_day/weekly, SUPER)",
+)
+async def admin_simulate_user(
+    user_id: UUID,
+    admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    req: SimulateRequest,
+) -> SimulateAcceptedResponse:
+    """RQ enqueue. weekly 는 한 번, next_day/full_day 는 days 회 반복 + 7배수 chain."""
+    return actions_service.enqueue_simulate(admin=admin, user_id=user_id, req=req)
+
+
+@router.get(
+    "/users/{user_id}/simulate/status",
+    response_model=SimulateStatusResponse,
+    summary="시뮬레이션 진행률 (Redis 직렬화, SUPER)",
+)
+async def admin_simulate_status(
+    user_id: UUID,
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+) -> SimulateStatusResponse:
+    """SPA polling 5s. 없으면 state='idle'."""
+    return await actions_service.get_simulate_status(
+        redis_async=_redis_default(), user_id=user_id
+    )
+
+
+# ============================================================
+# 시스템 설정 (C-61, A10 read-only loader 와 분리된 갱신 책임)
+# ============================================================
+
+
+@router.get(
+    "/system-config",
+    response_model=SystemConfigListResponse,
+    summary="system_config 전체 (SUPER)",
+)
+async def admin_list_system_config(
+    _admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SystemConfigListResponse:
+    return await actions_service.list_system_config(db=db)
+
+
+@router.put(
+    "/system-config/{key}",
+    response_model=SystemConfigItem,
+    summary="system_config row 갱신 + Redis cache invalidate (SUPER)",
+)
+async def admin_update_system_config(
+    key: str,
+    admin: Annotated[AdminUser, Depends(require_admin_role(AdminRole.SUPER))],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    payload: SystemConfigUpdateRequest,
+) -> SystemConfigItem:
+    return await actions_service.update_system_config(
+        db=db,
+        redis_async=_redis_default(),
+        admin=admin,
+        key=key,
+        new_value=payload.value,
+    )
 
 
 @router.post(

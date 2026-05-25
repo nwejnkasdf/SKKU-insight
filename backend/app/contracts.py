@@ -411,6 +411,15 @@ class RedisKey:
         return f"system_config:{key}"
 
     @staticmethod
+    def simulate_status(user_id: UUID) -> str:
+        """(C-61) admin SUPER simulate worker job 진행률. SETEX 1h.
+
+        worker (`simulate_user_day_job`) 가 매 1일/weekly chain 후 갱신. admin SPA 가
+        `GET /admin/users/{id}/simulate/status` 로 polling.
+        """
+        return f"simulate:{user_id}:status"
+
+    @staticmethod
     def interest_decay_lock(user_id: UUID) -> str:
         """A6 daily decay cron 의 per-user mutex. 10s TTL.
 

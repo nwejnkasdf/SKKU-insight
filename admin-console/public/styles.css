@@ -602,3 +602,239 @@ button.tableAction {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   C-61 인사이트 view (SUPER 전용 디버그 콘솔)
+   ============================================================ */
+
+.insightsBoard {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.insightsSearch {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.insightsSearch input {
+  flex: 1 1 280px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font: inherit;
+}
+
+.insightsSearch button {
+  white-space: nowrap;
+}
+
+.insightsTabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.insightsTabs button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.insightsTabs button.active {
+  background: rgba(80, 120, 200, 0.4);
+  border-color: rgba(120, 160, 240, 0.6);
+}
+
+.insightsTable {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.insightsTable .row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(5, minmax(80px, 1fr)) auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.insightsTable .row.header {
+  font-weight: 600;
+  opacity: 0.7;
+  border-bottom-color: rgba(255, 255, 255, 0.15);
+}
+
+.insightsTable .raw {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.insightsTable .pathChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.insightsTable .pathChips span {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.75rem;
+}
+
+.dangerAction {
+  background: rgba(180, 60, 60, 0.3);
+  border: 1px solid rgba(220, 100, 100, 0.6);
+  color: inherit;
+  padding: 0.3rem 0.7rem;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.dangerAction:hover {
+  background: rgba(200, 80, 80, 0.5);
+}
+
+.simulatePanel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.simulateControls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.simulateControls select,
+.simulateControls input {
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}
+
+.simulateProgress {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.simulateProgress b {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-bottom: 0.2rem;
+}
+
+.systemConfigEditor textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.systemConfigRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 3fr auto;
+  gap: 0.5rem;
+  align-items: start;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.systemConfigRow code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.85;
+}
+
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialogBox {
+  background: #1f2330;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 1.25rem;
+  max-width: 480px;
+  width: 90%;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dialogBox h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.dialogBox p {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.dialogBox textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.dialogActions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.dialogActions button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  cursor: pointer;
+}
+
+.dialogActions button.primary {
+  background: rgba(180, 60, 60, 0.5);
+  border-color: rgba(220, 100, 100, 0.6);
+}

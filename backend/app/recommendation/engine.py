@@ -380,6 +380,10 @@ async def _query_any_backfill_documents(
                 ClickbaitResult.document_id == Document.document_id,
                 ClickbaitResult.decision == "clickbait",
             ),
+            # (C-58 followup, 2026-05-25) pseudo 제외 — candidates.py:99 + fallback.py:285
+            # 와 같은 정책. 본 함수에 filter 누락으로 옛 pseudo Document 가 fallback 으로
+            # 끌어들여져 dashboard 상단 노출되던 결함 fix.
+            Document.content_type != ContentType.PSEUDO_COLD_START.value,
         )
         .order_by(
             Document.published_at.desc().nulls_last(),

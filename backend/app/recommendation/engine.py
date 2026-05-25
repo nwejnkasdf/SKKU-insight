@@ -101,12 +101,15 @@ class DashboardBuildResult:
 
 
 async def _cleanup_pseudo_recommendations(
-    db: AsyncSession, user_id: UUID
+    db: AsyncSession, redis: aioredis.Redis, user_id: UUID
 ) -> int:
     """(C-58, 2026-05-25) normal ranking 전환 시 옛 pseudo Recommendation row 정리.
 
     사용자 의도: "실제 수거하면 목업 다 없애". 옛 pseudo Document 자체는 보존 (legacy,
     backward-compat). Recommendation row 만 user-scoped DELETE.
+
+    (C-58 followup, 2026-05-25) DELETE 가 실제로 row 정리 시 Redis cache 도 invalidate.
+    그렇지 않으면 build_dashboard 가 cache hit 으로 옛 카드 (pseudo 포함) 반환.
 
     매 build_dashboard normal 분기 진입 시 호출 — idempotent (정리 후 0건 DELETE no-op).
     return: 삭제된 row 수 (통계용, 시연 검증 로그).
@@ -124,7 +127,10 @@ async def _cleanup_pseudo_recommendations(
         ),
         {"uid": user_id},
     )
-    return int(result.rowcount or 0)
+    deleted = int(result.rowcount or 0)
+    if deleted > 0:
+        await redis.delete(RedisKey.recommendation_cache(user_id))
+    return deleted
 
 
 async def _has_only_cold_start_recommendations(
@@ -1358,8 +1364,10 @@ async def build_dashboard(
             response=await _load_cold_start_dashboard(db, user, params, config)
         )
     # (C-58, 2026-05-25) normal ranking 전환 시 옛 pseudo Recommendation 자동 정리.
-    # idempotent — 이미 정리된 user 는 0건 DELETE.
-    await _cleanup_pseudo_recommendations(db, user.user_id)
+    # (C-58 followup) DELETE 발생 시 Redis cache 도 invalidate (caller 가 매 호출 cache
+    # hit 검사하므로 stale pseudo 카드가 cache 에서 복원되는 race 차단).
+    # idempotent — 이미 정리된 user 는 0건 DELETE + cache invalidate skip.
+    await _cleanup_pseudo_recommendations(db, redis, user.user_id)
 
     # 1. 후보 query base.
     current_csos = await trav_queries.get_current_topics(db, user.user_id)

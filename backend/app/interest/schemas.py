@@ -64,12 +64,18 @@ class BatchResponse(BaseModel):
 
 
 class InterestTopicView(BaseModel):
-    """관심 토픽 노출. NFR-04: 점수 자체 노출 X — bucket 만."""
+    """관심 토픽 노출. NFR-04: 점수 자체 노출 X — bucket 만.
+
+    (C-60, 2026-05-25) `is_onboarding_selected` 신규 — 사용자가 onboarding 시 직접
+    선택한 cluster (또는 1-hop boost 자식) 표시. UI 의 "초기 seed" view 가 onboarding
+    선택 정합. backend SQL = `boost_applied_at_active_day IS NOT NULL`.
+    """
 
     cso_topic_id: UUID | None = None
     leaf_topic_id: UUID | None = None
     label: str
     bucket: InterestBucket
+    is_onboarding_selected: bool = False
 
 
 class InterestStateResponse(BaseModel):

@@ -455,3 +455,24 @@ class TestRound1CodexFixGuards:
             )
         ).scalars().all()
         assert len(rows) == 0
+
+
+# ============================================================
+# C-60 — onboarding 선택 표시 정합
+# ============================================================
+
+
+def test_c60_interest_topic_view_has_is_onboarding_selected() -> None:
+    """InterestTopicView schema 가 is_onboarding_selected 필드 보유."""
+    import inspect
+
+    from app.interest.schemas import InterestTopicView
+
+    fields = InterestTopicView.model_fields
+    assert "is_onboarding_selected" in fields
+    # router 본문이 boost_applied_at_active_day 기반으로 채우는지 정적 검증.
+    from app.interest.router import get_interest_state
+
+    src = inspect.getsource(get_interest_state)
+    assert "is_onboarding_selected" in src
+    assert "boost_applied_at_active_day" in src

@@ -157,6 +157,8 @@ async def get_interest_state(
                 leaf_topic_id=row.leaf_topic_id,
                 label=label,
                 bucket=bucket,
+                # (C-60, 2026-05-25) onboarding 선택 표시 — UI "초기 seed" view 정합.
+                is_onboarding_selected=row.boost_applied_at_active_day is not None,
             )
         )
     # bucket HIGH→MEDIUM→LOW→NEUTRAL 정렬 (안정 정렬로 내부 long_score DESC 유지)

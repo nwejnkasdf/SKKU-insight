@@ -33,6 +33,12 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 
+class AdminSignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    signup_code: str
+
+
 class AdminTokenPair(BaseModel):
     """관리자 JWT 쌍. 부트스트랩 직후 must_change_password=true."""
 
@@ -211,6 +217,7 @@ __all__ = [
     "AdminLogoutRequest",
     "AdminMeResponse",
     "AdminRefreshRequest",
+    "AdminSignupRequest",
     "AdminTokenPair",
     "AdminUserInterestState",
     "AdminUserListItem",

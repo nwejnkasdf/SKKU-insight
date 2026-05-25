@@ -31,6 +31,7 @@ WHITELIST_PATTERNS = [
     re.compile(r"^/auth/signup/?$"),
     re.compile(r"^/auth/login/?$"),
     re.compile(r"^/auth/refresh/?$"),
+    re.compile(r"^/admin/auth/signup/?$"),
     re.compile(r"^/admin/auth/login/?$"),
     # codex C-3: admin refresh 도 access 만료 후 호출되므로 인증 우회 대상.
     re.compile(r"^/admin/auth/refresh/?$"),

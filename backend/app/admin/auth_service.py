@@ -11,6 +11,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import HTTPException, Request, status
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -35,6 +36,7 @@ from app.security.password import (
 from .schemas import (
     AdminLoginRequest,
     AdminRefreshRequest,
+    AdminSignupRequest,
     AdminTokenPair,
     ChangeAdminPasswordRequest,
 )
@@ -107,6 +109,79 @@ async def admin_login(
         refresh_token=refresh_token,
         expires_in=settings.JWT_ACCESS_MINUTES * 60,
         must_change_password=admin.must_change_password,
+    )
+
+
+async def admin_signup(
+    payload: AdminSignupRequest,
+    *,
+    request: Request,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> AdminTokenPair:
+    settings = get_settings()
+    if not settings.ADMIN_SIGNUP_CODE or payload.signup_code != settings.ADMIN_SIGNUP_CODE:
+        raise _http_error(
+            status.HTTP_403_FORBIDDEN,
+            ErrorCode.ADMIN_UNAUTHORIZED,
+            "관리자 가입 코드가 올바르지 않습니다.",
+            request=request,
+        )
+
+    email = _normalize(payload.email)
+    try:
+        enforce_password_policy(payload.password, email=email)
+    except PolicyViolation as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            exc.code,
+            exc.message,
+            request=request,
+            details={"sub_code": exc.sub_code},
+        ) from exc
+
+    existing = await db.execute(
+        select(AdminUser).where(func.lower(AdminUser.email) == email)
+    )
+    if existing.scalars().first() is not None:
+        raise _http_error(
+            status.HTTP_409_CONFLICT,
+            ErrorCode.AUTH_EMAIL_TAKEN,
+            "이미 가입된 관리자 이메일입니다.",
+            request=request,
+        )
+
+    admin = AdminUser(
+        email=email,
+        password_hash=hash_password(payload.password),
+        role=settings.ADMIN_SIGNUP_ROLE.value,
+        status="active",
+        must_change_password=False,
+        created_at=datetime.now(UTC),
+        last_login_at=datetime.now(UTC),
+    )
+    db.add(admin)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise _http_error(
+            status.HTTP_409_CONFLICT,
+            ErrorCode.AUTH_EMAIL_TAKEN,
+            "이미 가입된 관리자 이메일입니다.",
+            request=request,
+        ) from exc
+    await db.refresh(admin)
+
+    access_token, _ = encode_access(admin.admin_id, TokenAudience.ADMIN)
+    refresh_token, _ = await issue_refresh(
+        admin.admin_id, ip=_client_ip(request), ua=_user_agent(request), redis=redis
+    )
+    return AdminTokenPair(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=settings.JWT_ACCESS_MINUTES * 60,
+        must_change_password=False,
     )
 
 
@@ -215,4 +290,5 @@ __all__ = [
     "admin_login",
     "admin_logout",
     "admin_refresh",
+    "admin_signup",
 ]

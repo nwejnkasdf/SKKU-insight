@@ -3,12 +3,13 @@ const apiBase = window.__ADMIN_CONFIG__?.apiBase || "http://localhost:8000";
 const state = {
   accessToken: localStorage.getItem("admin_access") || "",
   refreshToken: localStorage.getItem("admin_refresh") || "",
-  adminEmail: localStorage.getItem("admin_email") || "admin@skkuinsight.org",
+  adminEmail: "",
   mustChangePassword: localStorage.getItem("admin_must_change") === "true",
   loading: false,
   error: "",
   notice: "",
   noticeTone: "success",
+  authMode: "login",
   collectionBusyUserId: "",
   collectionRowMessages: {},
   collectionPollTimer: null,
@@ -65,14 +66,14 @@ function setTokens(pair, email = state.adminEmail) {
   state.mustChangePassword = Boolean(pair.must_change_password);
   localStorage.setItem("admin_access", state.accessToken);
   localStorage.setItem("admin_refresh", state.refreshToken);
-  localStorage.setItem("admin_email", state.adminEmail);
+  localStorage.removeItem("admin_email");
   localStorage.setItem("admin_must_change", String(state.mustChangePassword));
 }
 
 function clearTokens() {
   state.accessToken = "";
   state.refreshToken = "";
-  state.adminEmail = "admin@skkuinsight.org";
+  state.adminEmail = "";
   state.mustChangePassword = false;
   localStorage.removeItem("admin_access");
   localStorage.removeItem("admin_refresh");
@@ -130,6 +131,33 @@ async function login(event) {
       body: JSON.stringify({
         email,
         password: String(data.get("password") || "")
+      })
+    }, false);
+    setTokens(pair, email);
+    await loadDashboard();
+  } catch (error) {
+    state.error = messageForError(error);
+  } finally {
+    state.loading = false;
+    render();
+    updateCollectionPolling();
+  }
+}
+
+async function signup(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  state.loading = true;
+  state.error = "";
+  render();
+  try {
+    const email = String(data.get("email") || "").trim();
+    const pair = await request("/admin/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        password: String(data.get("password") || ""),
+        signup_code: String(data.get("signupCode") || "").trim()
       })
     }, false);
     setTokens(pair, email);
@@ -531,20 +559,31 @@ function render() {
 }
 
 function loginView() {
+  const isSignup = state.authMode === "signup";
   return `
     <section class="loginWrap">
-      <form class="loginCard form" id="loginForm">
+      <form class="loginCard form" id="${isSignup ? "signupForm" : "loginForm"}">
         ${brandBlock()}
+        <div class="authSwitch">
+          <button class="${!isSignup ? "active" : ""}" type="button" data-auth-mode="login">로그인</button>
+          <button class="${isSignup ? "active" : ""}" type="button" data-auth-mode="signup">회원가입</button>
+        </div>
         <label>
           <span class="meta">관리자 이메일</span>
-          <input name="email" type="email" value="admin@skkuinsight.org" autocomplete="username" required />
+          <input name="email" type="email" autocomplete="username" required />
         </label>
         <label>
           <span class="meta">비밀번호</span>
-          <input name="password" type="password" autocomplete="current-password" required />
+          <input name="password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required />
         </label>
+        ${isSignup ? `
+          <label>
+            <span class="meta">관리자 가입 코드</span>
+            <input name="signupCode" type="password" autocomplete="off" required />
+          </label>
+        ` : ""}
         ${state.error ? `<p class="${state.error.includes("변경") ? "notice" : "error"}">${state.error}</p>` : ""}
-        <button type="submit" ${state.loading ? "disabled" : ""}>관리자 로그인</button>
+        <button type="submit" ${state.loading ? "disabled" : ""}>${isSignup ? "관리자 회원가입" : "관리자 로그인"}</button>
       </form>
     </section>
   `;
@@ -676,7 +715,6 @@ function accountView() {
           <span class="status">활성</span>
         </div>
         <div class="statusList">
-          ${statusRow("이메일", state.adminEmail, true)}
           ${statusRow("권한", "관리자", true)}
           ${statusRow("토큰 만료", session.expiresAt, session.valid)}
         </div>
@@ -768,6 +806,14 @@ function buttonSpinner() {
 
 function bindLogin() {
   document.querySelector("#loginForm")?.addEventListener("submit", login);
+  document.querySelector("#signupForm")?.addEventListener("submit", signup);
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.authMode = button.getAttribute("data-auth-mode") || "login";
+      state.error = "";
+      render();
+    });
+  });
 }
 
 function bindPasswordChange() {

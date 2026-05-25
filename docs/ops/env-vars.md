@@ -73,6 +73,8 @@
 | `ADMIN_BOOTSTRAP_EMAIL` | `admin@skkuinsight.org` | 첫 관리자 이메일 |
 | `ADMIN_BOOTSTRAP_PASSWORD` | (강력 비밀번호) | 첫 로그인 시 강제 변경 |
 | `ADMIN_BOOTSTRAP_ROLE` | `super` | super | operator | read_only |
+| `ADMIN_SIGNUP_CODE` | 빈 문자열 | 관리자 콘솔 회원가입 코드. 빈 값이면 회원가입 비활성 |
+| `ADMIN_SIGNUP_ROLE` | `super` | 가입 코드로 생성되는 관리자 role |
 
 ## Rate limit
 
@@ -338,6 +340,8 @@ CLICKBAIT_ENABLED=false
 ADMIN_BOOTSTRAP_EMAIL=admin@skkuinsight.org
 ADMIN_BOOTSTRAP_PASSWORD=Bootstrap-Initial-2026-Strong!
 ADMIN_BOOTSTRAP_ROLE=super
+ADMIN_SIGNUP_CODE=
+ADMIN_SIGNUP_ROLE=super
 
 # === Rate limit ===
 RATE_LIMIT_LOGIN=5/minute

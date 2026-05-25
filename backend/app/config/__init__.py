@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     # 정책 위반 회피: "admin" 금칙어 + email local "admin" 포함 차단 룰 통과해야 함.
     ADMIN_BOOTSTRAP_PASSWORD: str = "Bootstrap-Initial-2026-Strong!"
     ADMIN_BOOTSTRAP_ROLE: AdminRole = AdminRole.SUPER
+    ADMIN_SIGNUP_CODE: str = ""
+    ADMIN_SIGNUP_ROLE: AdminRole = AdminRole.SUPER
 
     # === Rate limit (slowapi format) ===
     RATE_LIMIT_LOGIN: str = "5/minute"

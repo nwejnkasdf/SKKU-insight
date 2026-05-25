@@ -29,6 +29,7 @@ from .schemas import (
     AdminLoginRequest,
     AdminLogoutRequest,
     AdminRefreshRequest,
+    AdminSignupRequest,
     AdminTokenPair,
     AdminUserInterestState,
     AdminUserListItem,
@@ -57,6 +58,22 @@ _settings = get_settings()
 # ============================================================
 # 인증 (4) — A2 본문 구현
 # ============================================================
+
+
+@router.post(
+    "/auth/signup",
+    response_model=AdminTokenPair,
+    summary="관리자 회원가입",
+)
+@limiter.limit(_settings.RATE_LIMIT_SIGNUP)
+async def admin_signup_endpoint(
+    request: Request,
+    req: AdminSignupRequest,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminTokenPair:
+    return await auth_service.admin_signup(
+        req, request=request, db=db, redis=_redis_default()
+    )
 
 
 @router.post(

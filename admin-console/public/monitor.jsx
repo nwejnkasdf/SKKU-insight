@@ -729,6 +729,11 @@
       }
     };
     const handleTraceSelect = (id) => {
+      // Toggle: 같은 trace 두 번째 클릭 시 선택 해제 → zoom 복원, leaves 사라짐.
+      if (selectedTrace === id) {
+        setSelectedTrace(null);
+        return;
+      }
       setSelectedTrace(id);
       const tr = user?.traces.find(t => t.id === id);
       if (tr && tr.path.length) setSelectedTopic(tr.path[tr.path.length - 1]);

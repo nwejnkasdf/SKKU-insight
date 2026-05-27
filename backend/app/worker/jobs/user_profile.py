@@ -35,6 +35,7 @@ from app.llm_provider import get_provider
 from app.profile.config_loader import load_profile_config
 from app.profile.service import (
     apply_fusion_bridge_override,
+    apply_reincarnation_prefetch,
     fetch_profile_llm_input,
     generate_profile_payload,
     upsert_user_profile,
@@ -136,6 +137,22 @@ async def _run() -> int:
                     fusion_fetch_max_documents=settings.FUSION_FETCH_MAX_DOCUMENTS,
                     fusion_fetch_recent_urls_window_days=(
                         settings.FUSION_FETCH_RECENT_URLS_WINDOW_DAYS
+                    ),
+                )
+                # (2026-05-27) Reincarnation 영역 fresh fetch — Fusion 대칭. payload
+                # 영향 없음 (side-effect only: Document INSERT). 같은 트랜잭션 안에서
+                # commit. 별도 archived_trace sampling — Fusion 의 sample 과 독립.
+                await apply_reincarnation_prefetch(
+                    db,
+                    user_id=user.user_id,
+                    archive_score_tail_min=config.archive_score_tail_min,
+                    input_archive_max=config.input_archive_max,
+                    softmax_temperature=settings.REINCARNATION_SAMPLING_TEMPERATURE,
+                    provider=provider,
+                    fetch_enabled=settings.REINCARNATION_FETCH_ENABLED,
+                    fetch_max_documents=settings.REINCARNATION_FETCH_MAX_DOCUMENTS,
+                    fetch_recent_urls_window_days=(
+                        settings.REINCARNATION_FETCH_RECENT_URLS_WINDOW_DAYS
                     ),
                 )
                 # (C-44 P2-28, 2026-05-19) candidate_pool 영속화 — LLM 이 사용한

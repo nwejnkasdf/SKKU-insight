@@ -310,8 +310,9 @@ class Settings(BaseSettings):
     USER_PROFILE_REINCARNATION_GAP_DAYS_MIN: int = 7
     # daily cron lock TTL (초). LLM 호출 동반 — Codex R1 Critical #1 fix (2026-05-19):
     # 직전 180s == LLM_REQUEST_TIMEOUT_SECONDS 라 LLM call 도중 lock 만료 race 위험.
-    # 2x LLM timeout + commit/cache 오버헤드 마진. A7 traversal_lock 패턴 답습 + 확장.
-    USER_PROFILE_LOCK_TTL_SECONDS: int = 360
+    # (2026-05-27 reincarnation_fetch 추가) Fusion + Reincarnation 2x LLM 호출 →
+    # 3x LLM timeout + commit/cache 오버헤드 마진 (540s). 종전 360 = 2x 였음.
+    USER_PROFILE_LOCK_TTL_SECONDS: int = 540
     # UserProfile fetch 시 Redis cache TTL (초). engine.build_dashboard 가 1회 fetch
     # 후 SETEX. daily cron 완료 후 DEL 로 invalidate.
     USER_PROFILE_CACHE_TTL_SECONDS: int = 3600
@@ -326,6 +327,14 @@ class Settings(BaseSettings):
     # P1 — prompt dedup hint 위해 prompt context 에 포함할 "직전 fusion fetch URL/title"
     # 윈도우 (days). Recommendation 의 origin_type='fusion' + 본 window 안 row 조회 결과.
     FUSION_FETCH_RECENT_URLS_WINDOW_DAYS: int = 30
+    # (2026-05-27) Reincarnation 영역 fresh Document fetch — fusion_fetch 대칭.
+    # 동기: archived 영역은 collection_job 의 active leaves 대상이 아니라 신규 docs
+    # 유입 없음 → Reincarnation 슬롯이 corpus 누적분에만 의존 → archive 부활 narrative
+    # 빈도 낮음. 매일 sampled archived trace tail_cso 에 LLM web_search 1회.
+    # 사용자당 LLM 1회/일 추가 (Fusion 1 + Reincarnation 1 = 2회/일).
+    REINCARNATION_FETCH_ENABLED: bool = True
+    REINCARNATION_FETCH_MAX_DOCUMENTS: int = 5
+    REINCARNATION_FETCH_RECENT_URLS_WINDOW_DAYS: int = 30
 
     # === External sources ===
     # (v13 라운드 dead, 2026-05-11) source 어댑터 6종 폐기로 본 두 env 미사용.

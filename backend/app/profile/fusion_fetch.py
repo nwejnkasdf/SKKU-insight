@@ -25,11 +25,11 @@ Anti-pattern 회피:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collection.orchestrator import (
@@ -62,13 +62,17 @@ async def fetch_trace_saved_titles(
     """trace path 의 cso_topic 들과 매핑된 SavedDocument 의 Document.title list.
 
     P1 prompt context B2 — 두 trace 각각의 최근 saved Document 제목 limit 개. SavedDocument
-    created_at DESC 정렬. trace.path 위 어떤 cso 든 매핑된 자료면 포함 (path 전체 = 해당
-    trace 의 관심 영역). DISTINCT title.
+    saved_at MAX DESC 정렬. trace.path 위 어떤 cso 든 매핑된 자료면 포함 (path 전체 =
+    해당 trace 의 관심 영역). 같은 title 여러 row 면 가장 최근 save 시각으로 통합.
+
+    (2026-05-27 fix) SELECT DISTINCT + ORDER BY non-select column 은 PostgreSQL 에서
+    InvalidColumnReferenceError. GROUP BY title + MAX(saved_at) 패턴으로 교체 —
+    semantic 동일 (distinct titles ordered by recency) + SQL 표준 준수.
     """
     if not trace_path:
         return []
     stmt = (
-        select(Document.title)
+        select(Document.title, func.max(SavedDocument.saved_at).label("last_save"))
         .join(
             DocumentTopic,
             DocumentTopic.document_id == Document.document_id,
@@ -81,8 +85,8 @@ async def fetch_trace_saved_titles(
             SavedDocument.user_id == user_id,
             DocumentTopic.cso_topic_id.in_(trace_path),
         )
-        .order_by(SavedDocument.created_at.desc())
-        .distinct()
+        .group_by(Document.title)
+        .order_by(func.max(SavedDocument.saved_at).desc())
         .limit(limit)
     )
     rows = (await db.execute(stmt)).all()
@@ -150,7 +154,7 @@ def _build_trace_json(
             "사용자의 옛 관심 영역(archived) 과 현재 관심 영역(active) 가 만나는 "
             "'fusion bridge' 토픽 영역의 fresh 자료를 web 검색 도구로 수집한다. "
             "두 trace 의 외부 교차 — meet in the middle BFS 의 첫 만남 노드. "
-            "narrative: 두 영역 사이의 새 학습 path (예: Graph Algorithms × Memory "
+            "narrative: 두 영역 사이의 새 학습 path (예: Graph Algorithms x Memory "
             "Management = Memory-bounded Algorithms)."
         ),
         "bridge": {

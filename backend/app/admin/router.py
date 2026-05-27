@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.collection.schemas import RunNowResponse
 from app.config import get_settings
 from app.contracts import CollectionJobStatus, PagedResponse, TraversalStatus
-from app.db.models import AdminUser, CSOTopic, DynamicLeafTopic
+from app.db.models import AdminUser, CSOTopic, DocumentTopic, DynamicLeafTopic
 from app.db.session import get_session
 from app.interest import service as interest_service
 from app.interest.bucket import bucket_for, bucket_sort_key
@@ -32,6 +32,7 @@ from app.topic.schemas import TopicDocumentsResponse, TraversalTraceDetail, Trav
 
 from . import auth_service, users_service
 from .schemas import (
+    AdminDocumentItem,
     AdminEventView,
     AdminInterestTopicView,
     AdminLoginRequest,
@@ -39,6 +40,7 @@ from .schemas import (
     AdminRefreshRequest,
     AdminSignupRequest,
     AdminTokenPair,
+    AdminTopicDocumentsResponse,
     AdminUserInterestState,
     AdminUserListItem,
     ChangeAdminPasswordRequest,
@@ -432,8 +434,8 @@ async def admin_user_trace_detail(
 
 @router.get(
     "/users/{user_id}/topics/{topic_id}/documents",
-    response_model=TopicDocumentsResponse,
-    summary="사용자별 토픽 수집 문서 (관리자)",
+    response_model=AdminTopicDocumentsResponse,
+    summary="사용자별 토픽 수집 문서 (관리자, confidence 포함)",
 )
 async def admin_user_topic_documents(
     user_id: UUID,
@@ -443,11 +445,38 @@ async def admin_user_topic_documents(
     since: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
-) -> TopicDocumentsResponse:
-    """관리자 모니터링 — 임의 user_id 의 토픽별 수집 문서. 본인용 /topics/{id}/documents 와 동일."""
+) -> AdminTopicDocumentsResponse:
+    """관리자 모니터링 — 본인용 endpoint 응답 + DocumentTopic.confidence 노출."""
     _ = admin
-    return await documents_service.list_topic_documents(
+    base = await documents_service.list_topic_documents(
         db, user_id, topic_id, since, cursor, limit
+    )
+    doc_ids = [item.document_id for item in base.items]
+    conf_map: dict[UUID, float | None] = {}
+    if doc_ids:
+        filter_col = (
+            DocumentTopic.cso_topic_id
+            if base.topic_type == "cso"
+            else DocumentTopic.leaf_topic_id
+        )
+        conf_stmt = select(DocumentTopic.document_id, DocumentTopic.confidence).where(
+            DocumentTopic.document_id.in_(doc_ids),
+            filter_col == topic_id,
+        )
+        for row in await db.execute(conf_stmt):
+            conf_map[row.document_id] = row.confidence
+    items = [
+        AdminDocumentItem(
+            **item.model_dump(),
+            confidence=conf_map.get(item.document_id),
+        )
+        for item in base.items
+    ]
+    return AdminTopicDocumentsResponse(
+        topic_type=base.topic_type,
+        topic_id=base.topic_id,
+        items=items,
+        meta=base.meta,
     )
 
 

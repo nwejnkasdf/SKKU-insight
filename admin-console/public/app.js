@@ -17,7 +17,10 @@ const state = {
   collectionAutoRefreshTimer: null,
   users: [],
   health: null,
-  view: window.location.hash === "#account" ? "account" : "operations"
+  view: (() => {
+    const h = (window.location.hash || "").replace(/^#/, "");
+    return ["account", "monitor"].includes(h) ? h : "operations";
+  })()
 };
 
 const root = document.querySelector("#root");
@@ -43,6 +46,17 @@ const navIcons = {
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M12 3 5 6v5c0 4.5 2.8 8.4 7 10 4.2-1.6 7-5.5 7-10V6l-7-3Z" />
       <path d="M9 12l2 2 4-5" />
+    </svg>
+  `,
+  monitor: `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="6" cy="7" r="2" />
+      <circle cx="18" cy="9" r="2" />
+      <circle cx="11" cy="15" r="2" />
+      <circle cx="17" cy="18" r="1.5" />
+      <path d="M7.5 8 10 14" />
+      <path d="M16.5 10.5 12.5 14" />
+      <path d="M12 16.5 16 17.5" />
     </svg>
   `
 };
@@ -627,28 +641,33 @@ function changePasswordView() {
 }
 
 function shellView() {
-  const isAccount = state.view === "account";
+  const view = state.view;
+  const isMonitor = view === "monitor";
+  const isAccount = view === "account";
   return `
     <div class="shell">
       <aside class="sidebar">
         ${brandBlock()}
         <nav class="nav">
           ${navButton("operations", "운영")}
+          ${navButton("monitor", "모니터")}
           ${navButton("account", "내 계정")}
         </nav>
         <div class="sidebarFoot">
           <button class="secondary" id="logoutButton">로그아웃</button>
         </div>
       </aside>
-      <section class="main">
-        <header class="pageTitle">
-          <div>
-            <h1>${isAccount ? "내 계정" : "운영"}</h1>
-            <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
-          </div>
-        </header>
-        <div id="messageArea">${messageView()}</div>
-        ${isAccount ? accountView() : operationsView()}
+      <section class="main ${isMonitor ? "main-monitor" : ""}">
+        ${isMonitor ? `<div id="monitorRoot" class="monitor-page"></div>` : `
+          <header class="pageTitle">
+            <div>
+              <h1>${isAccount ? "내 계정" : "운영"}</h1>
+              <p>${isAccount ? "관리자 세션과 계정 작업을 확인합니다." : "사용자 상태와 시스템 상태를 확인합니다."}</p>
+            </div>
+          </header>
+          <div id="messageArea">${messageView()}</div>
+          ${isAccount ? accountView() : operationsView()}
+        `}
       </section>
     </div>
   `;
@@ -849,9 +868,15 @@ function bindPasswordChange() {
 function bindApp() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
+      const prev = state.view;
       state.view = button.getAttribute("data-view") || "operations";
-      window.location.hash = state.view === "account" ? "account" : "operations";
+      window.location.hash = state.view;
+      // monitor 끝낼 때 React tree 정리
+      if (prev === "monitor" && state.view !== "monitor" && window.__monitor) {
+        window.__monitor.unmount();
+      }
       render();
+      mountMonitorIfActive();
       updateCollectionPolling();
       updateCollectionAutoRefresh();
     });
@@ -865,6 +890,18 @@ function bindApp() {
   });
   bindCollectionButtons();
   document.querySelector("#logoutButton")?.addEventListener("click", logout);
+  mountMonitorIfActive();
+}
+
+function mountMonitorIfActive() {
+  if (state.view !== "monitor") return;
+  if (!window.__monitor) {
+    // Babel가 monitor.jsx 컴파일 중일 수 있음 — 다음 tick에 재시도
+    setTimeout(mountMonitorIfActive, 120);
+    return;
+  }
+  const el = document.getElementById("monitorRoot");
+  if (el) window.__monitor.mount(el, { adminEmail: state.adminEmail });
 }
 
 function bindCollectionButtons() {

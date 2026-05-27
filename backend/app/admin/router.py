@@ -7,25 +7,33 @@ docs: api/admin.md (전체), api/collection.md (§수집 — 사용자용 2 endp
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collection.schemas import RunNowResponse
 from app.config import get_settings
-from app.contracts import CollectionJobStatus, PagedResponse
-from app.db.models import AdminUser
+from app.contracts import CollectionJobStatus, PagedResponse, TraversalStatus
+from app.db.models import AdminUser, CSOTopic, DynamicLeafTopic
 from app.db.session import get_session
+from app.interest import service as interest_service
+from app.interest.bucket import bucket_for, bucket_sort_key
+from app.interest.config_loader import get_interest_params
 from app.redis import get_redis
 from app.security.deps import get_current_admin
 from app.security.rate_limit import limiter
+from app.topic import documents_service, trace_service
+from app.topic.schemas import TopicDocumentsResponse, TraversalTraceSummary
 
 from . import auth_service, users_service
 from .schemas import (
     AdminEventView,
+    AdminInterestTopicView,
     AdminLoginRequest,
     AdminLogoutRequest,
     AdminRefreshRequest,
@@ -314,9 +322,63 @@ async def admin_list_users_endpoint(
     response_model=AdminUserInterestState,
     summary="사용자 관심 상태 (점수 포함, 관리자만)",
 )
-async def admin_user_interest_state(user_id: UUID) -> AdminUserInterestState:
-    """NFR-04 우회 — long_score/short_score 노출."""
-    raise NotImplementedError("Phase 0b A6에서 구현")
+async def admin_user_interest_state(
+    user_id: UUID,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminUserInterestState:
+    """NFR-04 우회 — long_score/short_score 노출. 관리자 모니터링 도구용 (admin/router-monitor)."""
+    _ = admin
+    params = await get_interest_params(_redis_default(), db)
+    rows = await interest_service.fetch_user_state(db, user_id, limit=50)
+
+    cso_ids = [r.cso_topic_id for r in rows if r.cso_topic_id is not None]
+    leaf_ids = [r.leaf_topic_id for r in rows if r.leaf_topic_id is not None]
+    cso_labels: dict[UUID, str] = {}
+    leaf_labels: dict[UUID, str] = {}
+    if cso_ids:
+        result = await db.execute(
+            select(CSOTopic.cso_topic_id, CSOTopic.label).where(
+                CSOTopic.cso_topic_id.in_(cso_ids)
+            )
+        )
+        for r in result:
+            cso_labels[r.cso_topic_id] = r.label
+    if leaf_ids:
+        result = await db.execute(
+            select(
+                DynamicLeafTopic.leaf_topic_id, DynamicLeafTopic.label
+            ).where(DynamicLeafTopic.leaf_topic_id.in_(leaf_ids))
+        )
+        for r in result:
+            leaf_labels[r.leaf_topic_id] = r.label
+
+    topics: list[AdminInterestTopicView] = []
+    for row in rows:
+        bucket = bucket_for(row.long_score, row.short_score, params)
+        label = ""
+        if row.leaf_topic_id is not None:
+            label = leaf_labels.get(row.leaf_topic_id, "")
+        elif row.cso_topic_id is not None:
+            label = cso_labels.get(row.cso_topic_id, "")
+        topics.append(
+            AdminInterestTopicView(
+                cso_topic_id=row.cso_topic_id,
+                leaf_topic_id=row.leaf_topic_id,
+                label=label,
+                long_score=row.long_score,
+                short_score=row.short_score,
+                bucket=bucket,
+                is_onboarding_selected=row.boost_applied_at_active_day is not None,
+            )
+        )
+    topics.sort(key=lambda t: bucket_sort_key(t.bucket))
+    updated_at = await interest_service.fetch_max_updated_at(db, user_id)
+    return AdminUserInterestState(
+        user_id=user_id,
+        topics=topics,
+        updated_at=updated_at or datetime.now(timezone.utc),
+    )
 
 
 @router.get(
@@ -330,6 +392,47 @@ async def admin_user_events(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> PagedResponse[AdminEventView]:
     raise NotImplementedError("Phase 0b A6에서 구현")
+
+
+@router.get(
+    "/users/{user_id}/traces",
+    response_model=PagedResponse[TraversalTraceSummary],
+    summary="사용자 traversal trace 목록 (관리자)",
+)
+async def admin_user_traces(
+    user_id: UUID,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    status_filter: TraversalStatus | None = Query(default=None, alias="status"),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> PagedResponse[TraversalTraceSummary]:
+    """관리자 모니터링 — 임의 user_id 의 trace 목록. 본인용 /topics/traces 와 동일 응답."""
+    _ = admin
+    return await trace_service.list_traces(
+        db, user_id, status_filter, cursor, limit
+    )
+
+
+@router.get(
+    "/users/{user_id}/topics/{topic_id}/documents",
+    response_model=TopicDocumentsResponse,
+    summary="사용자별 토픽 수집 문서 (관리자)",
+)
+async def admin_user_topic_documents(
+    user_id: UUID,
+    topic_id: UUID,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    since: str | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> TopicDocumentsResponse:
+    """관리자 모니터링 — 임의 user_id 의 토픽별 수집 문서. 본인용 /topics/{id}/documents 와 동일."""
+    _ = admin
+    return await documents_service.list_topic_documents(
+        db, user_id, topic_id, since, cursor, limit
+    )
 
 
 @router.post(

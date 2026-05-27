@@ -189,6 +189,7 @@ class AdminInterestTopicView(BaseModel):
     long_score: float
     short_score: float
     bucket: InterestBucket
+    is_onboarding_selected: bool = False
 
 
 class AdminUserInterestState(BaseModel):

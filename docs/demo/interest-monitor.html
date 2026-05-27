@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SKKU InSight · Live Interest Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #fbf9f3;             /* near-white, faint warmth */
+      --bg-panel: #f5f1e6;        /* paper card */
+      --bg-card: #ede7d6;         /* nested card */
+      --border: rgba(28, 25, 23, 0.10);
+      --border-hi: rgba(28, 25, 23, 0.22);
+      --border-sel: rgba(15, 118, 110, 0.45);
+      --text-0: #1c1917;         /* stone-900 */
+      --text-1: #44403c;         /* stone-700 */
+      --text-2: #78716c;         /* stone-500 */
+      --text-3: #a8a29e;         /* stone-400 */
+      --accent: #0f766e;         /* teal-700 */
+      --accent-dim: rgba(15, 118, 110, 0.45);
+      --amber: #c2410c;          /* orange-700 */
+      --green: #15803d;          /* green-700 */
+      --bucket-high: #0f766e;    /* teal-700 */
+      --bucket-med: #c2410c;     /* orange-700 */
+      --bucket-low: #a8a29e;     /* stone-400 */
+      --grid: rgba(28, 25, 23, 0.055);
+      --grid-major: rgba(28, 25, 23, 0.11);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      background-color: var(--bg);
+      background-image:
+        linear-gradient(to right, var(--grid) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid) 1px, transparent 1px),
+        linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+      background-size: 32px 32px, 32px 32px, 160px 160px, 160px 160px;
+      background-position: 0 0, 0 0, 0 0, 0 0;
+      color: var(--text-0);
+      font-family: 'Inter', 'Noto Sans KR', system-ui, sans-serif;
+      font-weight: 400;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: 0.01em;
+    }
+    #root { width: 100vw; height: 100vh; }
+    .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum' 1; }
+
+    /* ───── Layout grid ───── */
+    .app {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      grid-template-columns: 260px 1fr 320px;
+      grid-template-areas:
+        "header header header"
+        "users  graph  detail";
+      height: 100vh;
+    }
+
+    /* ───── Header ───── */
+    .header {
+      grid-area: header;
+      display: flex; align-items: center; padding: 0 22px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-panel);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand-mark {
+      width: 22px; height: 22px; border-radius: 5px;
+      background: linear-gradient(135deg, #0f766e 0%, #134e4a 100%);
+      position: relative;
+    }
+    .brand-mark::after {
+      content: ''; position: absolute; inset: 5px;
+      border: 1.5px solid rgba(236, 254, 248, 0.85); border-radius: 50%;
+      border-right-color: transparent;
+    }
+    .brand-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+    .brand-title .dim { color: var(--text-2); font-weight: 400; }
+    .brand-sub { font-size: 10px; color: var(--text-3); letter-spacing: 0.14em; text-transform: uppercase; margin-top: 1px; }
+
+    .header-spacer { flex: 1; }
+    .header-meta { display: flex; gap: 28px; align-items: center; }
+    .meta-cell { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; }
+    .meta-label { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.16em; }
+    .meta-value { font-size: 12px; color: var(--text-0); font-family: 'JetBrains Mono', monospace; }
+
+    .live-pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 4px 9px 4px 8px;
+      border: 1px solid rgba(21, 128, 61, 0.28);
+      background: rgba(21, 128, 61, 0.08);
+      border-radius: 4px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+      color: var(--green);
+    }
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 4px rgba(21, 128, 61, 0.6);
+      animation: livePulse 1.8s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    /* ───── Users panel (left) ───── */
+    .panel-users {
+      grid-area: users;
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 16px 14px 24px;
+    }
+    .panel-title {
+      font-size: 10px; font-weight: 600; letter-spacing: 0.18em;
+      color: var(--text-2); text-transform: uppercase;
+      margin-bottom: 14px; padding: 0 4px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .count-pill {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      color: var(--text-1); padding: 1px 6px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+
+    .user-card {
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      background: var(--bg-card);
+      transition: border-color 0.12s, background 0.12s;
+      position: relative;
+    }
+    .user-card:hover { border-color: var(--border-hi); }
+    .user-card.selected {
+      border-color: var(--border-sel);
+      background: rgba(15, 118, 110, 0.07);
+    }
+    .user-card.selected::before {
+      content: ''; position: absolute; left: -1px; top: 8px; bottom: 8px;
+      width: 2px; background: var(--accent); border-radius: 2px;
+    }
+    .uc-row1 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .uc-id { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-0); }
+    .uc-active-mark {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 6px var(--green);
+      margin-left: auto;
+    }
+    .uc-active-mark.idle { background: var(--text-3); box-shadow: none; }
+    .uc-persona { font-size: 12px; color: var(--text-0); font-weight: 500; margin-bottom: 8px; line-height: 1.3; }
+    .uc-stats {
+      display: flex; gap: 14px; font-size: 10px; color: var(--text-2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .uc-stats .k { color: var(--text-3); }
+
+    /* ───── Graph (center) ───── */
+    .panel-graph {
+      grid-area: graph;
+      position: relative;
+      background: transparent;
+      overflow: hidden;
+    }
+    .graph-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .graph-meta {
+      position: absolute; top: 14px; left: 18px; z-index: 5;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .graph-meta .gm-1 { font-size: 11px; color: var(--text-2); letter-spacing: 0.04em; }
+    .graph-meta .gm-2 { font-size: 18px; color: var(--text-0); font-weight: 600; letter-spacing: -0.01em; }
+    .graph-legend {
+      position: absolute; bottom: 14px; left: 18px; z-index: 5;
+      display: flex; gap: 14px; align-items: center;
+    }
+    .lg-item { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-2); letter-spacing: 0.04em; }
+    .lg-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .lg-dot.high { background: var(--bucket-high); }
+    .lg-dot.med { background: var(--bucket-med); }
+    .lg-dot.low { background: var(--bucket-low); }
+    .lg-line { width: 14px; height: 0; border-top: 1.5px solid; }
+    .lg-line.active { border-color: var(--accent); }
+    .lg-line.stale { border-color: var(--text-3); border-top-style: dashed; }
+
+    /* SVG */
+    .node-core { transition: r 0.15s, filter 0.15s; cursor: pointer; }
+    .node-label {
+      fill: var(--text-1); font-size: 11px; font-weight: 500;
+      font-family: 'Inter', 'Noto Sans KR', sans-serif;
+      pointer-events: none; user-select: none;
+      paint-order: stroke; stroke: var(--bg); stroke-width: 3.5px; stroke-linejoin: round;
+    }
+    .node-label.hi { fill: var(--text-0); }
+    .node-label.dim { fill: var(--text-2); }
+    .node-label.hidden { opacity: 0; transition: opacity 0.15s; }
+    .node-group:hover .node-label.hidden { opacity: 1; }
+    .node-onb {
+      fill: none; stroke: rgba(28, 25, 23, 0.45); stroke-width: 1;
+      stroke-dasharray: 1.5 2;
+      pointer-events: none;
+    }
+    .node-group:hover .node-core { filter: brightness(1.4); }
+    .node-group:hover .node-label { fill: var(--accent); }
+    .node-group.selected .node-core { filter: brightness(1.5) drop-shadow(0 0 6px var(--accent)); }
+    .node-group.selected .node-label { fill: var(--accent); font-weight: 600; }
+
+    .edge { fill: none; stroke-linecap: round; }
+    .edge.active {
+      stroke: var(--accent); stroke-width: 1.6; opacity: 0.6;
+      stroke-dasharray: 4 5;
+      animation: edgeFlow 1.4s linear infinite;
+    }
+    .edge.active.selected { opacity: 1; stroke-width: 2.4; filter: drop-shadow(0 0 5px var(--accent-dim)); }
+    .edge.stale { stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.5; }
+    @keyframes edgeFlow {
+      from { stroke-dashoffset: 9; }
+      to { stroke-dashoffset: 0; }
+    }
+
+    /* ───── Detail panel (right) ───── */
+    .panel-detail {
+      grid-area: detail;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 16px 16px 24px;
+      display: flex; flex-direction: column;
+    }
+
+    .traces-list { margin-bottom: 20px; }
+    .trace-row {
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      background: var(--bg-card);
+      transition: border-color 0.12s;
+      position: relative;
+    }
+    .trace-row:hover { border-color: var(--border-hi); }
+    .trace-row.selected { border-color: var(--border-sel); background: rgba(15, 118, 110, 0.06); }
+    .trace-row::before {
+      content: ''; position: absolute; left: -1px; top: 6px; bottom: 6px;
+      width: 2px; background: var(--accent); opacity: 0.6;
+    }
+    .trace-row.stale::before { background: var(--text-3); opacity: 1; }
+    .tr-head { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .tr-id { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-3); }
+    .tr-status {
+      font-size: 9px; padding: 0 5px; border-radius: 2px;
+      letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600;
+    }
+    .tr-status.active { color: var(--accent); background: rgba(110, 231, 255, 0.08); }
+    .tr-status.stale { color: var(--text-2); background: rgba(120, 130, 160, 0.06); }
+    .tr-label { font-size: 12px; color: var(--text-0); font-weight: 500; margin-bottom: 4px; }
+    .tr-meta {
+      display: flex; gap: 10px; font-size: 10px;
+      color: var(--text-2); font-family: 'JetBrains Mono', monospace;
+    }
+    .tr-meta .k { color: var(--text-3); }
+
+    /* Focus */
+    .focus-divider { height: 1px; background: var(--border); margin-bottom: 16px; }
+    .focus-empty { color: var(--text-3); font-size: 11px; padding: 12px 0; line-height: 1.5; }
+    .focus-head { margin-bottom: 14px; }
+    .focus-label { font-size: 16px; font-weight: 600; color: var(--text-0); line-height: 1.25; margin-bottom: 8px; }
+    .focus-stats { padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .focus-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; }
+    .focus-row .k { color: var(--text-2); }
+    .focus-row .v { color: var(--text-0); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+    .bucket-chip { padding: 1px 7px; border-radius: 3px; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+    .bucket-chip.high { color: #ecfeff; background: var(--bucket-high); }
+    .bucket-chip.med { color: #fff7ed; background: var(--bucket-med); }
+    .bucket-chip.low { color: var(--text-1); background: rgba(168, 162, 158, 0.32); }
+
+    .docs-title { font-size: 10px; font-weight: 600; letter-spacing: 0.18em; color: var(--text-2); text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+    .doc-row {
+      padding: 9px 0;
+      border-top: 1px solid var(--border);
+      display: flex; gap: 9px; align-items: flex-start;
+    }
+    .doc-row:first-of-type { border-top: none; padding-top: 2px; }
+    .doc-icon { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; }
+    .doc-icon.saved { background: var(--accent); }
+    .doc-icon.clicked { background: var(--amber); }
+    .doc-icon.viewed { background: var(--text-2); }
+    .doc-body { flex: 1; min-width: 0; }
+    .doc-title { font-size: 11px; line-height: 1.35; color: var(--text-0); margin-bottom: 2px; }
+    .doc-meta { font-size: 9px; color: var(--text-2); font-family: 'JetBrains Mono', monospace; display: flex; gap: 8px; }
+    .doc-meta .conf { color: var(--accent); }
+
+    /* ───── Settings cog + modal ───── */
+    .cog-btn {
+      width: 28px; height: 28px; border-radius: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: border-color 0.12s, color 0.12s, background 0.12s;
+      margin-left: 6px;
+    }
+    .cog-btn:hover { border-color: var(--border-hi); color: var(--text-0); background: rgba(28,25,23,0.04); }
+    .cog-btn svg { width: 14px; height: 14px; }
+
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(20, 17, 10, 0.45);
+      backdrop-filter: blur(2px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      width: 480px; max-width: 92vw;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 22px 22px 18px;
+      box-shadow: 0 24px 80px rgba(20, 17, 10, 0.25);
+    }
+    .modal-title { font-size: 14px; font-weight: 600; color: var(--text-0); margin-bottom: 4px; }
+    .modal-sub { font-size: 11px; color: var(--text-2); margin-bottom: 16px; line-height: 1.5; }
+    .modal-label { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; color: var(--text-2); text-transform: uppercase; margin-bottom: 6px; display: block; }
+    .modal-input, .modal-textarea {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid var(--border-hi);
+      background: var(--bg);
+      color: var(--text-0);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      border-radius: 4px;
+      outline: none;
+      margin-bottom: 14px;
+    }
+    .modal-input:focus, .modal-textarea:focus { border-color: var(--border-sel); }
+    .modal-textarea { resize: vertical; min-height: 90px; line-height: 1.4; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .btn {
+      padding: 7px 14px; border-radius: 4px;
+      font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border-hi);
+      background: transparent; color: var(--text-1);
+      cursor: pointer;
+      transition: border-color 0.12s, background 0.12s, color 0.12s;
+      font-family: inherit;
+    }
+    .btn:hover { border-color: var(--text-2); color: var(--text-0); }
+    .btn-primary {
+      background: var(--accent); color: #ecfeff; border-color: var(--accent);
+    }
+    .btn-primary:hover { background: #134e4a; border-color: #134e4a; color: #ecfeff; }
+    .modal-status {
+      margin-top: 12px; padding: 8px 10px;
+      border-radius: 4px; font-size: 11px;
+      border: 1px solid;
+    }
+    .modal-status.ok { border-color: rgba(21,128,61,0.3); background: rgba(21,128,61,0.06); color: var(--green); }
+    .modal-status.err { border-color: rgba(194,65,12,0.3); background: rgba(194,65,12,0.06); color: var(--amber); }
+    .modal-status.info { border-color: var(--border-hi); background: rgba(0,0,0,0.02); color: var(--text-2); }
+
+    /* live mode pill variants */
+    .live-pill.snapshot {
+      border-color: rgba(168, 162, 158, 0.4);
+      background: rgba(168, 162, 158, 0.1);
+      color: var(--text-2);
+    }
+    .live-pill.snapshot .live-dot { background: var(--text-3); box-shadow: none; animation: none; }
+    .live-pill.err {
+      border-color: rgba(194, 65, 12, 0.4);
+      background: rgba(194, 65, 12, 0.08);
+      color: var(--amber);
+    }
+    .live-pill.err .live-dot { background: var(--amber); box-shadow: 0 0 4px rgba(194,65,12,0.5); }
+
+    /* new user card fade-in */
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .user-card.fresh {
+      animation: cardIn 0.4s ease-out;
+      box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.3), 0 0 16px rgba(15, 118, 110, 0.08);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(28, 25, 23, 0.14); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(28, 25, 23, 0.28); }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef, useCallback } = React;
+
+    /* ═══════════════════ MOCK DATA ═══════════════════ */
+    // Topic definitions (id, label, position 0~1, bucket, score, onboarding, doc_count)
+    // Trace = ordered list of topic ids
+    // Document = { topicId, title, conf, evt, day }
+
+    function mkTopic(id, label, x, y, bucket, score, onb, docs) {
+      return { id, label, x, y, bucket, score, onb, docs };
+    }
+
+    const MOCK_USERS = [
+      {
+        id: 'usr_a7c2e9', shortId: 'a7c2e9',
+        persona: 'AI/ML Researcher',
+        activeDay: 8, totalDay: 14,
+        lastActiveMin: 2, online: true,
+        topics: [
+          mkTopic('llm',  'Large Language Models',           0.32, 0.32, 'high', 0.88, true,  3),
+          mkTopic('rag',  'Retrieval-Augmented Generation',  0.50, 0.40, 'high', 0.91, false, 5),
+          mkTopic('emb',  'Vector Embeddings',               0.65, 0.50, 'high', 0.82, false, 3),
+          mkTopic('prm',  'Prompt Engineering',              0.22, 0.50, 'med',  0.61, true,  1),
+          mkTopic('few',  'Few-shot Learning',               0.30, 0.68, 'med',  0.58, false, 1),
+          mkTopic('eval', 'RAG Evaluation',                  0.52, 0.62, 'med',  0.55, false, 2),
+          mkTopic('lc',   'Long Context Models',             0.44, 0.20, 'low',  0.31, false, 2),
+          mkTopic('ir',   'Information Retrieval',           0.78, 0.32, 'med',  0.52, false, 1),
+          mkTopic('vdb',  'Vector Databases',                0.80, 0.55, 'high', 0.79, false, 2),
+          mkTopic('inf',  'ML Inference Systems',            0.68, 0.78, 'med',  0.49, false, 1),
+          mkTopic('dt',   'Distributed Training',            0.40, 0.82, 'low',  0.28, true,  0),
+          mkTopic('mm',   'Multimodal Models',               0.14, 0.30, 'low',  0.27, false, 1),
+        ],
+        traces: [
+          { id: 3, label: 'RAG Exploration',     status: 'active', path: ['llm', 'rag', 'emb', 'eval'], days: 7, opLast: 'extend' },
+          { id: 5, label: 'Long Context Probe',  status: 'active', path: ['llm', 'lc'],                 days: 1, opLast: 'extend' },
+          { id: 7, label: 'Vector Store Path',   status: 'active', path: ['rag', 'emb', 'vdb', 'ir'],   days: 4, opLast: 'split'  },
+          { id: 2, label: 'Distributed Training', status: 'stale', path: ['llm', 'inf', 'dt'],          days: 9, opLast: 'archive' },
+        ],
+        docs: {
+          'rag': [
+            { title: 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks', conf: 0.94, evt: 'saved',   day: 2 },
+            { title: 'RAG Survey 2025: From Foundation to Frontier',                      conf: 0.91, evt: 'saved',   day: 4 },
+            { title: 'REALM: Retrieval-Augmented Language Model Pre-Training',            conf: 0.86, evt: 'clicked', day: 3 },
+            { title: 'Self-RAG: Self-Reflective Retrieval',                               conf: 0.83, evt: 'viewed',  day: 5 },
+            { title: 'Active Retrieval Augmented Generation',                             conf: 0.79, evt: 'viewed',  day: 6 },
+          ],
+          'emb': [
+            { title: 'Sentence-BERT: Sentence Embeddings using Siamese Networks',         conf: 0.89, evt: 'saved',   day: 3 },
+            { title: 'OpenAI text-embedding-3-large: Technical Notes',                    conf: 0.81, evt: 'clicked', day: 4 },
+            { title: 'BGE: Multi-Granularity Contrastive Learning',                       conf: 0.74, evt: 'viewed',  day: 5 },
+          ],
+          'llm': [
+            { title: 'GPT-4 Technical Report',                                            conf: 0.85, evt: 'saved',   day: 1 },
+            { title: 'Sparks of Artificial General Intelligence',                         conf: 0.78, evt: 'clicked', day: 2 },
+            { title: 'LLaMA 3 Herd of Models',                                            conf: 0.76, evt: 'viewed',  day: 4 },
+          ],
+          'lc':  [
+            { title: 'Lost in the Middle: How Language Models Use Long Contexts',         conf: 0.87, evt: 'viewed',  day: 7 },
+            { title: 'RULER: What is the Real Context Size of Your Long-Context LM?',     conf: 0.71, evt: 'viewed',  day: 8 },
+          ],
+          'vdb': [
+            { title: 'FAISS: A Library for Efficient Similarity Search',                  conf: 0.92, evt: 'saved',   day: 5 },
+            { title: 'Pinecone vs Weaviate: Production Vector Store Benchmarks',          conf: 0.74, evt: 'clicked', day: 6 },
+          ],
+          'eval': [
+            { title: 'RAGAS: Automated Evaluation of RAG',                                conf: 0.83, evt: 'saved',   day: 5 },
+            { title: 'BEIR: A Heterogeneous Benchmark for Zero-Shot IR',                  conf: 0.77, evt: 'viewed',  day: 6 },
+          ],
+          'prm': [{ title: 'Chain-of-Thought Prompting Elicits Reasoning',                conf: 0.81, evt: 'clicked', day: 1 }],
+          'few': [{ title: 'Language Models are Few-Shot Learners',                       conf: 0.84, evt: 'saved',   day: 2 }],
+          'ir':  [{ title: 'BM25 and the Language Model Approach to IR',                  conf: 0.76, evt: 'viewed',  day: 6 }],
+          'inf': [{ title: 'vLLM: Easy, Fast, and Cheap LLM Serving',                     conf: 0.79, evt: 'clicked', day: 3 }],
+          'mm':  [{ title: 'CLIP: Learning Transferable Visual Models',                   conf: 0.72, evt: 'viewed',  day: 2 }],
+        },
+      },
+      {
+        id: 'usr_b3f481', shortId: 'b3f481',
+        persona: 'Security Engineer',
+        activeDay: 5, totalDay: 11,
+        lastActiveMin: 14, online: true,
+        topics: [
+          mkTopic('webx', 'Web Application Security',        0.30, 0.32, 'high', 0.86, true,  4),
+          mkTopic('xss',  'Cross-Site Scripting',            0.48, 0.24, 'high', 0.79, false, 3),
+          mkTopic('sqli', 'SQL Injection',                   0.18, 0.52, 'med',  0.58, false, 2),
+          mkTopic('crypt','Applied Cryptography',            0.70, 0.36, 'med',  0.54, true,  2),
+          mkTopic('pki',  'Public-Key Infrastructure',       0.84, 0.50, 'low',  0.32, false, 1),
+          mkTopic('mw',   'Malware Analysis',                0.36, 0.66, 'high', 0.81, false, 3),
+          mkTopic('rev',  'Binary Reverse Engineering',      0.54, 0.74, 'med',  0.62, false, 2),
+          mkTopic('zt',   'Zero Trust Architecture',         0.66, 0.62, 'low',  0.36, true,  1),
+          mkTopic('sup',  'Supply-Chain Security',           0.20, 0.78, 'low',  0.29, false, 1),
+        ],
+        traces: [
+          { id: 1, label: 'Web Attack Surface', status: 'active', path: ['webx', 'xss', 'sqli'],   days: 5, opLast: 'extend' },
+          { id: 4, label: 'Malware Reversing',  status: 'active', path: ['mw', 'rev'],             days: 3, opLast: 'extend' },
+          { id: 6, label: 'Crypto Foundations', status: 'stale',  path: ['crypt', 'pki'],          days: 4, opLast: 'archive' },
+        ],
+        docs: {
+          'webx': [
+            { title: 'OWASP Top 10: 2025 Updates',                                        conf: 0.92, evt: 'saved',   day: 1 },
+            { title: 'The Web Application Hacker\'s Handbook (Annotated)',                conf: 0.84, evt: 'saved',   day: 2 },
+            { title: 'Browser Same-Origin Bypass Patterns',                               conf: 0.78, evt: 'clicked', day: 3 },
+            { title: 'CSP Bypass Techniques 2025',                                        conf: 0.71, evt: 'viewed',  day: 4 },
+          ],
+          'xss': [
+            { title: 'DOM-based XSS: A Modern Treatment',                                 conf: 0.88, evt: 'saved',   day: 2 },
+            { title: 'Trusted Types and the End of XSS?',                                 conf: 0.76, evt: 'clicked', day: 3 },
+            { title: 'XSS Polyglots: Cross-Context Payloads',                             conf: 0.69, evt: 'viewed',  day: 4 },
+          ],
+          'sqli': [
+            { title: 'SQL Injection Prevention Cheat Sheet (OWASP)',                      conf: 0.85, evt: 'saved',   day: 3 },
+            { title: 'Blind SQLi via Out-of-Band DNS',                                    conf: 0.73, evt: 'viewed',  day: 5 },
+          ],
+          'mw': [
+            { title: 'Practical Malware Analysis (Sikorski & Honig)',                     conf: 0.89, evt: 'saved',   day: 1 },
+            { title: 'Modern Ransomware: TTPs and Indicators',                            conf: 0.81, evt: 'clicked', day: 3 },
+            { title: 'Living-off-the-Land Binaries (LOLBins) in 2025',                    conf: 0.74, evt: 'viewed',  day: 4 },
+          ],
+          'rev': [
+            { title: 'Ghidra vs IDA Pro: A Reverse Engineer\'s Notes',                    conf: 0.79, evt: 'clicked', day: 3 },
+            { title: 'Static Analysis Bypass via Packed Binaries',                        conf: 0.71, evt: 'viewed',  day: 4 },
+          ],
+          'crypt': [
+            { title: 'A Graduate Course in Applied Cryptography (Boneh & Shoup)',         conf: 0.86, evt: 'saved',   day: 1 },
+            { title: 'Post-Quantum Cryptography: NIST PQC Final Round Survey',            conf: 0.74, evt: 'viewed',  day: 3 },
+          ],
+          'pki': [{ title: 'X.509 Certificate Path Validation in Practice',               conf: 0.68, evt: 'viewed',  day: 4 }],
+          'zt':  [{ title: 'Zero Trust Networks (Gilman & Barth)',                        conf: 0.72, evt: 'clicked', day: 2 }],
+          'sup': [{ title: 'SLSA: Supply-chain Levels for Software Artifacts',            conf: 0.70, evt: 'viewed',  day: 5 }],
+        },
+      },
+      {
+        id: 'usr_d8e155', shortId: 'd8e155',
+        persona: 'HCI & UX Designer',
+        activeDay: 12, totalDay: 18,
+        lastActiveMin: 1, online: true,
+        topics: [
+          mkTopic('a11y',  'Accessibility',                  0.28, 0.34, 'high', 0.84, true,  4),
+          mkTopic('design','Design Systems',                 0.50, 0.28, 'high', 0.87, true,  5),
+          mkTopic('motion','Motion Design',                  0.70, 0.36, 'med',  0.59, false, 2),
+          mkTopic('vr',    'AR/VR Interaction',              0.78, 0.58, 'low',  0.34, false, 1),
+          mkTopic('eye',   'Eye-Tracking',                   0.66, 0.74, 'low',  0.31, false, 1),
+          mkTopic('haptic','Haptic Feedback',                0.46, 0.78, 'med',  0.51, false, 2),
+          mkTopic('inter', 'Interaction Patterns',           0.34, 0.56, 'high', 0.79, false, 3),
+          mkTopic('color', 'Color Theory for UI',            0.18, 0.62, 'med',  0.56, false, 2),
+          mkTopic('type',  'Typography on Screen',           0.14, 0.40, 'med',  0.55, false, 2),
+          mkTopic('eval',  'Usability Evaluation',           0.56, 0.50, 'med',  0.49, true,  2),
+          mkTopic('voice', 'Voice User Interfaces',          0.82, 0.32, 'low',  0.28, false, 1),
+        ],
+        traces: [
+          { id: 11, label: 'Design System Build',  status: 'active', path: ['design', 'inter', 'a11y'],         days: 8, opLast: 'extend' },
+          { id: 12, label: 'Visual Foundations',   status: 'active', path: ['design', 'type', 'color'],          days: 6, opLast: 'split' },
+          { id: 13, label: 'Motion Vocabulary',    status: 'active', path: ['design', 'motion'],                 days: 3, opLast: 'extend' },
+          { id: 14, label: 'Multimodal Probe',     status: 'active', path: ['inter', 'haptic', 'eye'],           days: 2, opLast: 'extend' },
+        ],
+        docs: {
+          'design': [
+            { title: 'Atomic Design (Brad Frost) — Revisited',                            conf: 0.90, evt: 'saved',   day: 1 },
+            { title: 'Material Design 3: Foundations',                                    conf: 0.85, evt: 'saved',   day: 2 },
+            { title: 'Apple HIG 2025 Update Notes',                                       conf: 0.81, evt: 'clicked', day: 3 },
+            { title: 'Refactoring UI (Wathan & Schoger)',                                 conf: 0.79, evt: 'saved',   day: 5 },
+            { title: 'Design Tokens: The Common Currency',                                conf: 0.74, evt: 'viewed',  day: 7 },
+          ],
+          'a11y': [
+            { title: 'WCAG 2.2 Quick Reference',                                          conf: 0.88, evt: 'saved',   day: 2 },
+            { title: 'Inclusive Components (Heydon Pickering)',                           conf: 0.83, evt: 'saved',   day: 4 },
+            { title: 'ARIA Authoring Practices Guide',                                    conf: 0.77, evt: 'clicked', day: 5 },
+            { title: 'Color Contrast Beyond WCAG: APCA',                                  conf: 0.71, evt: 'viewed',  day: 8 },
+          ],
+          'inter': [
+            { title: 'About Face (Cooper) 4th Edition Notes',                             conf: 0.84, evt: 'saved',   day: 3 },
+            { title: '100 Things Every Designer Needs to Know (Weinschenk)',              conf: 0.76, evt: 'clicked', day: 5 },
+            { title: 'Gestalt Principles in Digital Interfaces',                          conf: 0.71, evt: 'viewed',  day: 7 },
+          ],
+          'motion': [
+            { title: 'Designing Interface Animation (Head)',                              conf: 0.81, evt: 'saved',   day: 4 },
+            { title: 'The Twelve Principles of UX in Motion',                             conf: 0.75, evt: 'clicked', day: 6 },
+          ],
+          'type': [
+            { title: 'On Web Typography (Santa Maria)',                                   conf: 0.79, evt: 'saved',   day: 4 },
+            { title: 'Variable Fonts in Production',                                      conf: 0.72, evt: 'viewed',  day: 6 },
+          ],
+          'color': [
+            { title: 'OKLCH and the Future of Color Picking',                             conf: 0.77, evt: 'clicked', day: 5 },
+            { title: 'Refactoring Color Systems',                                         conf: 0.69, evt: 'viewed',  day: 7 },
+          ],
+          'haptic': [
+            { title: 'Designing for Touch (Hoober)',                                      conf: 0.74, evt: 'viewed',  day: 8 },
+            { title: 'Haptics in Mobile UI: A Practitioner Survey',                       conf: 0.66, evt: 'viewed',  day: 9 },
+          ],
+          'eval':  [
+            { title: 'Measuring the User Experience (Tullis & Albert)',                   conf: 0.78, evt: 'saved',   day: 4 },
+            { title: 'NIST SUS: How It Holds Up in 2025',                                 conf: 0.71, evt: 'viewed',  day: 6 },
+          ],
+          'vr':    [{ title: 'Designing for Mixed Reality (Aukstakalnis)',                conf: 0.65, evt: 'viewed',  day: 9 }],
+          'eye':   [{ title: 'Eye Tracking Methodology (Holmqvist)',                      conf: 0.69, evt: 'clicked', day: 7 }],
+          'voice': [{ title: 'Voice User Interface Design (Pearl)',                       conf: 0.66, evt: 'viewed',  day: 8 }],
+        },
+      },
+      {
+        id: 'usr_c1a402', shortId: 'c1a402',
+        persona: 'Systems / DevOps',
+        activeDay: 3, totalDay: 7,
+        lastActiveMin: 45, online: false,
+        topics: [
+          mkTopic('k8s',  'Kubernetes',                      0.30, 0.32, 'high', 0.83, true,  3),
+          mkTopic('mesh', 'Service Mesh',                    0.54, 0.30, 'med',  0.55, false, 2),
+          mkTopic('obs',  'Observability',                   0.72, 0.42, 'high', 0.78, true,  3),
+          mkTopic('trace','Distributed Tracing',             0.82, 0.62, 'med',  0.51, false, 2),
+          mkTopic('ci',   'Continuous Delivery',             0.42, 0.62, 'med',  0.49, false, 2),
+          mkTopic('iac',  'Infrastructure as Code',          0.22, 0.56, 'low',  0.34, false, 1),
+          mkTopic('chaos','Chaos Engineering',               0.58, 0.76, 'low',  0.28, false, 1),
+        ],
+        traces: [
+          { id: 21, label: 'K8s Operations',       status: 'active', path: ['k8s', 'mesh', 'obs'],     days: 3, opLast: 'extend' },
+          { id: 22, label: 'Reliability Practice', status: 'stale',  path: ['obs', 'trace', 'chaos'],  days: 5, opLast: 'archive' },
+        ],
+        docs: {
+          'k8s': [
+            { title: 'Kubernetes Patterns 2nd Ed. (Ibryam & Huss)',                       conf: 0.87, evt: 'saved',   day: 1 },
+            { title: 'GitOps with Argo CD: Production Patterns',                          conf: 0.79, evt: 'clicked', day: 2 },
+            { title: 'K8s Autoscaling Deep Dive (HPA/VPA/Karpenter)',                     conf: 0.72, evt: 'viewed',  day: 3 },
+          ],
+          'mesh': [
+            { title: 'Istio in Action (Posta & Maloku)',                                  conf: 0.81, evt: 'saved',   day: 2 },
+            { title: 'Linkerd vs Istio: 2025 Benchmark Notes',                            conf: 0.74, evt: 'viewed',  day: 3 },
+          ],
+          'obs': [
+            { title: 'OpenTelemetry: The Definitive Guide',                               conf: 0.85, evt: 'saved',   day: 1 },
+            { title: 'eBPF for Observability: A Practitioner View',                       conf: 0.78, evt: 'clicked', day: 2 },
+            { title: 'SLO Engineering at Scale',                                          conf: 0.71, evt: 'viewed',  day: 3 },
+          ],
+          'trace': [
+            { title: 'Distributed Tracing in Practice (Parker et al.)',                   conf: 0.79, evt: 'saved',   day: 2 },
+            { title: 'Tail-Based Sampling Strategies for OpenTelemetry',                  conf: 0.71, evt: 'viewed',  day: 3 },
+          ],
+          'ci':   [
+            { title: 'Continuous Delivery (Humble & Farley)',                             conf: 0.82, evt: 'saved',   day: 1 },
+            { title: 'Progressive Delivery with Flagger',                                 conf: 0.73, evt: 'clicked', day: 2 },
+          ],
+          'iac':  [{ title: 'Terraform: Up & Running 4th Ed.',                            conf: 0.75, evt: 'viewed',  day: 2 }],
+          'chaos':[{ title: 'Chaos Engineering (Rosenthal & Jones)',                      conf: 0.71, evt: 'viewed',  day: 4 }],
+        },
+      },
+    ];
+
+    const W = 1920, H = 1080;
+    const PADDING = 80;
+    const px = (n) => PADDING + n * (W - 2 * PADDING);
+    const py = (n) => PADDING + n * (H - 2 * PADDING);
+
+    const BUCKET_R    = { high: 11, med: 8, low: 5 };
+    const BUCKET_FILL = { high: '#0f766e', med: '#c2410c', low: '#a8a29e' };
+
+    /* ═══════════════════ LIVE MODE INFRA ═══════════════════ */
+    const API_BASE = (new URLSearchParams(location.search).get('api')) || 'http://localhost:8000';
+    const POLL_USERS_MS  = 5000;
+    const POLL_STATE_MS  = 1000;
+    const POLL_DOCS_MS   = 5000;
+
+    /* ─── Auth storage (access + refresh + expiry) ─── */
+    const AUTH_KEYS = { access: 'skku_admin_access', refresh: 'skku_admin_refresh', exp: 'skku_admin_exp', email: 'skku_admin_email' };
+    function readStoredAuth() {
+      // back-compat: migrate old key 'skku_admin_jwt' → new schema (no refresh, no exp)
+      const legacy = localStorage.getItem('skku_admin_jwt');
+      if (legacy && !localStorage.getItem(AUTH_KEYS.access)) {
+        localStorage.setItem(AUTH_KEYS.access, legacy);
+        localStorage.removeItem('skku_admin_jwt');
+      }
+      return {
+        access: localStorage.getItem(AUTH_KEYS.access) || '',
+        refresh: localStorage.getItem(AUTH_KEYS.refresh) || '',
+        exp: parseInt(localStorage.getItem(AUTH_KEYS.exp) || '0', 10) || 0,
+        email: localStorage.getItem(AUTH_KEYS.email) || '',
+      };
+    }
+    function writeStoredAuth(access, refresh, expiresInSec, email) {
+      if (!access) {
+        Object.values(AUTH_KEYS).forEach(k => localStorage.removeItem(k));
+        return;
+      }
+      localStorage.setItem(AUTH_KEYS.access, access);
+      if (refresh) localStorage.setItem(AUTH_KEYS.refresh, refresh);
+      if (expiresInSec) localStorage.setItem(AUTH_KEYS.exp, String(Date.now() + expiresInSec * 1000));
+      if (email) localStorage.setItem(AUTH_KEYS.email, email);
+    }
+
+    async function rawApiFetch(path, token, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const err = new Error(`HTTP ${res.status}`);
+        err.status = res.status; err.body = text;
+        throw err;
+      }
+      return res.json();
+    }
+
+    async function postJson(path, body) {
+      return rawApiFetch(path, null, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    /* ─── Deterministic hash → [0,1) ─── */
+    function hash01(str) {
+      let h = 2166136261 >>> 0;
+      for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+      }
+      return (h % 100000) / 100000;
+    }
+    const bucketYCenter = { high: 0.35, med: 0.5, low: 0.65 };
+    function layoutTopic(topic) {
+      const seed = topic.label || topic.id;
+      const a = hash01(seed + ':x');
+      const b = hash01(seed + ':y');
+      const yC = bucketYCenter[topic.bucket] ?? 0.5;
+      return {
+        x: 0.10 + a * 0.80,
+        y: yC - 0.12 + b * 0.24,
+      };
+    }
+
+    /* ─── Density-aware layout: collision relaxation in [0,1] space ───
+       Input: topics with initial x,y (already in unit square).
+       Output: Map<topic.id, {x,y}> where pairwise distance ≥ minDist.
+       minDist scales with N so 10 nodes get spread out, 1000 nodes packed tight. */
+    function relaxPositions(topics) {
+      const N = topics.length;
+      if (N === 0) return new Map();
+      const pts = topics.map(t => {
+        const init = (t.x != null && t.y != null) ? { x: t.x, y: t.y } : layoutTopic({ id: t.id, label: t.label, bucket: t.bucket });
+        return { id: t.id, x: init.x, y: init.y };
+      });
+      const minDist = Math.max(0.022, Math.min(0.18, Math.sqrt(0.55 / Math.max(N, 4))));
+      const iters = N <= 50 ? 40 : N <= 200 ? 60 : 80;
+      for (let iter = 0; iter < iters; iter++) {
+        let moved = 0;
+        for (let i = 0; i < N; i++) {
+          for (let j = i + 1; j < N; j++) {
+            const dx = pts[j].x - pts[i].x;
+            const dy = pts[j].y - pts[i].y;
+            const d = Math.hypot(dx, dy);
+            if (d < minDist && d > 1e-6) {
+              const push = (minDist - d) * 0.5;
+              const nx = dx / d, ny = dy / d;
+              pts[i].x -= nx * push;
+              pts[i].y -= ny * push;
+              pts[j].x += nx * push;
+              pts[j].y += ny * push;
+              moved++;
+            } else if (d < 1e-6) {
+              // exact overlap — nudge deterministically by id
+              pts[j].x += 0.005;
+              pts[j].y += 0.005;
+              moved++;
+            }
+          }
+        }
+        for (const p of pts) {
+          p.x = Math.max(0.05, Math.min(0.95, p.x));
+          p.y = Math.max(0.07, Math.min(0.93, p.y));
+        }
+        if (moved === 0) break;
+      }
+      return new Map(pts.map(p => [p.id, { x: p.x, y: p.y }]));
+    }
+
+    /* ─── Render scale based on node count ─── */
+    function nodeScale(N) {
+      // 1.0 at N≤20 → 0.32 at N=200 → ~0.14 at N=1000, floor 0.30
+      return Math.min(1.0, Math.max(0.30, Math.sqrt(22 / Math.max(N, 22))));
+    }
+
+    /* ─── Label visibility policy ─── */
+    function labelableSet(topics, selectedId) {
+      const out = new Set();
+      if (selectedId) out.add(selectedId);
+      const N = topics.length;
+      if (N <= 30) {
+        for (const t of topics) out.add(t.id);
+      } else if (N <= 100) {
+        for (const t of topics) if (t.bucket === 'high') out.add(t.id);
+        // top 8 high+med by score as backup
+        if (out.size < 6) {
+          const top = [...topics].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 8);
+          for (const t of top) out.add(t.id);
+        }
+      } else {
+        const top = [...topics].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 10);
+        for (const t of top) out.add(t.id);
+      }
+      return out;
+    }
+
+    /* ─── Bucket normalization ─── */
+    function normBucket(raw) {
+      if (!raw) return 'low';
+      const v = String(raw).toLowerCase();
+      if (v === 'high') return 'high';
+      if (v === 'medium' || v === 'med') return 'med';
+      if (v === 'low') return 'low';
+      return 'low'; // NEUTRAL → treat as low
+    }
+    function normStatus(raw) {
+      if (!raw) return 'stale';
+      const v = String(raw).toLowerCase();
+      return v === 'active' ? 'active' : v === 'archived' ? 'archived' : 'stale';
+    }
+
+    /* ─── Transform live backend responses → frontend user shape ─── */
+    function buildLiveUser(listItem, stateRes, tracesRes) {
+      const uid = listItem.user_id;
+      const shortId = uid.replace(/-/g, '').slice(0, 6);
+      // Topics — derive id from cso_topic_id or leaf_topic_id; layout deterministically
+      const topicsRaw = (stateRes?.topics || []).map(t => {
+        const id = (t.leaf_topic_id || t.cso_topic_id || t.label || '').toString();
+        const bucket = normBucket(t.bucket);
+        const score = Math.max(t.long_score ?? 0, t.short_score ?? 0);
+        const onb = !!t.is_onboarding_selected;
+        const { x, y } = layoutTopic({ id, label: t.label, bucket });
+        return { id, label: t.label || '(unlabeled)', x, y, bucket, score, onb, docs: 0 };
+      });
+      // dedupe by id (label keying) — keep first
+      const seenIds = new Set();
+      const topics = [];
+      for (const t of topicsRaw) {
+        if (seenIds.has(t.id)) continue;
+        seenIds.add(t.id);
+        topics.push(t);
+      }
+      // Map label → id for trace path resolution
+      const labelToId = Object.fromEntries(topics.map(t => [t.label, t.id]));
+
+      // Traces — path arrives as label strings; map to topic ids; drop labels we don't have
+      const traces = (tracesRes?.items || tracesRes || []).map(tr => {
+        const labels = tr.path_labels || tr.path || [];
+        const path = labels.map(lb => labelToId[lb]).filter(Boolean);
+        const span = (tr.last_activity_active_day ?? 0) - (tr.started_active_day ?? 0);
+        return {
+          id: tr.trace_id,
+          shortId: (tr.trace_id || '').toString().slice(0, 6),
+          label: labels[labels.length - 1] || `trace ${(tr.trace_id || '').toString().slice(0, 6)}`,
+          status: normStatus(tr.status),
+          path,
+          days: Math.max(0, span),
+          opLast: '—',
+        };
+      }).filter(tr => tr.path.length > 0);
+
+      const activeCount = traces.filter(t => t.status === 'active').length;
+      const updatedAt = stateRes?.updated_at ? new Date(stateRes.updated_at) : null;
+      const nowMs = Date.now();
+      const lastActiveMin = updatedAt ? Math.max(0, Math.round((nowMs - updatedAt.getTime()) / 60000)) : 999;
+      const online = lastActiveMin < 5;
+
+      return {
+        id: uid,
+        shortId,
+        persona: listItem.email || '(no email)',
+        createdAt: listItem.created_at,
+        activeDay: 0,
+        totalDay: 0,
+        lastActiveMin,
+        online,
+        topics,
+        traces,
+        docs: {}, // populated by per-topic poll
+        live: true,
+      };
+    }
+
+    /* ─── React hooks: auth + polling ─── */
+    function useAdminAuth() {
+      const [auth, setAuth] = useState(() => readStoredAuth());
+      const [error, setError] = useState(null);
+      const accessRef = useRef(auth.access);
+      const refreshInflight = useRef(null);
+      useEffect(() => { accessRef.current = auth.access; }, [auth.access]);
+
+      const applyTokens = (r, email) => {
+        writeStoredAuth(r.access_token, r.refresh_token, r.expires_in, email);
+        setAuth({
+          access: r.access_token,
+          refresh: r.refresh_token || '',
+          exp: Date.now() + (r.expires_in || 900) * 1000,
+          email: email || auth.email,
+        });
+      };
+
+      const doRefresh = async () => {
+        if (refreshInflight.current) return refreshInflight.current;
+        const stored = readStoredAuth();
+        if (!stored.refresh) { setError('no refresh token'); return null; }
+        refreshInflight.current = (async () => {
+          try {
+            const r = await postJson('/admin/auth/refresh', { refresh_token: stored.refresh });
+            applyTokens(r, stored.email);
+            setError(null);
+            return r.access_token;
+          } catch (e) {
+            // refresh failed → wipe stored creds, surface error
+            writeStoredAuth('', '', 0, '');
+            setAuth({ access: '', refresh: '', exp: 0, email: '' });
+            setError(e.message || 'refresh failed');
+            return null;
+          } finally {
+            refreshInflight.current = null;
+          }
+        })();
+        return refreshInflight.current;
+      };
+
+      // Schedule auto-refresh 60s before access expiry
+      useEffect(() => {
+        if (!auth.exp || !auth.refresh) return;
+        const ms = Math.max(2000, auth.exp - Date.now() - 60_000);
+        const t = setTimeout(doRefresh, ms);
+        return () => clearTimeout(t);
+      }, [auth.exp, auth.refresh]);
+
+      const login = async (email, password) => {
+        setError(null);
+        try {
+          const r = await postJson('/admin/auth/login', { email, password });
+          applyTokens(r, email);
+          return true;
+        } catch (e) {
+          // backend may return { code, message } JSON in err.body
+          let msg = e.message;
+          try { const parsed = JSON.parse(e.body || '{}'); if (parsed.message) msg = parsed.message; } catch {}
+          setError(msg);
+          return false;
+        }
+      };
+
+      const logout = () => {
+        writeStoredAuth('', '', 0, '');
+        setAuth({ access: '', refresh: '', exp: 0, email: '' });
+        setError(null);
+      };
+
+      // Wrapped fetch: uses live token, auto-retries once on 401 after refresh
+      const apiFetch = useCallback(async (path, opts = {}) => {
+        const t1 = accessRef.current;
+        try {
+          return await rawApiFetch(path, t1, opts);
+        } catch (e) {
+          if (e.status !== 401) throw e;
+          const t2 = await doRefresh();
+          if (!t2) throw e;
+          return await rawApiFetch(path, t2, opts);
+        }
+      }, []);
+
+      return { auth, error, login, logout, apiFetch, authed: !!auth.access };
+    }
+
+    function useUserList(apiFetch, authed) {
+      const [list, setList] = useState([]);
+      const [error, setError] = useState(null);
+      const [loaded, setLoaded] = useState(false);
+      useEffect(() => {
+        if (!authed) { setList([]); setLoaded(false); return; }
+        let cancelled = false;
+        const ac = new AbortController();
+        async function tick() {
+          try {
+            const res = await apiFetch('/admin/users?limit=100', { signal: ac.signal });
+            if (cancelled) return;
+            setList(res.items || []);
+            setError(null);
+            setLoaded(true);
+          } catch (e) {
+            if (cancelled || e.name === 'AbortError') return;
+            setError(e);
+          }
+        }
+        tick();
+        const i = setInterval(tick, POLL_USERS_MS);
+        return () => { cancelled = true; ac.abort(); clearInterval(i); };
+      }, [apiFetch, authed]);
+      return { list, error, loaded };
+    }
+
+    function useUserStateBundle(apiFetch, authed, userIds) {
+      const [bundle, setBundle] = useState({});
+      const ref = useRef({});
+      useEffect(() => {
+        if (!authed || userIds.length === 0) return;
+        let cancelled = false;
+        const ac = new AbortController();
+        async function pollAll() {
+          await Promise.allSettled(userIds.map(async uid => {
+            try {
+              const [state, traces] = await Promise.all([
+                apiFetch(`/admin/users/${uid}/interest-state`, { signal: ac.signal }),
+                apiFetch(`/admin/users/${uid}/traces?limit=20`, { signal: ac.signal }),
+              ]);
+              if (cancelled) return;
+              ref.current[uid] = { state, traces };
+            } catch (e) {
+              if (e.name === 'AbortError') return;
+              // keep last known
+            }
+          }));
+          if (!cancelled) setBundle({ ...ref.current });
+        }
+        pollAll();
+        const i = setInterval(pollAll, POLL_STATE_MS);
+        return () => { cancelled = true; ac.abort(); clearInterval(i); };
+      }, [apiFetch, authed, userIds.join('|')]);
+      return bundle;
+    }
+
+    function useTopicDocs(apiFetch, authed, userId, topicId) {
+      const [docs, setDocs] = useState([]);
+      useEffect(() => {
+        if (!authed || !userId || !topicId) { setDocs([]); return; }
+        let cancelled = false;
+        const ac = new AbortController();
+        async function tick() {
+          try {
+            const res = await apiFetch(
+              `/admin/users/${userId}/topics/${topicId}/documents?limit=20`,
+              { signal: ac.signal }
+            );
+            if (cancelled) return;
+            const items = (res.items || []).map(it => ({
+              title: it.title || '(no title)',
+              conf: it.recommendation_score ?? it.confidence ?? 0,
+              evt: 'viewed',
+              day: 0,
+            }));
+            setDocs(items);
+          } catch (e) {
+            if (e.name === 'AbortError') return;
+          }
+        }
+        tick();
+        const i = setInterval(tick, POLL_DOCS_MS);
+        return () => { cancelled = true; ac.abort(); clearInterval(i); };
+      }, [apiFetch, authed, userId, topicId]);
+      return docs;
+    }
+
+    /* ═══════════════════ HELPERS ═══════════════════ */
+    function quadCurve(p1, p2) {
+      const mx = (p1.x + p2.x) / 2;
+      const my = (p1.y + p2.y) / 2;
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const offset = Math.min(len * 0.10, 22);
+      const nx = -dy / len, ny = dx / len;
+      const cx = mx + nx * offset;
+      const cy = my + ny * offset;
+      return `M${p1.x},${p1.y} Q${cx},${cy} ${p2.x},${p2.y}`;
+    }
+    function tracePath(trace, topicById) {
+      const pts = trace.path.map(id => {
+        const t = topicById[id];
+        return { x: px(t.x), y: py(t.y) };
+      });
+      if (pts.length < 2) return '';
+      let d = '';
+      for (let i = 0; i < pts.length - 1; i++) {
+        const seg = quadCurve(pts[i], pts[i + 1]);
+        d += (i === 0 ? seg : seg.replace(/^M[^Q]+/, ' '));
+      }
+      return d;
+    }
+
+    /* ═══════════════════ COMPONENTS ═══════════════════ */
+    function CogIcon() {
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      );
+    }
+
+    function Header({ user, now, liveStatus, onSettings }) {
+      const fmt = now.toLocaleTimeString('en-GB', { hour12: false });
+      const pillCls = liveStatus === 'live' ? '' : liveStatus === 'err' ? 'err' : 'snapshot';
+      const pillLabel = liveStatus === 'live' ? 'LIVE' : liveStatus === 'err' ? 'API ERR' : 'SNAPSHOT';
+      return (
+        <div className="header">
+          <div className="brand">
+            <div className="brand-mark" />
+            <div>
+              <div className="brand-title">SKKU InSight <span className="dim">/ Interest Monitor</span></div>
+              <div className="brand-sub">{liveStatus === 'live' ? 'Live · Topic Graph' : 'Snapshot · Topic Graph'}</div>
+            </div>
+          </div>
+          <div className="header-spacer" />
+          <div className="header-meta">
+            <div className="meta-cell"><div className="meta-label">User</div><div className="meta-value">#{user.shortId}</div></div>
+            <div className="meta-cell"><div className="meta-label">Topics</div><div className="meta-value">{user.topics.length}</div></div>
+            <div className="meta-cell"><div className="meta-label">Traces</div><div className="meta-value">{user.traces.filter(t => t.status === 'active').length}</div></div>
+            <div className="meta-cell"><div className="meta-label">Last Update</div><div className="meta-value">{fmt}</div></div>
+            <div className={`live-pill ${pillCls}`}><span className="live-dot" /> {pillLabel}</div>
+            <button className="cog-btn" onClick={onSettings} title="Settings"><CogIcon /></button>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsModal({ open, authed, email, authError, listError, onLogin, onLogout, onClose }) {
+      const [emailDraft, setEmailDraft] = useState(email || '');
+      const [passDraft, setPassDraft] = useState('');
+      const [busy, setBusy] = useState(false);
+      useEffect(() => { if (open) { setEmailDraft(email || ''); setPassDraft(''); } }, [open, email]);
+      if (!open) return null;
+      const onBackdropClick = (e) => { if (e.target === e.currentTarget) onClose(); };
+      const submit = async (e) => {
+        if (e) e.preventDefault();
+        if (!emailDraft || !passDraft || busy) return;
+        setBusy(true);
+        const ok = await onLogin(emailDraft, passDraft);
+        setBusy(false);
+        if (ok) onClose();
+      };
+      return (
+        <div className="modal-backdrop" onClick={onBackdropClick}>
+          <div className="modal">
+            <div className="modal-title">{authed ? 'Live Connection' : 'Admin Login'}</div>
+            <div className="modal-sub">
+              {authed
+                ? '관리자 계정으로 로그인되어 있습니다. 토큰은 만료 60초 전 자동 갱신됩니다.'
+                : '관리자 계정으로 로그인하면 모든 사용자 상태를 실시간으로 받아옵니다. access 토큰 만료 60초 전 자동 갱신.'}
+            </div>
+            <label className="modal-label">API Base</label>
+            <input className="modal-input" type="text" value={API_BASE} readOnly onFocus={(e) => e.target.select()} />
+
+            {authed ? (
+              <>
+                <label className="modal-label">Signed in as</label>
+                <input className="modal-input" type="text" value={email || '—'} readOnly />
+                {listError && (
+                  <div className="modal-status err">● API 응답 실패 — {listError.message || ('HTTP ' + listError.status)}</div>
+                )}
+                {!listError && (
+                  <div className="modal-status ok">● 연결 정상 — /admin/users 폴링 중</div>
+                )}
+                <div className="modal-actions">
+                  <button className="btn" onClick={onLogout}>Sign out</button>
+                  <button className="btn btn-primary" onClick={onClose}>Close</button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={submit}>
+                <label className="modal-label">Email</label>
+                <input
+                  className="modal-input"
+                  type="email"
+                  value={emailDraft}
+                  onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="admin@example.com"
+                  autoFocus
+                />
+                <label className="modal-label">Password</label>
+                <input
+                  className="modal-input"
+                  type="password"
+                  value={passDraft}
+                  onChange={(e) => setPassDraft(e.target.value)}
+                  placeholder="••••••••"
+                />
+                {authError
+                  ? <div className="modal-status err">● {authError}</div>
+                  : <div className="modal-status info">● 로그인 필요 (스냅샷 모드 작동 중)</div>}
+                <div className="modal-actions">
+                  <button type="button" className="btn" onClick={onClose}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={busy || !emailDraft || !passDraft}>
+                    {busy ? 'Signing in…' : 'Sign in'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function UsersPanel({ users, selectedId, onSelect, freshIds }) {
+      return (
+        <div className="panel-users">
+          <div className="panel-title"><span>Users</span><span className="count-pill">{users.length}</span></div>
+          {users.map(u => {
+            const sel = selectedId === u.id;
+            const active = u.traces.filter(t => t.status === 'active').length;
+            const fresh = freshIds && freshIds.has(u.id);
+            return (
+              <div
+                key={u.id}
+                className={`user-card ${sel ? 'selected' : ''} ${fresh ? 'fresh' : ''}`}
+                onClick={() => onSelect(u.id)}
+              >
+                <div className="uc-row1">
+                  <span className="uc-id">#{u.shortId}</span>
+                  <span className={`uc-active-mark ${u.online ? '' : 'idle'}`} />
+                </div>
+                <div className="uc-persona">{u.persona}</div>
+                <div className="uc-stats">
+                  <span><span className="k">topic</span> {u.topics.length}</span>
+                  <span><span className="k">trace</span> {active}</span>
+                  {u.live
+                    ? <span><span className="k">live</span> {u.lastActiveMin < 999 ? `${u.lastActiveMin}m` : '—'}</span>
+                    : <span><span className="k">day</span> {u.activeDay}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function Graph({ user, selectedTopic, selectedTrace, onTopicSelect }) {
+      const N = user.topics.length;
+      // Relaxed positions — stable across re-polls (keyed by user.id + topic id set)
+      const posKey = user.id + '|' + user.topics.map(t => t.id).sort().join(',');
+      const positions = useMemo(() => relaxPositions(user.topics), [posKey]);
+      const topicById = useMemo(() => {
+        const map = {};
+        for (const t of user.topics) {
+          const p = positions.get(t.id) || { x: t.x ?? 0.5, y: t.y ?? 0.5 };
+          map[t.id] = { ...t, x: p.x, y: p.y };
+        }
+        return map;
+      }, [user.topics, positions]);
+      const scale = useMemo(() => nodeScale(N), [N]);
+      const labelable = useMemo(
+        () => labelableSet(user.topics, selectedTopic),
+        [user.topics, selectedTopic]
+      );
+
+      return (
+        <div className="panel-graph">
+          <div className="graph-meta">
+            <div className="gm-1">{user.persona}</div>
+            <div className="gm-2">#{user.shortId}</div>
+          </div>
+          <svg className="graph-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <filter id="nodeGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.5" />
+              </filter>
+            </defs>
+
+            {/* Edges (trace paths) — use relaxed positions */}
+            {user.traces.map(tr => {
+              const d = tracePath(tr, topicById);
+              if (!d) return null;
+              const isSel = selectedTrace === tr.id;
+              return (
+                <path
+                  key={tr.id}
+                  d={d}
+                  className={`edge ${tr.status} ${isSel ? 'selected' : ''}`}
+                />
+              );
+            })}
+
+            {/* Nodes */}
+            {user.topics.map(t => {
+              const placed = topicById[t.id];
+              const cx = px(placed.x), cy = py(placed.y);
+              const r = Math.max(2.4, BUCKET_R[t.bucket] * scale);
+              const fill = BUCKET_FILL[t.bucket];
+              const sel = selectedTopic === t.id;
+              const showLabel = labelable.has(t.id);
+              return (
+                <g
+                  key={t.id}
+                  className={`node-group ${sel ? 'selected' : ''}`}
+                  onClick={() => onTopicSelect(t.id)}
+                >
+                  {t.onb && <circle className="node-onb" cx={cx} cy={cy} r={r + 5} />}
+                  <circle className="node-core" cx={cx} cy={cy} r={r} fill={fill} />
+                  <text
+                    className={`node-label ${t.bucket === 'high' ? 'hi' : t.bucket === 'low' ? 'dim' : ''} ${showLabel ? '' : 'hidden'}`}
+                    x={cx}
+                    y={cy + r + Math.max(11, 15 * scale)}
+                    textAnchor="middle"
+                  >
+                    {t.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+          <div className="graph-legend">
+            <div className="lg-item"><span className="lg-dot high" /> high</div>
+            <div className="lg-item"><span className="lg-dot med" /> med</div>
+            <div className="lg-item"><span className="lg-dot low" /> low</div>
+            <div className="lg-item" style={{ marginLeft: 12 }}><span className="lg-line active" /> active trace</div>
+            <div className="lg-item"><span className="lg-line stale" /> stale</div>
+            <div className="lg-item" style={{ marginLeft: 12, color: 'var(--text-3)' }}>○ onboarding</div>
+            <div className="lg-item" style={{ marginLeft: 12, color: 'var(--text-3)' }}>N={N}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function DetailPanel({ user, selectedTopic, selectedTrace, onTraceSelect }) {
+      const topic = selectedTopic ? user.topics.find(t => t.id === selectedTopic) : null;
+      const docs = selectedTopic ? (user.docs[selectedTopic] || []) : [];
+
+      return (
+        <div className="panel-detail">
+          <div className="traces-list">
+            <div className="panel-title"><span>Traces</span><span className="count-pill">{user.traces.length}</span></div>
+            {user.traces.map(tr => {
+              const sel = selectedTrace === tr.id;
+              const lastHop = tr.path[tr.path.length - 1];
+              const lastLabel = user.topics.find(t => t.id === lastHop)?.label || lastHop;
+              return (
+                <div key={tr.id} className={`trace-row ${tr.status} ${sel ? 'selected' : ''}`} onClick={() => onTraceSelect(tr.id)}>
+                  <div className="tr-head">
+                    <span className="tr-id">#{String(tr.id).padStart(3, '0')}</span>
+                    <span className={`tr-status ${tr.status}`}>{tr.status}</span>
+                  </div>
+                  <div className="tr-label">{tr.label}</div>
+                  <div className="tr-meta">
+                    <span><span className="k">hops</span> {tr.path.length}</span>
+                    <span><span className="k">days</span> {tr.days}</span>
+                    <span><span className="k">last-op</span> {tr.opLast}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="focus-divider" />
+
+          {!topic && (
+            <>
+              <div className="panel-title"><span>Focus</span></div>
+              <div className="focus-empty">노드 또는 trace를 클릭하면 토픽 상세와 수집된 문서가 여기 표시됩니다.</div>
+            </>
+          )}
+          {topic && (
+            <>
+              <div className="panel-title"><span>Focus</span><span className="count-pill mono">#{topic.id}</span></div>
+              <div className="focus-head">
+                <div className="focus-label">{topic.label}</div>
+              </div>
+              <div className="focus-stats">
+                <div className="focus-row">
+                  <span className="k">Bucket</span>
+                  <span className={`bucket-chip ${topic.bucket === 'high' ? 'high' : topic.bucket === 'med' ? 'med' : 'low'}`}>{topic.bucket}</span>
+                </div>
+                <div className="focus-row"><span className="k">Score</span><span className="v">{topic.score.toFixed(2)}</span></div>
+                <div className="focus-row"><span className="k">Onboarding</span><span className="v">{topic.onb ? 'YES' : '—'}</span></div>
+                <div className="focus-row"><span className="k">Docs</span><span className="v">{docs.length}</span></div>
+              </div>
+              <div className="docs-title"><span>Collected Documents</span><span>{docs.length}</span></div>
+              {docs.length === 0 && <div className="focus-empty">아직 수집된 문서 없음.</div>}
+              {docs.map((d, i) => (
+                <div className="doc-row" key={i}>
+                  <span className={`doc-icon ${d.evt}`} />
+                  <div className="doc-body">
+                    <div className="doc-title">{d.title}</div>
+                    <div className="doc-meta">
+                      <span>{d.evt}</span>
+                      <span className="conf">conf {d.conf.toFixed(2)}</span>
+                      <span>day {d.day}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      );
+    }
+
+    /* ═══════════════════ APP ═══════════════════ */
+    function App() {
+      const { auth, error: authError, login, logout, apiFetch, authed } = useAdminAuth();
+      const [showSettings, setShowSettings] = useState(false);
+      const [now, setNow] = useState(() => new Date());
+
+      useEffect(() => {
+        const i = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(i);
+      }, []);
+
+      // ─── Live data layer ───
+      const { list: liveList, error: listErr, loaded: listLoaded } = useUserList(apiFetch, authed);
+      const liveUserIds = useMemo(
+        () => liveList.map(u => u.user_id),
+        [liveList.map(u => u.user_id).join('|')]
+      );
+      const bundle = useUserStateBundle(apiFetch, authed, liveUserIds);
+
+      const liveUsers = useMemo(() => {
+        return liveList.map(item => {
+          const slot = bundle[item.user_id] || {};
+          return buildLiveUser(item, slot.state || { topics: [] }, slot.traces || { items: [] });
+        });
+      }, [liveList, bundle]);
+
+      // ─── Track fresh (newly arrived) users for highlight animation ───
+      const seenIdsRef = useRef(new Set());
+      const [freshIds, setFreshIds] = useState(new Set());
+      useEffect(() => {
+        if (!liveUsers.length) return;
+        const incoming = new Set(liveUsers.map(u => u.id));
+        const fresh = new Set();
+        for (const id of incoming) {
+          if (!seenIdsRef.current.has(id)) fresh.add(id);
+        }
+        seenIdsRef.current = incoming;
+        if (fresh.size) {
+          setFreshIds(fresh);
+          const t = setTimeout(() => setFreshIds(new Set()), 2500);
+          return () => clearTimeout(t);
+        }
+      }, [liveUsers]);
+
+      // ─── Status pill ───
+      const isLive = authed && listLoaded && !listErr;
+      const liveStatus = !authed ? 'snapshot' : (listErr ? 'err' : (isLive ? 'live' : 'snapshot'));
+
+      // ─── Effective users (live or mock) ───
+      const users = isLive ? liveUsers : MOCK_USERS;
+
+      // ─── Selection state ───
+      const [selectedUserId, setSelectedUserId] = useState(MOCK_USERS[0].id);
+      const [selectedTopic, setSelectedTopic] = useState('rag');
+      const [selectedTrace, setSelectedTrace] = useState(3);
+
+      // Auto-pick first user when switching to live mode for the first time
+      useEffect(() => {
+        if (!isLive || users.length === 0) return;
+        if (!users.find(u => u.id === selectedUserId)) {
+          const first = users[0];
+          setSelectedUserId(first.id);
+          const firstActive = first.traces.find(t => t.status === 'active') || first.traces[0];
+          setSelectedTrace(firstActive?.id ?? null);
+          if (firstActive && firstActive.path.length) {
+            setSelectedTopic(firstActive.path[firstActive.path.length - 1]);
+          } else {
+            setSelectedTopic(first.topics[0]?.id ?? null);
+          }
+        }
+      }, [isLive, users, selectedUserId]);
+
+      const user = users.find(u => u.id === selectedUserId) || users[0];
+
+      // ─── Per-topic doc poll (live mode only, for selected user+topic) ───
+      const liveDocs = useTopicDocs(
+        apiFetch,
+        isLive,
+        isLive ? selectedUserId : '',
+        isLive ? selectedTopic : ''
+      );
+
+      const handleUserSelect = (id) => {
+        setSelectedUserId(id);
+        const u = users.find(x => x.id === id);
+        if (u) {
+          const firstActive = u.traces.find(t => t.status === 'active') || u.traces[0];
+          setSelectedTrace(firstActive?.id ?? null);
+          if (firstActive && firstActive.path.length) {
+            setSelectedTopic(firstActive.path[firstActive.path.length - 1]);
+          } else {
+            setSelectedTopic(u.topics[0]?.id ?? null);
+          }
+        }
+      };
+
+      const handleTraceSelect = (id) => {
+        // Toggle: 같은 trace 두 번째 클릭 시 선택 해제.
+        if (selectedTrace === id) {
+          setSelectedTrace(null);
+          return;
+        }
+        setSelectedTrace(id);
+        const tr = user?.traces.find(t => t.id === id);
+        if (tr && tr.path.length) setSelectedTopic(tr.path[tr.path.length - 1]);
+      };
+
+      if (!user) {
+        return (
+          <div className="app">
+            <Header
+              user={{ shortId: '——', topics: [], traces: [] }}
+              now={now}
+              liveStatus={liveStatus}
+              onSettings={() => setShowSettings(true)}
+            />
+            <div className="panel-users" />
+            <div className="panel-graph" />
+            <div className="panel-detail" />
+            <SettingsModal
+              open={showSettings}
+              authed={authed}
+              email={auth.email}
+              authError={authError}
+              listError={listErr}
+              onLogin={login}
+              onLogout={logout}
+              onClose={() => setShowSettings(false)}
+            />
+          </div>
+        );
+      }
+
+      // For live mode, focus topic uses live docs; for mock, look up from user.docs
+      const detailUser = isLive
+        ? { ...user, docs: { [selectedTopic]: liveDocs } }
+        : user;
+
+      return (
+        <div className="app">
+          <Header
+            user={user}
+            now={now}
+            liveStatus={liveStatus}
+            onSettings={() => setShowSettings(true)}
+          />
+          <UsersPanel
+            users={users}
+            selectedId={selectedUserId}
+            onSelect={handleUserSelect}
+            freshIds={freshIds}
+          />
+          <Graph
+            user={user}
+            selectedTopic={selectedTopic}
+            selectedTrace={selectedTrace}
+            onTopicSelect={setSelectedTopic}
+          />
+          <DetailPanel
+            user={detailUser}
+            selectedTopic={selectedTopic}
+            selectedTrace={selectedTrace}
+            onTraceSelect={handleTraceSelect}
+          />
+          <SettingsModal
+            open={showSettings}
+            authed={authed}
+            email={auth.email}
+            authError={authError}
+            listError={listErr}
+            onLogin={login}
+            onLogout={logout}
+            onClose={() => setShowSettings(false)}
+          />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

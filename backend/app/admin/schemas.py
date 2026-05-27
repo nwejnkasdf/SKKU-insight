@@ -17,8 +17,10 @@ from app.contracts import (
     AdminRole,
     ClickbaitDecision,
     CollectionJobStatus,
+    DocumentSummary,
     EventType,
     InterestBucket,
+    PageMeta,
     SourceType,
     TrustLevel,
 )
@@ -189,6 +191,7 @@ class AdminInterestTopicView(BaseModel):
     long_score: float
     short_score: float
     bucket: InterestBucket
+    is_onboarding_selected: bool = False
 
 
 class AdminUserInterestState(BaseModel):
@@ -210,9 +213,29 @@ class AdminEventView(BaseModel):
     server_received_at: datetime
 
 
+class AdminDocumentItem(DocumentSummary):
+    """관리자용 토픽 문서 row — DocumentSummary + DocumentTopic 매핑 신뢰도.
+
+    `confidence`: DocumentTopic.confidence (topic ↔ doc 관련도, NOT NULL float).
+    """
+
+    confidence: float | None = None
+
+
+class AdminTopicDocumentsResponse(BaseModel):
+    """`GET /admin/users/{id}/topics/{tid}/documents` 응답 — 관리자용 (confidence 포함)."""
+
+    topic_type: Literal["cso", "leaf"]
+    topic_id: UUID
+    items: list[AdminDocumentItem]
+    meta: PageMeta
+
+
 __all__ = [
+    "AdminDocumentItem",
     "AdminEventView",
     "AdminInterestTopicView",
+    "AdminTopicDocumentsResponse",
     "AdminLoginRequest",
     "AdminLogoutRequest",
     "AdminMeResponse",

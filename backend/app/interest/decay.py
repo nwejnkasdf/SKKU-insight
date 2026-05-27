@@ -16,8 +16,9 @@ from typing import Any, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from sqlalchemy import CursorResult, select, text
+from sqlalchemy import CursorResult, Float, Integer, bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from app.config import Settings
 from app.contracts import RedisKey
@@ -89,7 +90,7 @@ async def apply_decay_to_user(
                 EXP(-:ln2 / :half_long  * delta) AS f_long,
                 CASE
                     WHEN boost_applied_at_active_day IS NOT NULL
-                         AND (:current_active_day - boost_applied_at_active_day) >= :boost_expiry
+                         AND (CAST(:current_active_day AS INTEGER) - boost_applied_at_active_day) >= CAST(:boost_expiry AS INTEGER)
                     THEN TRUE ELSE FALSE
                 END AS expire_boost,
                 long_alpha, long_beta, short_alpha, short_beta
@@ -154,6 +155,19 @@ async def apply_decay_to_user(
         FROM computed c
         WHERE s.state_id = c.state_id
         """
+    ).bindparams(
+        # (2026-05-27 fix) asyncpg 가 parameter type inference 실패 시 'unknown'
+        # 으로 보내서 PostgreSQL 의 - / + 연산자가 ambiguous 로 에러. 명시적 타입
+        # 바인딩으로 회피.
+        bindparam("user_id", type_=PG_UUID(as_uuid=True)),
+        bindparam("current_active_day", type_=Integer),
+        bindparam("ln2", type_=Float),
+        bindparam("half_short", type_=Float),
+        bindparam("half_long", type_=Float),
+        bindparam("alpha_prior", type_=Float),
+        bindparam("beta_prior", type_=Float),
+        bindparam("boost", type_=Float),
+        bindparam("boost_expiry", type_=Integer),
     )
     result = cast(
         CursorResult[Any],

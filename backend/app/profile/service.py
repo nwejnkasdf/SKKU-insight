@@ -620,31 +620,35 @@ async def apply_fusion_bridge_override(
 
     # (C-54, 2026-05-24) bridge_cso 영역 fresh Document fetch — LLM web_search + INSERT.
     # 실패 모드 F1: 예외 발생해도 fusion_candidates 자체는 보존 (BFS 결정은 살림).
+    # (2026-05-27) SAVEPOINT 격리 — fetch 안에서 SQL 실패 시 session 이 InFailedSQL
+    # 상태로 빠져 후속 query (예: apply_reincarnation_prefetch) 가 "transaction aborted"
+    # 로 연쇄 실패. begin_nested 로 fetch 부분만 savepoint rollback → outer transaction 보존.
     if fusion_fetch_enabled and provider is not None:
         from app.profile import fusion_fetch as fusion_fetch_mod
 
         try:
-            archived_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
-                db, user_id, list(archived_trace.path)
-            )
-            active_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
-                db, user_id, list(active_trace.path)
-            )
-            await fusion_fetch_mod.fetch_fusion_documents(
-                db,
-                provider,
-                user_id=user_id,
-                bridge_cso_topic_id=bridge_cso,
-                bridge_label=bridge_label,
-                archived_trace=archived_trace,
-                active_trace=active_trace,
-                archived_path_labels=from_archived,
-                active_path_labels=from_active,
-                archived_saved_titles=archived_saved_titles,
-                active_saved_titles=active_saved_titles,
-                max_documents=fusion_fetch_max_documents,
-                recent_urls_window_days=fusion_fetch_recent_urls_window_days,
-            )
+            async with db.begin_nested():
+                archived_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
+                    db, user_id, list(archived_trace.path)
+                )
+                active_saved_titles = await fusion_fetch_mod.fetch_trace_saved_titles(
+                    db, user_id, list(active_trace.path)
+                )
+                await fusion_fetch_mod.fetch_fusion_documents(
+                    db,
+                    provider,
+                    user_id=user_id,
+                    bridge_cso_topic_id=bridge_cso,
+                    bridge_label=bridge_label,
+                    archived_trace=archived_trace,
+                    active_trace=active_trace,
+                    archived_path_labels=from_archived,
+                    active_path_labels=from_active,
+                    archived_saved_titles=archived_saved_titles,
+                    active_saved_titles=active_saved_titles,
+                    max_documents=fusion_fetch_max_documents,
+                    recent_urls_window_days=fusion_fetch_recent_urls_window_days,
+                )
         except Exception:
             logger.warning(
                 "fusion_fetch failed user=%s bridge=%s — fusion_candidates preserved",
@@ -653,6 +657,85 @@ async def apply_fusion_bridge_override(
             )
 
     return payload.model_copy(update={"fusion_candidates": [fusion]})
+
+
+async def apply_reincarnation_prefetch(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    archive_score_tail_min: float,
+    input_archive_max: int,
+    softmax_temperature: float,
+    provider: LLMProvider | None = None,
+    fetch_enabled: bool = False,
+    fetch_max_documents: int = 5,
+    fetch_recent_urls_window_days: int = 30,
+) -> None:
+    """Reincarnation 영역 fresh Document fetch — fusion_fetch 대칭.
+
+    apply_fusion_bridge_override 와 독립 (own archived_trace softmax sampling). 매일
+    다른 archived trace 가 sampled → 시간이 지나면 eligible archive 영역 전반에 fresh
+    docs 분산 누적.
+
+    payload 영향 없음 (side-effect only: Document/DocumentTopic INSERT). caller (worker)
+    가 별도 호출 → upsert_user_profile + db.commit() 와 같은 트랜잭션 안에서 commit.
+
+    provider=None / fetch_enabled=False / archived pool 비어있음 → no-op return.
+    실패 (ProviderError 등) 는 silent skip — 다음 일자 cron 재시도.
+    """
+    if not fetch_enabled or provider is None:
+        return
+    archived_pool = await trav_queries.get_archived_traces_with_score(
+        db,
+        user_id,
+        score_tail_min=archive_score_tail_min,
+        limit=input_archive_max,
+    )
+    archived_trace = softmax_sample_trace(
+        archived_pool, temperature=softmax_temperature
+    )
+    if archived_trace is None or not archived_trace.path:
+        return
+    archived_leaves = await trav_queries.get_descendant_archived_leaves(
+        db, user_id, trace=archived_trace
+    )
+    label_lookup = await _build_cso_label_lookup(db, set(archived_trace.path))
+    tail_cso = archived_trace.path[-1]
+    tail_label = label_lookup.get(tail_cso) or str(tail_cso)
+    path_labels = [label_lookup.get(c, str(c)) for c in archived_trace.path]
+    leaf_labels = [lf.label for lf in archived_leaves]
+
+    # 옛 saved titles + LLM fetch — SAVEPOINT 격리 (fusion_fetch 와 동일 정책).
+    # fetch 안에서 SQL 실패 → 본 savepoint 만 rollback → outer transaction (worker 의
+    # upsert_user_profile commit) 보존. fetch_trace_saved_titles / fetch_reincarnation
+    # 어느 한쪽이 실패해도 daily cron 전체를 rollback 시키지 않음.
+    from app.profile.fusion_fetch import fetch_trace_saved_titles
+    from app.profile.reincarnation_fetch import fetch_reincarnation_documents
+
+    try:
+        async with db.begin_nested():
+            saved_titles = await fetch_trace_saved_titles(
+                db, user_id, list(archived_trace.path)
+            )
+            await fetch_reincarnation_documents(
+                db,
+                provider,
+                user_id=user_id,
+                tail_cso_topic_id=tail_cso,
+                tail_label=tail_label,
+                archived_trace=archived_trace,
+                archived_path_labels=path_labels,
+                archived_leaf_labels=leaf_labels,
+                archived_saved_titles=saved_titles,
+                max_documents=fetch_max_documents,
+                recent_urls_window_days=fetch_recent_urls_window_days,
+            )
+    except Exception:
+        logger.warning(
+            "reincarnation_prefetch failed user=%s trace=%s — silent skip",
+            user_id,
+            archived_trace.trace_id,
+        )
 
 
 async def upsert_user_profile(

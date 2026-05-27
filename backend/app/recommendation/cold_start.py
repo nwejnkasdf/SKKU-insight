@@ -159,7 +159,7 @@ def _build_cold_start_prompt(
         "    \"url_hint\": \"정확한 URL 모르면 null. 추측 금지.\",\n"
         "    \"doi_hint\": \"DOI 알면 명시. 모르면 null.\",\n"
         "    \"published_at\": \"2024-09-12\" | \"2025-03-21T00:00:00Z\" | null  (정확한 발행일 모르면 null. YYYY-MM-DD 또는 ISO 8601),\n"
-        "    \"related_csos_en\": [\"Computer Vision\", \"Reinforcement Learning\"],\n"
+        "    \"related_csos_en\": [\"Computer Vision\", \"Reinforcement Learning\"],  // 정확히 2개\n"
         "    \"reason_short_ko\": \"한국어 한 문장 추천 이유 (60자 이내). "
         "점수나 알고리즘 언급 금지.\"\n"
         "  }\n"
@@ -167,6 +167,10 @@ def _build_cold_start_prompt(
         "- 한국어 사용자에게도 영어 원문 자료 추천이 자연스럽다. 단, reason_short_ko 는 "
         "반드시 한국어.\n"
         "- 동일 publisher 가 한 슬롯에서 2개 이상 나오지 않도록.\n"
+        "- **`related_csos_en` 는 정확히 2개**: CSO 3.5 ontology 기준 가장 잘 맞는 좁고 "
+        "구체적인 CSO 노드 2개만 (cluster root 같은 broad 노드 회피 — e.g. \"Artificial "
+        "Intelligence\" 대신 \"Large Language Models\" / \"Reinforcement Learning\" 등 "
+        "subtopic 우선). 3개 이상 매핑 시 trace 의도 모호화 → 추천 품질 저하.\n"
         "- **가능한 한 최신 자료 우선**: 최근 6개월 안 발표가 이상적, 1년 이내 권장. "
         "단 cluster 의 canonical landmark 자료 (e.g. \"Attention Is All You Need\" 같은 "
         "기준점) 는 예외 허용 — 사용자가 배경 지식으로 알아야 하는 경우만.\n"
@@ -278,6 +282,9 @@ def _validate_cold_start(parsed: Any) -> list[ColdStartItem]:
             if isinstance(related_csos_raw, list)
             else []
         )
+        # (2026-05-27) 매핑 폭증 회피 — LLM 이 prompt 무시하고 3+ 반환해도 server 가 2개 cap.
+        # 너무 broad 한 매핑이 trace 의도를 흐려 split 폭증 유발 (root-cause discovery).
+        related_csos = related_csos[:2]
         items.append(
             ColdStartItem(
                 slot_type=slot,

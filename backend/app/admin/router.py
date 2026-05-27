@@ -28,7 +28,7 @@ from app.redis import get_redis
 from app.security.deps import get_current_admin
 from app.security.rate_limit import limiter
 from app.topic import documents_service, trace_service
-from app.topic.schemas import TopicDocumentsResponse, TraversalTraceSummary
+from app.topic.schemas import TopicDocumentsResponse, TraversalTraceDetail, TraversalTraceSummary
 
 from . import auth_service, users_service
 from .schemas import (
@@ -412,6 +412,22 @@ async def admin_user_traces(
     return await trace_service.list_traces(
         db, user_id, status_filter, cursor, limit
     )
+
+
+@router.get(
+    "/users/{user_id}/traces/{trace_id}",
+    response_model=TraversalTraceDetail,
+    summary="trace 상세 + 산하 leaf (관리자)",
+)
+async def admin_user_trace_detail(
+    user_id: UUID,
+    trace_id: UUID,
+    admin: Annotated[AdminUser, Depends(get_current_admin)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> TraversalTraceDetail:
+    """관리자 모니터링 — 임의 user_id 의 trace 상세 (path + leaves)."""
+    _ = admin
+    return await trace_service.get_trace_detail(db, user_id, trace_id)
 
 
 @router.get(

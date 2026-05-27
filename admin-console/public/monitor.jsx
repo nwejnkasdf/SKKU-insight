@@ -111,13 +111,16 @@
   function buildLiveUser(listItem, stateRes, tracesRes) {
     const uid = listItem.user_id;
     const shortId = uid.replace(/-/g, '').slice(0, 6);
-    const topicsRaw = (stateRes?.topics || []).map(t => {
-      const id = (t.leaf_topic_id || t.cso_topic_id || t.label || '').toString();
-      const bucket = normBucket(t.bucket);
-      const score = Math.max(t.long_score ?? 0, t.short_score ?? 0);
-      const onb = !!t.is_onboarding_selected;
-      return { id, label: t.label || '(unlabeled)', bucket, score, onb, docs: 0 };
-    });
+    // 기본 노드는 CSO 토픽만. leaf 토픽은 trace 클릭 시 trace detail로 별도 fetch해서 시각 차별 표시.
+    const topicsRaw = (stateRes?.topics || [])
+      .filter(t => !!t.cso_topic_id)
+      .map(t => {
+        const id = (t.cso_topic_id || t.label || '').toString();
+        const bucket = normBucket(t.bucket);
+        const score = Math.max(t.long_score ?? 0, t.short_score ?? 0);
+        const onb = !!t.is_onboarding_selected;
+        return { id, label: t.label || '(unlabeled)', bucket, score, onb, docs: 0 };
+      });
     const seenIds = new Set();
     const topics = [];
     for (const t of topicsRaw) {
@@ -216,6 +219,28 @@
     return bundle;
   }
 
+  function useTraceDetail(userId, traceId) {
+    const [detail, setDetail] = useState(null);
+    useEffect(() => {
+      if (!userId || !traceId) { setDetail(null); return; }
+      let cancelled = false;
+      const ac = new AbortController();
+      async function tick() {
+        try {
+          const res = await apiFetch(`/admin/users/${userId}/traces/${traceId}`, { signal: ac.signal });
+          if (cancelled) return;
+          setDetail(res);
+        } catch (e) {
+          if (e.name === 'AbortError') return;
+        }
+      }
+      tick();
+      const i = setInterval(tick, 5000);
+      return () => { cancelled = true; ac.abort(); clearInterval(i); };
+    }, [userId, traceId]);
+    return detail;
+  }
+
   function useTopicDocs(userId, topicId) {
     const [docs, setDocs] = useState([]);
     useEffect(() => {
@@ -254,6 +279,114 @@
   const py = (n) => PADDING + n * (H - 2 * PADDING);
   const BUCKET_R    = { high: 11, med: 8, low: 5 };
   const BUCKET_FILL = { high: '#0f766e', med: '#c2410c', low: '#a8a29e' };
+
+  /* ─── Zoom computation: focus camera on trace's bounding box ─── */
+  const IDENTITY_ZOOM = { tx: 0, ty: 0, scale: 1 };
+  function computeZoom(trace, topicById) {
+    if (!trace || !trace.path || trace.path.length === 0) return IDENTITY_ZOOM;
+    const pts = trace.path.map(id => topicById[id]).filter(Boolean);
+    if (pts.length === 0) return IDENTITY_ZOOM;
+    const xs = pts.map(p => px(p.x));
+    const ys = pts.map(p => py(p.y));
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const padding = 260;
+    const bw = (maxX - minX) + padding * 2;
+    const bh = (maxY - minY) + padding * 2;
+    const scale = Math.min(W / bw, H / bh, 2.4);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    return { tx: W / 2 - cx * scale, ty: H / 2 - cy * scale, scale };
+  }
+
+  /* ─── Smoothly interpolated zoom group via rAF ─── */
+  function ZoomGroup({ target, children }) {
+    // Direct DOM transform manipulation via ref — bypasses React re-render storm
+    // (60fps × setZoom would re-render the whole graph each frame).
+    const gRef = useRef(null);
+    const animRef = useRef({ start: { ...target }, target: { ...target }, t0: 0, raf: null });
+
+    useEffect(() => {
+      const node = gRef.current;
+      if (!node) return;
+      const a = animRef.current;
+      // Read CURRENT rendered transform (so a re-target mid-animation continues smoothly).
+      const ct = node.getAttribute('transform') || '';
+      const m = ct.match(/translate\(([\-\d.]+)\s+([\-\d.]+)\)\s*scale\(([\-\d.]+)\)/);
+      const cur = m
+        ? { tx: parseFloat(m[1]), ty: parseFloat(m[2]), scale: parseFloat(m[3]) }
+        : { ...a.start };
+      a.start = cur;
+      a.target = { ...target };
+      a.t0 = performance.now();
+      const apply = (v) => {
+        if (gRef.current) {
+          gRef.current.setAttribute('transform', `translate(${v.tx} ${v.ty}) scale(${v.scale})`);
+        }
+      };
+      apply(cur); // ensure attribute exists from frame 0 (avoid first-paint flash)
+      const duration = 520;
+      const ease = (t) => 1 - Math.pow(1 - t, 3);
+      const step = (now) => {
+        const dt = Math.min(1, (now - a.t0) / duration);
+        const e = ease(dt);
+        apply({
+          tx: a.start.tx + (a.target.tx - a.start.tx) * e,
+          ty: a.start.ty + (a.target.ty - a.start.ty) * e,
+          scale: a.start.scale + (a.target.scale - a.start.scale) * e,
+        });
+        if (dt < 1) a.raf = requestAnimationFrame(step);
+      };
+      if (a.raf) cancelAnimationFrame(a.raf);
+      a.raf = requestAnimationFrame(step);
+      // Fallback for hidden tabs (rAF doesn't fire when document.hidden): snap after 700ms.
+      const fallback = setTimeout(() => apply(a.target), 700);
+      return () => {
+        if (a.raf) cancelAnimationFrame(a.raf);
+        clearTimeout(fallback);
+      };
+    }, [target.tx, target.ty, target.scale]);
+
+    return (
+      <g ref={gRef}>
+        {children}
+      </g>
+    );
+  }
+
+  /* ─── Group trace's leaves by parent CSO node, lay out radially around each ─── */
+  function placeLeaves(trace, leaves, topicById) {
+    if (!trace || !leaves || leaves.length === 0) return [];
+    const groups = new Map();
+    const fallbackParent = trace.path[trace.path.length - 1];
+    for (const leaf of leaves) {
+      const parent = (leaf.cso_topic_ids || []).find(cid => topicById[cid]) || fallbackParent;
+      if (!groups.has(parent)) groups.set(parent, []);
+      groups.get(parent).push(leaf);
+    }
+    const out = [];
+    for (const [parentId, group] of groups) {
+      const parent = topicById[parentId];
+      if (!parent) continue;
+      const cx = px(parent.x), cy = py(parent.y);
+      const count = group.length;
+      const radius = 46 + Math.min(count, 6) * 5;
+      group.forEach((leaf, i) => {
+        const angle = (i / Math.max(count, 1)) * 2 * Math.PI - Math.PI / 2;
+        out.push({
+          leaf_topic_id: leaf.leaf_topic_id,
+          label: leaf.label,
+          confidence: leaf.confidence,
+          parentId,
+          parentX: cx,
+          parentY: cy,
+          x: cx + radius * Math.cos(angle),
+          y: cy + radius * Math.sin(angle),
+        });
+      });
+    }
+    return out;
+  }
 
   function quadCurve(p1, p2) {
     const mx = (p1.x + p2.x) / 2;
@@ -341,7 +474,7 @@
     );
   }
 
-  function Graph({ user, selectedTopic, selectedTrace, onTopicSelect }) {
+  function Graph({ user, selectedTopic, selectedTrace, onTopicSelect, traceDetail }) {
     const N = user.topics.length;
     const posKey = user.id + '|' + user.topics.map(t => t.id).sort().join(',');
     const positions = useMemo(() => relaxPositions(user.topics), [posKey]);
@@ -356,6 +489,19 @@
     const scale = useMemo(() => nodeScale(N), [N]);
     const labelable = useMemo(() => labelableSet(user.topics, selectedTopic), [user.topics, selectedTopic]);
 
+    const selectedTr = useMemo(
+      () => (selectedTrace ? user.traces.find(t => t.id === selectedTrace) : null),
+      [selectedTrace, user.traces]
+    );
+    const zoomTarget = useMemo(
+      () => (selectedTr ? computeZoom(selectedTr, topicById) : IDENTITY_ZOOM),
+      [selectedTr, topicById]
+    );
+    const leaves = useMemo(
+      () => placeLeaves(selectedTr, traceDetail?.leaves || [], topicById),
+      [selectedTr, traceDetail, topicById]
+    );
+
     return (
       <div className="m-panel-graph">
         <div className="m-graph-meta">
@@ -363,42 +509,66 @@
           <div className="gm-2">#{user.shortId}</div>
         </div>
         <svg className="m-graph-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-          {/* Edges */}
-          {user.traces.map(tr => {
-            const d = tracePath(tr, topicById);
-            if (!d) return null;
-            const isSel = selectedTrace === tr.id;
-            return (
-              <path key={tr.id} d={d} className={`m-edge ${tr.status} ${isSel ? 'selected' : ''}`} />
-            );
-          })}
-          {/* Nodes */}
-          {user.topics.map(t => {
-            const placed = topicById[t.id];
-            const cx = px(placed.x), cy = py(placed.y);
-            const r = Math.max(2.4, BUCKET_R[t.bucket] * scale);
-            const fill = BUCKET_FILL[t.bucket];
-            const sel = selectedTopic === t.id;
-            const showLabel = labelable.has(t.id);
-            return (
-              <g
-                key={t.id}
-                className={`m-node-group ${sel ? 'selected' : ''}`}
-                onClick={() => onTopicSelect(t.id)}
-              >
-                {t.onb && <circle className="m-node-onb" cx={cx} cy={cy} r={r + 5} />}
-                <circle className="m-node-core" cx={cx} cy={cy} r={r} fill={fill} />
+          <ZoomGroup target={zoomTarget}>
+            {/* Edges */}
+            {user.traces.map(tr => {
+              const d = tracePath(tr, topicById);
+              if (!d) return null;
+              const isSel = selectedTrace === tr.id;
+              return (
+                <path key={tr.id} d={d} className={`m-edge ${tr.status} ${isSel ? 'selected' : ''}`} />
+              );
+            })}
+            {/* Nodes */}
+            {user.topics.map(t => {
+              const placed = topicById[t.id];
+              const cx = px(placed.x), cy = py(placed.y);
+              const r = Math.max(2.4, BUCKET_R[t.bucket] * scale);
+              const fill = BUCKET_FILL[t.bucket];
+              const sel = selectedTopic === t.id;
+              const showLabel = labelable.has(t.id);
+              return (
+                <g
+                  key={t.id}
+                  className={`m-node-group ${sel ? 'selected' : ''}`}
+                  onClick={() => onTopicSelect(t.id)}
+                >
+                  {t.onb && <circle className="m-node-onb" cx={cx} cy={cy} r={r + 5} />}
+                  <circle className="m-node-core" cx={cx} cy={cy} r={r} fill={fill} />
+                  <text
+                    className={`m-node-label ${t.bucket === 'high' ? 'hi' : t.bucket === 'low' ? 'dim' : ''} ${showLabel ? '' : 'hidden'}`}
+                    x={cx}
+                    y={cy + r + Math.max(11, 15 * scale)}
+                    textAnchor="middle"
+                  >
+                    {t.label}
+                  </text>
+                </g>
+              );
+            })}
+            {/* Leaves — selected trace's dynamic leaf topics, attached to their parent CSO node */}
+            {leaves.map((leaf, i) => (
+              <g key={leaf.leaf_topic_id || i} className="m-leaf-group">
+                <line
+                  className="m-leaf-link"
+                  x1={leaf.parentX} y1={leaf.parentY}
+                  x2={leaf.x} y2={leaf.y}
+                />
+                <path
+                  className="m-leaf-diamond"
+                  d={`M${leaf.x},${leaf.y - 6.5} L${leaf.x + 6.5},${leaf.y} L${leaf.x},${leaf.y + 6.5} L${leaf.x - 6.5},${leaf.y} Z`}
+                />
                 <text
-                  className={`m-node-label ${t.bucket === 'high' ? 'hi' : t.bucket === 'low' ? 'dim' : ''} ${showLabel ? '' : 'hidden'}`}
-                  x={cx}
-                  y={cy + r + Math.max(11, 15 * scale)}
+                  className="m-leaf-label"
+                  x={leaf.x}
+                  y={leaf.y + 16}
                   textAnchor="middle"
                 >
-                  {t.label}
+                  {leaf.label}
                 </text>
               </g>
-            );
-          })}
+            ))}
+          </ZoomGroup>
         </svg>
         <div className="m-graph-legend">
           <div className="m-lg-item"><span className="m-lg-dot high" /> high</div>
@@ -406,8 +576,9 @@
           <div className="m-lg-item"><span className="m-lg-dot low" /> low</div>
           <div className="m-lg-item" style={{ marginLeft: 12 }}><span className="m-lg-line active" /> active trace</div>
           <div className="m-lg-item"><span className="m-lg-line stale" /> stale</div>
+          <div className="m-lg-item" style={{ marginLeft: 12 }}><span className="m-lg-leaf" /> leaf</div>
           <div className="m-lg-item" style={{ marginLeft: 12, color: 'var(--m-text-3)' }}>○ onboarding</div>
-          <div className="m-lg-item" style={{ marginLeft: 12, color: 'var(--m-text-3)' }}>N={N}</div>
+          <div className="m-lg-item" style={{ marginLeft: 12, color: 'var(--m-text-3)' }}>N={N}{leaves.length ? ` · leaves=${leaves.length}` : ''}</div>
         </div>
       </div>
     );
@@ -542,6 +713,7 @@
 
     const user = users.find(u => u.id === selectedUserId) || users[0];
     const docs = useTopicDocs(selectedUserId, selectedTopic);
+    const traceDetail = useTraceDetail(selectedUserId, selectedTrace);
 
     const handleUserSelect = (id) => {
       setSelectedUserId(id);
@@ -585,7 +757,7 @@
       <div className="m-app">
         <Header user={user} now={now} liveStatus={liveStatus} adminEmail={adminEmail} />
         <UsersPanel users={users} selectedId={selectedUserId} onSelect={handleUserSelect} freshIds={freshIds} />
-        <Graph user={user} selectedTopic={selectedTopic} selectedTrace={selectedTrace} onTopicSelect={setSelectedTopic} />
+        <Graph user={user} selectedTopic={selectedTopic} selectedTrace={selectedTrace} onTopicSelect={setSelectedTopic} traceDetail={traceDetail} />
         <DetailPanel user={user} selectedTopic={selectedTopic} selectedTrace={selectedTrace} onTraceSelect={handleTraceSelect} docs={docs} />
       </div>
     );

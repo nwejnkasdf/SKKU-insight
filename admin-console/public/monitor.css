@@ -305,6 +305,43 @@
 .monitor-page .m-doc-meta { font-size: 9px; color: var(--m-text-2); font-family: 'JetBrains Mono', monospace; display: flex; gap: 8px; }
 .monitor-page .m-doc-meta .conf { color: var(--m-accent); }
 
+/* ──────── Leaf nodes (trace 클릭 시만) ──────── */
+.monitor-page .m-leaf-group {
+  animation: m-leafIn 0.32s ease-out;
+  transform-origin: center;
+}
+@keyframes m-leafIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.monitor-page .m-leaf-diamond {
+  fill: rgba(15, 118, 110, 0.18);
+  stroke: var(--m-accent);
+  stroke-width: 1.6;
+  stroke-dasharray: 2.5 2;
+}
+.monitor-page .m-leaf-link {
+  stroke: var(--m-accent);
+  stroke-width: 1;
+  stroke-dasharray: 1.5 3;
+  opacity: 0.55;
+}
+.monitor-page .m-leaf-label {
+  fill: var(--m-accent);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Inter', 'Noto Sans KR', sans-serif;
+  pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: var(--m-bg); stroke-width: 3px; stroke-linejoin: round;
+}
+.monitor-page .m-lg-leaf {
+  display: inline-block;
+  width: 9px; height: 9px;
+  transform: rotate(45deg);
+  background: rgba(15, 118, 110, 0.18);
+  border: 1.2px dashed var(--m-accent);
+}
+
 /* Scrollbar */
 .monitor-page ::-webkit-scrollbar { width: 5px; height: 5px; }
 .monitor-page ::-webkit-scrollbar-track { background: transparent; }

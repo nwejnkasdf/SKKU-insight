@@ -1584,3 +1584,48 @@ C-62 결정 #11 ("cold-start 종료 시 boost trace 삭제") 의 "모든 boost D
 
 PR #(TBD) merge commit `(TBD)`.
 
+
+## 32. C-73 라운드 — Fusion bridge 후보 생성·LLM 선택 분리 + depth 가드 (2026-06-11)
+
+### 배경
+
+CSO 3.5 실측 (cross-cluster trace 쌍 400 샘플, networkx 시뮬레이션) 에서 C-53 `find_fusion_bridge` 의 구조적 결함 발견:
+
+1. **min hop-sum 단독 선택의 허브 수렴** — 발견율 56.5% 이나 **발견 bridge 의 100% 가 깊이 ≤2 범용 허브 (대부분 root `computer_science`)**. trace path 는 cluster 에서 시작해 root 를 포함하지 않으므로, C-53 의 "path 위 visited 제외" root 가드가 실질 무력 — root 가 항상 최단 만남 지점이라 min hop-sum 이 기계적으로 "AI x Systems 의 교차점 = Computer Science" 류의 공허한 답으로 수렴.
+2. **원 설계 의도와의 드리프트** — 사용자 원안은 "두 trace 사이 노드들의 최단경로 후보를 LLM 에 넣어 가장 잘 맞는 것으로 매핑" (그래프가 제안, LLM 이 판단). C-53 이 LLM 단계를 제거하면서 의미 판단 없는 그래프 단독 선택이 됨.
+3. **깊이 필터 실측** — bridge 후보에 깊이 ≥3 (CSV 기준; app graph 기준 ≥2) 제약 시 **발견율 56.5% 무손실** + 구체 토픽 bridge 출현 (예: multi-view_video x adaptive_routing → computer_vision_applications). 의도된 설계 (최단경로 내부 노드 풀) 시뮬레이션도 52.1% 쌍에서 깊이 ≥3 후보 존재 확인.
+
+### 사용자 결정 (3건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | bridge 결정 = 그래프 후보 생성 (deterministic) + LLM 닫힌 목록 선택 — 원안 복원 | C-53 의 deterministic 단독이 의미 판단을 잃음. LLM 은 생성이 아니라 **닫힌 목록 선택만** — 환각 차단은 유지. |
+| 2 | LLM 거부 = 일급 출력 | 후보가 전부 빈약할 때 강제 선택은 "허브를 LLM 권위로 세탁". 거부 시 fusion_candidates=[] → trend fallback (기존 경로). |
+| 3 | 상세 계획 보고 후 진행 | 코드 수정 전 계획 검수. |
+
+### 자체 결정 (7건)
+
+| # | 결정 | 이유 |
+|---|---|---|
+| 1 | 후보 = 최단경로 내부 노드 ∪ BFS meet (max_hops 전 라운드) | 원안 (최단경로) + C-53 자산 (BFS) 합집합. "랜덤 5쌍" 은 풀 빈약 (평균 5 노드) — top_k 교차쌍 전체 (≤25) 로 확장, 비용 무시 가능. |
+| 2 | `FUSION_BRIDGE_MIN_DEPTH=2` (app graph cluster root=0 기준) | 실측 깊이 필터 무손실. CSV 분석의 깊이 3 = app graph 깊이 2 (root 미적재). |
+| 3 | `FUSION_BRIDGE_CANDIDATES_MAX=8` + (hop_sum ASC, depth DESC, uuid) deterministic 랭킹 | LLM 입력 토큰 cap + 재현 가능. |
+| 4 | LLM 선택 model_slot = "medium" | 닫힌 목록 선택은 생성 과제가 아님 — high 불필요. |
+| 5 | `FUSION_BRIDGE_LLM_SELECT_ENABLED` env toggle (default true) | false/provider 부재 시 deterministic 모드 (깊이 필터 1위) — LLM 없이도 허브 수렴은 차단. |
+| 6 | FixtureNotFound/ProviderError/parse 실패/풀 밖 ID = 모두 거부 취급 | CI mock 환경 안전 (fusion 빈 풀 → trend fallback). leaf_dispatch_llm 가드 패턴 답습. |
+| 7 | `find_fusion_bridge` 는 backward-compat wrapper 유지 (깊이 필터 1위 반환) | 외부 caller 호환 + wrapper 도 허브 미수렴. |
+
+### 코드 산출
+
+- `traversal/fusion_bridge.py` 재작성 — `FusionBridgeCandidate` dataclass + `find_fusion_bridge_candidates` (후보 생성) + `_node_depths` (root 기준 깊이, 그래프별 캐시) + `_collect_bfs_meets` (전 라운드 수집) + `_collect_shortest_path_interiors`
+- `traversal/fusion_select_llm.py` 신규 — `call_fusion_bridge_select` (닫힌 목록 선택 + 거부 일급 + 환각 가드)
+- `profile/service.py:apply_fusion_bridge_override` — BFS 단일 결정 → 후보 생성 + LLM 선택 (거부 시 []) + bridge_reasoning 을 LLM reasoning 으로
+- Settings 3 신규 (`FUSION_BRIDGE_MIN_DEPTH/CANDIDATES_MAX/LLM_SELECT_ENABLED`) + .env.example x2 + env-vars.md
+- 테스트 23 신규 (후보 생성 toy 그래프 허브 차단/최단경로/빈 풀 + LLM 선택 거부/환각/실패 분기)
+
+C-53 의 "bridge_cso 결정 = LLM 의존 X" 결정 부분 무효 — deterministic 은 **후보 생성** 에 유지, **선택** 은 LLM 복원. C-54 fetch 흐름은 무변경.
+
+### 동반 drift 정리 (제 범위 밖, 기존 결함)
+
+- `USER_PROFILE_LOCK_TTL_SECONDS` 540 (코드, 2026-05-27) vs 360/180 (테스트·env·docs) — 540 으로 정렬
+- check_env 누락 7건 (ADMIN_SIGNUP_CODE/ROLE, REINCARNATION_FETCH_* 3, LEAF_EMERGING_CSO_DEDUP_THRESHOLD docs) 동기화 — check_env PASS 회복

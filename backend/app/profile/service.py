@@ -66,7 +66,8 @@ from app.profile.schemas import (
     UserProfilePayload,
 )
 from app.traversal import queries as trav_queries
-from app.traversal.fusion_bridge import find_fusion_bridge
+from app.traversal.fusion_bridge import find_fusion_bridge_candidates
+from app.traversal.fusion_select_llm import BridgeOption, call_fusion_bridge_select
 
 logger = logging.getLogger(__name__)
 
@@ -536,16 +537,23 @@ async def apply_fusion_bridge_override(
     fusion_fetch_enabled: bool = False,
     fusion_fetch_max_documents: int = 5,
     fusion_fetch_recent_urls_window_days: int = 30,
+    bridge_min_depth: int = 2,
+    bridge_candidates_max: int = 8,
+    bridge_llm_select_enabled: bool = True,
 ) -> UserProfilePayload:
-    """(C-53, 2026-05-24) LLM 결과의 fusion_candidates 를 BFS 결과로 override.
+    """(C-53, 2026-05-24 / C-73, 2026-06-11) fusion_candidates 결정 — 후보 생성 + 선택.
 
     사용자 결정 (디자인 논의):
-    - bridge_cso 결정 = trace↔trace meet in the middle BFS (LLM 의존 X, deterministic)
     - Reincarnation 다양성 = archived trace softmax sampling (T=0.3 default)
     - active trace 선택 = softmax sampling (C-53 followup, archived 와 동일 기준 다양성)
+    - **(C-73) bridge 결정 = 그래프 후보 생성 (deterministic) + LLM 닫힌 목록 선택**
+      — C-53 의 "min hop-sum 단독 선택" 이 실측에서 100% 허브 (root) 수렴 결함.
+      원 설계 의도 (그래프가 제안, LLM 이 판단) 복원. LLM 거부 = 일급 출력.
 
-    BFS bridge 못 찾으면 fusion_candidates=[] — query_discovery_fusion 이 빈 풀 →
-    fallback trend.
+    후보 부재 / LLM 거부 / LLM 실패 모두 fusion_candidates=[] —
+    query_discovery_fusion 이 빈 풀 → fallback trend.
+    `bridge_llm_select_enabled=False` (또는 provider=None) 시 deterministic 모드:
+    깊이 필터 후보 1위 사용 (LLM 없이도 허브 수렴은 차단).
 
     LLM 결과의 다른 부분 (persona / deepening / broadening) 은 그대로. fusion 만 override.
 
@@ -575,8 +583,8 @@ async def apply_fusion_bridge_override(
     if archived_trace is None:
         return payload.model_copy(update={"fusion_candidates": []})
 
-    # 3. BFS — bridge_cso 결정.
-    bridge_cso = await find_fusion_bridge(
+    # 3. (C-73) bridge 후보 생성 — 최단경로 내부 + BFS meet + 깊이 필터.
+    candidates = await find_fusion_bridge_candidates(
         db,
         cso_graph,
         user_id,
@@ -584,38 +592,75 @@ async def apply_fusion_bridge_override(
         active_trace,
         top_k=path_top_k,
         max_hops=max_hops,
+        min_depth=bridge_min_depth,
+        max_candidates=bridge_candidates_max,
     )
-    if bridge_cso is None:
+    if not candidates:
         return payload.model_copy(update={"fusion_candidates": []})
 
-    # 4. FusionCandidate build — LLM 결과 무시, BFS 결과 우선.
+    # 4. (C-73) bridge 선택 — LLM 닫힌 목록 선택 (거부 일급) 또는 deterministic 1위.
     label_lookup = await _build_cso_label_lookup(
         db,
-        set(active_trace.path) | set(archived_trace.path) | {bridge_cso},
+        set(active_trace.path)
+        | set(archived_trace.path)
+        | {c.cso_topic_id for c in candidates},
     )
-    bridge_label = label_lookup.get(bridge_cso) or str(bridge_cso)
     from_archived = [
         label_lookup.get(cid, str(cid)) for cid in list(archived_trace.path)[-3:]
     ]
     from_active = [
         label_lookup.get(cid, str(cid)) for cid in list(active_trace.path)[-3:]
     ]
+    llm_select_active = bridge_llm_select_enabled and provider is not None
+    if llm_select_active and provider is not None:
+        selection = await call_fusion_bridge_select(
+            provider,
+            user_id=user_id,
+            archived_path_labels=from_archived,
+            active_path_labels=from_active,
+            options=[
+                BridgeOption(
+                    cso_topic_id=c.cso_topic_id,
+                    label=_resolve_label(c.cso_topic_id, label_lookup, cso_graph),
+                )
+                for c in candidates
+            ],
+        )
+        if selection is None:
+            # LLM 거부/실패 — 억지 조합보다 빈 풀 (trend fallback) 이 옳다.
+            return payload.model_copy(update={"fusion_candidates": []})
+        bridge_cso = selection.cso_topic_id
+        bridge_reasoning = selection.reasoning
+    else:
+        bridge_cso = candidates[0].cso_topic_id
+        bridge_reasoning = ""
+
+    if len(bridge_reasoning) < 20:
+        # FusionCandidate.bridge_reasoning min_length=20 — deterministic 모드 또는
+        # LLM reasoning 부실 시 default 문구.
+        bridge_reasoning = (
+            "그래프 후보 (최단경로+BFS meet, 깊이 필터) 기반 — 과거·현재 관심 "
+            "영역 사이의 구체 교차 토픽."
+        )
+
+    # 5. FusionCandidate build.
+    bridge_label = _resolve_label(bridge_cso, label_lookup, cso_graph)
     fusion = FusionCandidate(
         from_archived=from_archived or [str(archived_trace.path[-1])],
         from_active=from_active or [str(active_trace.path[-1])],
         bridge_label=bridge_label[:80],
         bridge_cso_topic_id=bridge_cso,
-        bridge_reasoning=(
-            "meet in the middle BFS — archived trace 와 active trace 의 외향 frontier "
-            "첫 만남 노드. 두 영역의 의미적 외부 교차."
-        ),
+        bridge_reasoning=bridge_reasoning[:300],
     )
     logger.info(
-        "user_profile fusion_bridge BFS user=%s archived_trace=%s active_trace=%s bridge_cso=%s",
+        "user_profile fusion_bridge user=%s archived_trace=%s active_trace=%s "
+        "bridge_cso=%s candidates=%d llm_select=%s",
         user_id,
         archived_trace.trace_id,
         active_trace.trace_id,
         bridge_cso,
+        len(candidates),
+        llm_select_active,
     )
 
     # (C-54, 2026-05-24) bridge_cso 영역 fresh Document fetch — LLM web_search + INSERT.

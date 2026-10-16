@@ -157,6 +157,7 @@
 | `LEAF_EMERGING_MAX_PER_DAY` | `3` | LLM `identify_emerging` 가 일일 사용자별 채택하는 최대 emerging 후보 수. confidence 내림차순 상위 N. |
 | `LEAF_EMERGING_CONFIDENCE_MIN` | `0.6` | Strict 검증 — candidate confidence 미달 자동 거부. |
 | `LEAF_EMERGING_SUPPORTING_DOCUMENTS_MIN` | `3` | Strict 검증 — supporting_document_ids 길이 미달 자동 거부. |
+| `LEAF_EMERGING_CSO_DEDUP_THRESHOLD` | `0.75` | **(C-59 신규)** Strict 검증 룰 5 — emerging leaf 라벨이 anchor_set 의 CSO label 과 유사도 ≥ 임계 시 reject (CSO 14k 와 중복 leaf 차단). |
 | `LEAF_EMERGING_LABEL_SIMILARITY_DEDUP` | `0.75` | 기존 active leaf 라벨 의미유사도 ≥ 임계 시 dedup (신규 거부). Levenshtein 정규화 사용 (임베딩 미사용). |
 | `LEAF_EMERGING_INPUT_WINDOW_HOURS` | `24` | LLM input 시간 window. A4 collection 결과 + UserEvent click/save Document 의 union (결정 매트릭스 #18 옵션 D). |
 | `LEAF_LLM_ANCHOR_RETRY_CAP` | `1` | trace_anchor_required 위반 candidate 모두 거부 시 보강된 prompt 로 재호출 cap. 2차도 위반 시 빈 응답 fallback + warning log. |
@@ -221,15 +222,21 @@ trace operation 4 → 5 로 확장 (merge 신규 도입, decisions.md §12 결�
 | `USER_PROFILE_GENERATOR_VERSION` | `v1` | **(A8-v2 신규)** prompt template + output schema 버전 추적. `UserProfile.generator_version` 컬럼 값. 변경 시 bump → daily cron 매일 갱신이라 자연 교체. |
 | `USER_PROFILE_INPUT_ARCHIVE_MAX` | `8` | **(A8-v2 신규)** LLM input archive 상한 (token 폭주 가드). score_tail DESC 정렬 상위 N. |
 | `USER_PROFILE_REINCARNATION_GAP_DAYS_MIN` | `7` | **(A8-v2 신규)** archived_at 직후 본 active day 미만 archive 는 reincarnation 후보 제외 — 자연 망각 시간 부재. |
-| `USER_PROFILE_LOCK_TTL_SECONDS` | `360` | **(A8-v2 신규)** daily cron `RedisKey.user_profile_generation_lock` TTL. LLM 호출 동반이라 2x LLM timeout 마진 (Codex R1 Critical #1 fix 2026-05-19 — 직전 180=LLM timeout 였음). |
+| `USER_PROFILE_LOCK_TTL_SECONDS` | `540` | **(A8-v2 신규)** daily cron `RedisKey.user_profile_generation_lock` TTL. LLM 호출 동반이라 2x LLM timeout 마진 (Codex R1 Critical #1 fix 2026-05-19 — 직전 180=LLM timeout 였음). |
 | `USER_PROFILE_CACHE_TTL_SECONDS` | `3600` | **(A8-v2 신규)** `RedisKey.user_profile_cache` SETEX TTL — engine.build_dashboard fetch 후 1h. daily cron 완료 시 DEL invalidate. |
 | `REINCARNATION_SAMPLING_TEMPERATURE` | `0.3` | **(C-53 신규)** Reincarnation archived trace softmax sampling temperature. `P(trace_i) = exp(score_tail_i / T) / Σ`. T → 0 deterministic (top 1) / T → ∞ uniform / **T=0.3** 추천 (score 0.6~1.0 분포 기준 top 70~80% weight, 다양성 충분). `backend/app/profile/sampling.py`. |
 | `FUSION_BRIDGE_PATH_TOP_K` | `5` | **(C-53 신규)** Fusion bridge BFS 의 각 path 출발점 개수. `user_interest_state.long_score` DESC top_k. path 길이 ≤ K 면 전부 사용. |
 | `FUSION_BRIDGE_MAX_HOPS` | `3` | **(C-53 신규)** Fusion bridge meet-in-the-middle BFS 외향 깊이. CSO 14k 노드 sparse 그래프 (avg deg ~6) 기준 충분. 만나지 않으면 None → trend fallback. |
+| `FUSION_BRIDGE_MIN_DEPTH` | `2` | **(C-73 신규)** bridge 후보 최소 깊이 (cluster root=0). min hop-sum 단독 선택이 root/cluster head 허브로 100% 수렴하는 실측 결함 (CSO 3.5, cross-cluster 쌍 400 샘플) 차단. 깊이 필터 적용 시 발견율 56.5% 무손실. `backend/app/traversal/fusion_bridge.py:find_fusion_bridge_candidates`. |
+| `FUSION_BRIDGE_CANDIDATES_MAX` | `8` | **(C-73 신규)** LLM 닫힌 목록 선택에 제시할 bridge 후보 상한. (hop_sum ASC, depth DESC) 정렬 상위. |
+| `FUSION_BRIDGE_LLM_SELECT_ENABLED` | `true` | **(C-73 신규)** bridge 선택 = LLM 닫힌 목록 선택 (거부 일급) toggle. LLM 은 그래프 생성 후보 안에서만 선택 — 거부/실패 시 fusion_candidates=[] → trend fallback. false 시 deterministic 모드 (깊이 필터 후보 1위). `backend/app/traversal/fusion_select_llm.py`. |
 | `WEEKLY_PROMOTION_CRON` | `0 18 * * 0` | **(C-53 신규)** discovery/adjacent → core promotion 주 1회 cron. 일요일 18 UTC = 월요일 03 KST. UserEvent.save 7-day window + Recommendation.origin_type/origin_ref JOIN. `backend/app/worker/jobs/weekly_promotion.py`. |
 | `FUSION_FETCH_ENABLED` | `true` | **(C-54 신규)** UserProfile cron 안 fusion bridge_cso 영역 fresh Document fetch toggle. `apply_fusion_bridge_override` 가 BFS bridge 결정 직후 LLM web_search 호출 + DocumentTopic INSERT. false 시 fetch skip — fusion 카드 빈 풀 시 fallback trend. `backend/app/profile/fusion_fetch.py`. |
 | `FUSION_FETCH_MAX_DOCUMENTS` | `5` | **(C-54 신규)** bridge fetch 1회 당 LLM 결과 Document 수 cap. collection_job (`COLLECTION_TOP_N`) 과 동일. |
 | `FUSION_FETCH_RECENT_URLS_WINDOW_DAYS` | `30` | **(C-54 신규, P1 dedup hint)** prompt context 에 회피 hint 로 박을 "직전 fusion 카드 URL/title" 윈도우 (days). Recommendation.origin_type='fusion' + 본 window 안 row 조회 → `trace_json["seen_urls"]`/`["seen_titles"]`. 기존 collection prompt §2 dedup hint 자연 적용. |
+| `REINCARNATION_FETCH_ENABLED` | `true` | **(2026-05-27 신규)** Reincarnation 영역 fresh Document fetch toggle — fusion_fetch 대칭. `apply_reincarnation_prefetch` (own archived softmax sampling, payload 영향 없음). |
+| `REINCARNATION_FETCH_MAX_DOCUMENTS` | `5` | **(2026-05-27 신규)** reincarnation fetch 1회 당 Document 수 cap. |
+| `REINCARNATION_FETCH_RECENT_URLS_WINDOW_DAYS` | `30` | **(2026-05-27 신규)** dedup hint 윈도우 — origin_type='reincarnation' 직전 N일 URL/title 회피. |
 
 ## 외부 소스 키 (있을 때만 채움)
 
@@ -435,19 +442,26 @@ USER_PROFILE_ARCHIVE_SCORE_TAIL_MIN=0.6
 USER_PROFILE_GENERATOR_VERSION=v1
 USER_PROFILE_INPUT_ARCHIVE_MAX=8
 USER_PROFILE_REINCARNATION_GAP_DAYS_MIN=7
-USER_PROFILE_LOCK_TTL_SECONDS=180
+USER_PROFILE_LOCK_TTL_SECONDS=540
 USER_PROFILE_CACHE_TTL_SECONDS=3600
 
 # === C-53 Fusion bridge BFS + Reincarnation softmax + weekly promotion (2026-05-24) ===
 REINCARNATION_SAMPLING_TEMPERATURE=0.3
 FUSION_BRIDGE_PATH_TOP_K=5
 FUSION_BRIDGE_MAX_HOPS=3
+FUSION_BRIDGE_MIN_DEPTH=2
+FUSION_BRIDGE_CANDIDATES_MAX=8
+FUSION_BRIDGE_LLM_SELECT_ENABLED=true
 WEEKLY_PROMOTION_CRON=0 18 * * 0
 
 # === C-54 Fusion bridge_cso 영역 fresh Document fetch (2026-05-24) ===
 FUSION_FETCH_ENABLED=true
 FUSION_FETCH_MAX_DOCUMENTS=5
 FUSION_FETCH_RECENT_URLS_WINDOW_DAYS=30
+REINCARNATION_FETCH_ENABLED=true
+REINCARNATION_FETCH_MAX_DOCUMENTS=5
+REINCARNATION_FETCH_RECENT_URLS_WINDOW_DAYS=30
+LEAF_EMERGING_CSO_DEDUP_THRESHOLD=0.75
 
 # === External ===
 OPENALEX_POLITE_EMAIL=dev@insight.test

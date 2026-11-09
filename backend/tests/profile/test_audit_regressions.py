@@ -240,8 +240,8 @@ class TestSettings:
         assert settings.USER_PROFILE_GENERATOR_VERSION == "v1"
         assert settings.USER_PROFILE_INPUT_ARCHIVE_MAX == 8
         assert settings.USER_PROFILE_REINCARNATION_GAP_DAYS_MIN == 7
-        # Codex R1 Critical #1 fix (2026-05-19): 180 → 360 (2x LLM timeout 마진).
-        assert settings.USER_PROFILE_LOCK_TTL_SECONDS == 360
+        # Codex R1 fix 180→360 (2026-05-19) → 540 (2026-05-27, 3x LLM timeout 마진).
+        assert settings.USER_PROFILE_LOCK_TTL_SECONDS == 540
         assert settings.USER_PROFILE_CACHE_TTL_SECONDS == 3600
 
 

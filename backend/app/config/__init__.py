@@ -293,6 +293,11 @@ class Settings(BaseSettings):
     REINCARNATION_SAMPLING_TEMPERATURE: float = 0.3  # softmax T (0.05~∞), top 70~80% weight
     FUSION_BRIDGE_PATH_TOP_K: int = 5  # 각 path 의 long_score DESC top_k 출발점
     FUSION_BRIDGE_MAX_HOPS: int = 3  # 외향 BFS 최대 깊이 (sparse 그래프 기준 충분)
+    # (C-73, 2026-06-11) bridge 후보 깊이 가드 + LLM 닫힌 목록 선택.
+    # min hop-sum 단독 선택이 root/cluster head 허브로 100% 수렴하는 실측 결함 fix.
+    FUSION_BRIDGE_MIN_DEPTH: int = 2  # bridge 후보 최소 깊이 (cluster root=0)
+    FUSION_BRIDGE_CANDIDATES_MAX: int = 8  # LLM 에 제시할 후보 상한
+    FUSION_BRIDGE_LLM_SELECT_ENABLED: bool = True  # False = 깊이 필터 후보 1위 사용
     # discovery/adjacent → core promotion 주 1회 cron. UserEvent.save 7-day window.
     WEEKLY_PROMOTION_CRON: str = "0 18 * * 0"  # 일요일 18 UTC (= 월요일 03 KST)
     # LLM input archive 필터 — score_tail >= 본 임계 archived trace 만 input 포함.

@@ -117,9 +117,10 @@ async def _run() -> int:
                     )
                     total_skipped_llm += 1
                     continue
-                # (C-53, 2026-05-24) fusion_candidates 만 BFS 결과로 override.
-                # LLM 의 fusion 결정은 LCA root 문제 + LLM hallucination 위험 — deterministic
-                # graph 알고리즘 (meet in the middle) 으로 교체. archived trace 도 softmax
+                # (C-53, 2026-05-24 / C-73, 2026-06-11) fusion_candidates override.
+                # C-73: 그래프가 후보 생성 (최단경로+BFS meet, 깊이 필터) → LLM 이
+                # 닫힌 목록에서 선택 또는 거부 — C-53 min hop-sum 단독 선택의 허브
+                # 수렴 결함 fix + 원 설계 의도 복원. archived trace 는 softmax
                 # sampling 으로 매일 다른 후보. LLM 의 persona / deepening / broadening 은 그대로.
                 payload = await apply_fusion_bridge_override(
                     db,
@@ -137,6 +138,12 @@ async def _run() -> int:
                     fusion_fetch_max_documents=settings.FUSION_FETCH_MAX_DOCUMENTS,
                     fusion_fetch_recent_urls_window_days=(
                         settings.FUSION_FETCH_RECENT_URLS_WINDOW_DAYS
+                    ),
+                    # (C-73, 2026-06-11) bridge 후보 깊이 가드 + LLM 닫힌 목록 선택.
+                    bridge_min_depth=settings.FUSION_BRIDGE_MIN_DEPTH,
+                    bridge_candidates_max=settings.FUSION_BRIDGE_CANDIDATES_MAX,
+                    bridge_llm_select_enabled=(
+                        settings.FUSION_BRIDGE_LLM_SELECT_ENABLED
                     ),
                 )
                 # (2026-05-27) Reincarnation 영역 fresh fetch — Fusion 대칭. payload
